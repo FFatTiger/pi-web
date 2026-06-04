@@ -10,6 +10,22 @@ import {
 } from "@/lib/session-reader";
 import { getRpcSession } from "@/lib/rpc-manager";
 
+/**
+ * Collapse consecutive single-child nodes into their parent to avoid
+ * JSON.stringify call stack overflow on 2000+ message linear sessions.
+ */
+function compressTree<T extends { children: T[] }>(nodes: T[]): T[] {
+  function walk(node: T): T {
+    if (node.children.length === 0) return node;
+    if (node.children.length === 1) {
+      const collapsed = walk(node.children[0]);
+      return { ...node, children: collapsed.children };
+    }
+    return { ...node, children: node.children.map(walk) };
+  }
+  return nodes.map(walk);
+}
+
 export async function GET(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -23,8 +39,8 @@ export async function GET(
 
     const sm = SessionManager.open(filePath);
     const entries = sm.getEntries() as never;
-    const tree = sm.getTree();
     const leafId = sm.getLeafId();
+    const tree = compressTree(sm.getTree());
     const context = buildSessionContext(entries, leafId);
 
     const header = sm.getHeader();
@@ -66,8 +82,8 @@ export async function GET(
       sessionId: id,
       filePath,
       info,
-      tree,
       leafId,
+      tree,
       context,
       ...(agentState !== undefined ? { agentState } : {}),
     });
