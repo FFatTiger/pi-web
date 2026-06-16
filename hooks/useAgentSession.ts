@@ -612,7 +612,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   // Load model list
   useEffect(() => {
-    fetch("/api/models").then((r) => r.json()).then((d: { models: Record<string, string>; modelList?: { id: string; name: string; provider: string }[]; defaultModel?: { provider: string; modelId: string } | null; thinkingLevels?: Record<string, string[]>; thinkingLevelMaps?: Record<string, Record<string, string | null>> }) => {
+    const modelCwd = newSessionCwd ?? session?.cwd ?? "";
+    const modelsUrl = modelCwd ? `/api/models?cwd=${encodeURIComponent(modelCwd)}` : "/api/models";
+    fetch(modelsUrl).then((r) => r.json()).then((d: { models: Record<string, string>; modelList?: { id: string; name: string; provider: string }[]; defaultModel?: { provider: string; modelId: string } | null; thinkingLevels?: Record<string, string[]>; thinkingLevelMaps?: Record<string, Record<string, string | null>> }) => {
       setModelNames(d.models);
       if (d.thinkingLevels) setModelThinkingLevels(d.thinkingLevels);
       if (d.thinkingLevelMaps) setModelThinkingLevelMaps(d.thinkingLevelMaps);
@@ -628,7 +630,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         }
       }
     }).catch(() => {});
-  }, [isNew, modelsRefreshKey, setNewSessionModel]);
+  }, [isNew, modelsRefreshKey, newSessionCwd, session?.cwd, setNewSessionModel]);
 
   // Compact error auto-dismiss
   useEffect(() => {
