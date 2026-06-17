@@ -295,11 +295,17 @@ export async function startRpcSession(
 
     // Determine which tools to pass based on requested toolNames.
     // Since v0.68.0, createAgentSession expects string[] tool names instead of Tool[] instances.
-    // Pass all built-in coding tool names by default; for "all off", pass empty array.
     const allCodingToolNames = ["read", "bash", "edit", "write", "grep", "find", "ls"];
     let toolsOption: string[] | undefined;
     if (toolNames !== undefined) {
-      toolsOption = toolNames.length === 0 ? [] : allCodingToolNames;
+      // toolNames === [] -> "all off" (an empty allow-list disables every tool).
+      // Otherwise DO NOT pass a builtin-only allow-list: passing allCodingToolNames
+      // set allowedToolNames to coding builtins only, which filtered every
+      // extension/package-provided tool (e.g. subagents, web access) out of the
+      // tool registry — so they were unavailable in pi-web sessions even though the
+      // `pi` CLI keeps them. Leaving the allow-list unset lets the SDK register all
+      // tools (and activate extension tools); we narrow the ACTIVE set below.
+      toolsOption = toolNames.length === 0 ? [] : undefined;
     }
 
     const { session: inner } = await createAgentSession({
@@ -309,9 +315,15 @@ export async function startRpcSession(
       ...(toolsOption !== undefined ? { tools: toolsOption } : {}),
     });
 
-    // If specific tool names were requested (non-empty), narrow active tools now
+    // If specific tool names were requested (non-empty), set the active tools to the
+    // requested builtin coding tools PLUS all extension/package tools, so installed
+    // extensions stay usable in pi-web just like in the `pi` CLI.
     if (toolNames && toolNames.length > 0) {
-      inner.setActiveToolsByName(toolNames);
+      const extensionToolNames = inner
+        .getAllTools()
+        .map((t) => t.name)
+        .filter((name) => !allCodingToolNames.includes(name));
+      inner.setActiveToolsByName([...toolNames, ...extensionToolNames]);
     }
 
     // When all tools are disabled, clear the system prompt entirely.
