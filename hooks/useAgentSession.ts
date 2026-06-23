@@ -49,10 +49,21 @@ interface AgentEvent {
   [key: string]: unknown;
 }
 
+interface CompactCommandResult {
+  tokensBefore?: number;
+  estimatedTokensAfter?: number;
+}
+
 export type AgentPhase =
   | { kind: "waiting_model" }
   | { kind: "running_tools"; tools: { id: string; name: string }[] }
   | null;
+
+export interface CompactResultInfo {
+  reason: "manual" | "threshold" | "overflow" | "auto" | string;
+  tokensBefore: number;
+  estimatedTokensAfter: number;
+}
 
 export interface UseAgentSessionOptions {
   session: SessionInfo | null;
@@ -73,6 +84,13 @@ export type ThinkingLevelOption = "auto" | "off" | "minimal" | "low" | "medium" 
 const PROGRAMMATIC_SCROLL_IGNORE_MS = 700;
 const USER_SCROLL_INTENT_MS = 1200;
 const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " ", "Space", "Spacebar"]);
+
+function readCompactResult(result: unknown, reason: string): CompactResultInfo | null {
+  if (!result || typeof result !== "object") return null;
+  const r = result as CompactCommandResult;
+  if (typeof r.tokensBefore !== "number" || typeof r.estimatedTokensAfter !== "number") return null;
+  return { reason, tokensBefore: r.tokensBefore, estimatedTokensAfter: r.estimatedTokensAfter };
+}
 
 export interface ChatInputHandle {
   insertText: (text: string) => void;
@@ -117,6 +135,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [pendingModel, setPendingModel] = useState<{ provider: string; modelId: string } | null>(null);
   const [isCompacting, setIsCompacting] = useState(false);
   const [compactError, setCompactError] = useState<string | null>(null);
+  const [compactResult, setCompactResult] = useState<CompactResultInfo | null>(null);
   const [agentPhase, setAgentPhase] = useState<AgentPhase>(null);
 
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -326,13 +345,16 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       case "compaction_start":
         setIsCompacting(true);
         setCompactError(null);
+        setCompactResult(null);
         break;
       case "auto_compaction_end":
       case "compaction_end":
         setIsCompacting(false);
         if (event.errorMessage) {
           setCompactError(event.errorMessage as string);
+          setCompactResult(null);
         } else if (!event.aborted) {
+          setCompactResult(readCompactResult(event.result, (event.reason as string | undefined) ?? "auto"));
           if (sessionIdRef.current) loadSession(sessionIdRef.current);
         }
         break;
@@ -481,11 +503,14 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     if (!sid || isCompacting) return;
     setIsCompacting(true);
     setCompactError(null);
+    setCompactResult(null);
     try {
-      await sendAgentCommand(sid, { type: "compact" });
+      const result = await sendAgentCommand<CompactCommandResult>(sid, { type: "compact" });
+      setCompactResult(readCompactResult(result, "manual"));
       await loadSession(sid, true);
     } catch (e) {
       setCompactError(e instanceof Error ? e.message : String(e));
+      setCompactResult(null);
     } finally {
       setIsCompacting(false);
     }
@@ -688,12 +713,18 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     return () => clearTimeout(t);
   }, [compactError]);
 
+  useEffect(() => {
+    if (!compactResult) return;
+    const t = setTimeout(() => setCompactResult(null), 6000);
+    return () => clearTimeout(t);
+  }, [compactResult]);
+
   return {
     // State
     data, loading, error, activeLeafId, messages, entryIds, streamState,
     agentRunning, modelNames, modelList, modelThinkingLevels, modelThinkingLevelMaps, newSessionModel, toolPreset, thinkingLevel,
     retryInfo, contextUsage, systemPrompt, forkingEntryId,
-    isCompacting, compactError, currentModel, displayModel, sessionStats,
+    isCompacting, compactError, compactResult, currentModel, displayModel, sessionStats,
     agentPhase,
     isNew,
     // Refs

@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useRef, useState, useCallback, useEffect, useImperativeHandle, forwardRef, KeyboardEvent } from "react";
+import type { CompactResultInfo } from "@/hooks/useAgentSession";
 
 export interface AttachedImage {
   data: string;   // base64, no prefix
@@ -28,6 +29,7 @@ interface Props {
   onAbortCompaction?: () => void;
   isCompacting?: boolean;
   compactError?: string | null;
+  compactResult?: CompactResultInfo | null;
   toolPreset?: "none" | "default" | "full";
   onToolPresetChange?: (preset: "none" | "default" | "full") => void;
   thinkingLevel?: "auto" | "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
@@ -60,9 +62,15 @@ const THINKING_LEVEL_DESC: Record<typeof THINKING_LEVELS[number], string> = {
   xhigh: "最高强度推理",
 };
 
+function formatTokenCount(tokens: number): string {
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
+  if (tokens >= 1_000) return `${Math.round(tokens / 1_000)}k`;
+  return tokens.toLocaleString();
+}
+
 export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   onSend, onAbort, onSteer, onFollowUp, isStreaming, model, modelNames, modelList, onModelChange,
-  onCompact, onAbortCompaction, isCompacting, compactError, toolPreset, onToolPresetChange,
+  onCompact, onAbortCompaction, isCompacting, compactError, compactResult, toolPreset, onToolPresetChange,
   thinkingLevel, onThinkingLevelChange, availableThinkingLevels, thinkingLevelMap,
   retryInfo,
   soundEnabled, onSoundToggle,
@@ -255,6 +263,16 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     ? (modelOptions.find((o) => o.modelId === model.modelId && o.provider === model.provider)?.name ?? model.modelId)
     : modelOptions.length > 0 ? modelOptions[0].name : null;
 
+  const compactSavedTokens = compactResult
+    ? Math.max(0, compactResult.tokensBefore - compactResult.estimatedTokensAfter)
+    : 0;
+  const compactVerb = compactResult?.reason && compactResult.reason !== "manual"
+    ? `${compactResult.reason[0].toUpperCase()}${compactResult.reason.slice(1)} compacted`
+    : "Compacted";
+  const compactResultText = compactResult
+    ? `${compactVerb} ${formatTokenCount(compactResult.tokensBefore)} -> ${formatTokenCount(compactResult.estimatedTokensAfter)} tokens (${formatTokenCount(compactSavedTokens)} saved)`
+    : null;
+
   // Close dropdowns on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -313,6 +331,19 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               <path d="M3 3v5h5" />
             </svg>
             Retrying ({retryInfo.attempt}/{retryInfo.maxAttempts})…{retryInfo.errorMessage && <span style={{ opacity: 0.7, marginLeft: 4 }}>— {retryInfo.errorMessage}</span>}
+          </div>
+        )}
+        {compactResultText && (
+          <div style={{
+            marginBottom: 8, padding: "5px 10px",
+            background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.24)",
+            borderRadius: 6, fontSize: 12, color: "rgba(5,150,105,0.95)",
+            display: "flex", alignItems: "center", gap: 6,
+          }}>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+            {compactResultText}
           </div>
         )}
         {/* Image previews */}
