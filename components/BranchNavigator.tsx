@@ -19,13 +19,16 @@ interface Props {
   hasSession?: boolean;
 }
 
-// Find the set of entry IDs on the path from root to activeLeafId
+// Find the visible entry IDs on the path from root to activeLeafId.
 function buildActivePath(nodes: SessionTreeNode[], targetId: string | null): Set<string> {
   if (!targetId) return new Set();
+  const target = targetId;
   function search(nodes: SessionTreeNode[], path: string[]): string[] | null {
     for (const node of nodes) {
       const next = [...path, node.entry.id];
-      if (node.entry.id === targetId) return next;
+      if (node.entry.id === target || node.compressedEntryIds?.includes(target)) {
+        return next;
+      }
       const found = search(node.children, next);
       if (found) return found;
     }
@@ -34,14 +37,14 @@ function buildActivePath(nodes: SessionTreeNode[], targetId: string | null): Set
   return new Set(search(nodes, []) ?? []);
 }
 
-// Compress a linear chain into the first branching/leaf node.
-// Returns the representative node to display, plus a count of skipped nodes.
+// Compress a visible linear chain into the first branching/leaf node.
+// Server-side compressed IDs also count as skipped nodes.
 function compress(node: SessionTreeNode): { node: SessionTreeNode; skipped: number } {
   let current = node;
-  let skipped = 0;
+  let skipped = current.compressedEntryIds?.length ?? 0;
   while (current.children.length === 1) {
     current = current.children[0];
-    skipped++;
+    skipped += 1 + (current.compressedEntryIds?.length ?? 0);
   }
   return { node: current, skipped };
 }
