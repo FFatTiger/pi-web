@@ -31,7 +31,7 @@
     "katex": "^0.16.47",
     "mammoth": "^1.12.0",
     "mermaid": "^11.14.0",
-    "next": "16.2.1",
+    "next": "16.2.9",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-markdown": "^10.1.0",
@@ -48,7 +48,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.2.1",
+    "eslint-config-next": "16.2.9",
     "postcss": "^8",
     "tailwindcss": "^4.2.2",
     "typescript": "^5"
