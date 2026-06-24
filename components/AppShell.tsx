@@ -103,7 +103,11 @@ export function AppShell() {
   const handleCwdChange = useCallback((cwd: string | null) => {
     setActiveCwd(cwd);
     // Skip if cwd is null (initial mount) or during the initial URL restore.
-    if (!cwd || suppressCwdBumpRef.current) return;
+    if (!cwd) return;
+    if (suppressCwdBumpRef.current) {
+      suppressCwdBumpRef.current = false;
+      return;
+    }
     // Close any session that belongs to a different cwd — it no longer
     // matches the selected project directory.
     setSelectedSession((prev) => {
@@ -132,7 +136,6 @@ export function AppShell() {
       // Suppress the redundant sessionKey bump that would come from the
       // onCwdChange effect firing after setSelectedCwd in the sidebar
       suppressCwdBumpRef.current = true;
-      setTimeout(() => { suppressCwdBumpRef.current = false; }, 0);
     }
     // Skip router.replace when restoring from URL — the param is already correct
     // and calling replace in production Next.js triggers a Suspense remount loop
