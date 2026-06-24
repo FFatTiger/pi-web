@@ -1,3 +1,4 @@
+import { stat } from "fs/promises";
 import { createAgentSessionServices, getAgentDir, type SettingsManager } from "@earendil-works/pi-coding-agent";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 
@@ -20,10 +21,20 @@ export async function GET(req: Request) {
   let defaultModel: { provider: string; modelId: string } | null = null;
   const thinkingLevels: Record<string, string[]> = {};
   const thinkingLevelMaps: Record<string, Record<string, string | null>> = {};
+  const cwd = new URL(req.url).searchParams.get("cwd") || process.cwd();
+
+  let cwdStat;
+  try {
+    cwdStat = await stat(cwd);
+  } catch {
+    return Response.json({ error: `Directory does not exist: ${cwd}` }, { status: 400 });
+  }
+  if (!cwdStat.isDirectory()) {
+    return Response.json({ error: `Not a directory: ${cwd}` }, { status: 400 });
+  }
 
   try {
     const agentDir = getAgentDir();
-    const cwd = new URL(req.url).searchParams.get("cwd") || process.cwd();
     const services = await createAgentSessionServices({ cwd, agentDir });
     const registry = services.modelRegistry;
     const available = registry.getAvailable();
@@ -42,8 +53,8 @@ export async function GET(req: Request) {
     const settings: SettingsManager = services.settingsManager;
     const provider = settings.getDefaultProvider();
     const modelId = settings.getDefaultModel();
-    if (provider) {
-      defaultModel = { provider, modelId: modelId ?? available[0]?.id ?? "" };
+    if (provider && modelId && available.some((m) => m.provider === provider && m.id === modelId)) {
+      defaultModel = { provider, modelId };
     }
   } catch { /* return empty */ }
 

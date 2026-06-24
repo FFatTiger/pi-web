@@ -21,6 +21,7 @@ interface Props {
   onFollowUp?: (message: string, images?: AttachedImage[]) => void;
   isStreaming: boolean;
   model?: { provider: string; modelId: string } | null;
+  isAutoModelSelection?: boolean;
   modelNames?: Record<string, string>;
   modelList?: { id: string; name: string; provider: string }[];
   onModelChange?: (provider: string, modelId: string) => void;
@@ -68,7 +69,7 @@ const THINKING_LEVEL_DESC: Record<typeof THINKING_LEVELS[number], string> = {
 };
 
 export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
-  onSend, onAbort, onSteer, onFollowUp, isStreaming, model, modelNames, modelList, onModelChange,
+  onSend, onAbort, onSteer, onFollowUp, isStreaming, model, isAutoModelSelection, modelNames, modelList, onModelChange,
   onCompact, onAbortCompaction, isCompacting, compactError, toolPreset, onToolPresetChange,
   thinkingLevel, onThinkingLevelChange, availableThinkingLevels, thinkingLevelMap,
   retryInfo,
@@ -258,9 +259,10 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     else modelsByProvider.push({ provider: opt.provider, options: [opt] });
   }
 
-  const currentName = model
+  const displayModelName = model
     ? (modelOptions.find((o) => o.modelId === model.modelId && o.provider === model.provider)?.name ?? model.modelId)
-    : modelOptions.length > 0 ? modelOptions[0].name : null;
+    : null;
+  const currentName = displayModelName;
 
   // Close dropdowns on outside click
   useEffect(() => {
@@ -569,13 +571,13 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                     const bottom = viewportHeight - modelDropdownRect.top + 6;
                     const maxH = Math.max(120, Math.min(modelDropdownRect.top - 8, viewportHeight * 0.6));
                     return (
-                    <div ref={modelDropdownPanelRef} style={{
+                      <div ref={modelDropdownPanelRef} style={{
                       position: "fixed",
                       bottom, left: modelDropdownRect.left,
                       zIndex: 500, background: "var(--bg)", border: "1px solid var(--border)",
                       borderRadius: 8, boxShadow: "0 -4px 16px rgba(0,0,0,0.10)",
                       overflow: "hidden", width: "max-content", minWidth: modelDropdownRect.width, maxHeight: maxH, overflowY: "auto",
-                    }}>
+                      }}>
                       {modelsByProvider.map((group, gi) => (
                         <div key={group.provider}>
                           {(modelsByProvider.length > 1) && (
@@ -593,7 +595,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                             return (
                               <button
                                 key={`${opt.provider}:${opt.modelId}`}
-                                onClick={() => { setModelDropdownOpen(false); if (!isActive) onModelChange(opt.provider, opt.modelId); }}
+                                onClick={() => { setModelDropdownOpen(false); if (!isActive || isAutoModelSelection) onModelChange(opt.provider, opt.modelId); }}
                                 style={{
                                   display: "flex", alignItems: "center", gap: 8,
                                   width: "100%", padding: "7px 12px",

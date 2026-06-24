@@ -64,7 +64,6 @@ export interface UseAgentSessionOptions {
   chatInputRef?: React.RefObject<ChatInputHandle | null>;
   onBranchDataChange?: (tree: SessionTreeNode[], activeLeafId: string | null, onLeafChange: (leafId: string | null) => void) => void;
   onSystemPromptChange?: (prompt: string | null) => void;
-  setNewSessionModel?: (model: { provider: string; modelId: string } | null) => void;
   setToolPreset?: (preset: "none" | "default" | "full") => void;
 }
 
@@ -81,6 +80,16 @@ export interface AttachedImage {
   mimeType: string;
   previewUrl: string;
 }
+
+type SelectedModel = { provider: string; modelId: string };
+type ModelEntry = { id: string; name: string; provider: string };
+type ModelsResponse = {
+  models: Record<string, string>;
+  modelList?: ModelEntry[];
+  defaultModel?: SelectedModel | null;
+  thinkingLevels?: Record<string, string[]>;
+  thinkingLevelMaps?: Record<string, Record<string, string | null>>;
+};
 
 export function useAgentSession(opts: UseAgentSessionOptions) {
   const {
@@ -99,10 +108,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [streamState, dispatch] = useReducer(streamReducer, { isStreaming: false, streamingMessage: null });
   const [agentRunning, setAgentRunning] = useState(false);
   const [modelNames, setModelNames] = useState<Record<string, string>>({});
-  const [modelList, setModelList] = useState<{ id: string; name: string; provider: string }[]>([]);
+  const [modelList, setModelList] = useState<ModelEntry[]>([]);
   const [modelThinkingLevels, setModelThinkingLevels] = useState<Record<string, string[]>>({});
   const [modelThinkingLevelMaps, setModelThinkingLevelMaps] = useState<Record<string, Record<string, string | null>>>({});
-  const [newSessionModel, setNewSessionModelState] = useState<{ provider: string; modelId: string } | null>(null);
+  const [newSessionModel, setNewSessionModel] = useState<SelectedModel | null>(null);
+  const [newSessionDefaultModel, setNewSessionDefaultModel] = useState<SelectedModel | null>(null);
   const [toolPreset, setToolPreset] = useState<"none" | "default" | "full">("default");
   const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevelOption>("auto");
   const [retryInfo, setRetryInfo] = useState<{ attempt: number; maxAttempts: number; errorMessage?: string } | null>(null);
@@ -125,11 +135,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
 
-  const setNewSessionModel = opts.setNewSessionModel ?? setNewSessionModelState;
   const setToolPresetState = opts.setToolPreset ?? setToolPreset;
 
   const currentModel = currentModelOverride ?? data?.context.model ?? pendingModel ?? null;
-  const displayModel = isNew ? newSessionModel : currentModel;
+  const displayModel = isNew ? (newSessionModel ?? newSessionDefaultModel) : currentModel;
 
   const sessionStats = (() => {
     const tokens = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
@@ -614,23 +623,28 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   useEffect(() => {
     const modelCwd = newSessionCwd ?? session?.cwd ?? "";
     const modelsUrl = modelCwd ? `/api/models?cwd=${encodeURIComponent(modelCwd)}` : "/api/models";
-    fetch(modelsUrl).then((r) => r.json()).then((d: { models: Record<string, string>; modelList?: { id: string; name: string; provider: string }[]; defaultModel?: { provider: string; modelId: string } | null; thinkingLevels?: Record<string, string[]>; thinkingLevelMaps?: Record<string, Record<string, string | null>> }) => {
+    const controller = new AbortController();
+    fetch(modelsUrl, { signal: controller.signal }).then((r) => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    }).then((d: ModelsResponse) => {
       setModelNames(d.models);
-      if (d.thinkingLevels) setModelThinkingLevels(d.thinkingLevels);
-      if (d.thinkingLevelMaps) setModelThinkingLevelMaps(d.thinkingLevelMaps);
-      if (d.modelList) {
-        setModelList(d.modelList);
-        if (isNew && d.modelList.length > 0) {
-          const def = d.defaultModel;
-          const match = def && d.modelList.find((m) => m.id === def.modelId && m.provider === def.provider);
-          const selected = match
-            ? { provider: match.provider, modelId: match.id }
-            : { provider: d.modelList[0].provider, modelId: d.modelList[0].id };
-          setNewSessionModel(selected);
-        }
+      setModelThinkingLevels(d.thinkingLevels ?? {});
+      setModelThinkingLevelMaps(d.thinkingLevelMaps ?? {});
+      const nextModelList = d.modelList ?? [];
+      setModelList(nextModelList);
+      if (isNew) {
+        const match = d.defaultModel
+          ? nextModelList.find((m) => m.id === d.defaultModel?.modelId && m.provider === d.defaultModel?.provider)
+          : undefined;
+        const displayModel = match ?? nextModelList[0];
+        setNewSessionDefaultModel(displayModel ? { provider: displayModel.provider, modelId: displayModel.id } : null);
       }
-    }).catch(() => {});
-  }, [isNew, modelsRefreshKey, newSessionCwd, session?.cwd, setNewSessionModel]);
+    }).catch((e) => {
+      if (e instanceof DOMException && e.name === "AbortError") return;
+    });
+    return () => controller.abort();
+  }, [isNew, modelsRefreshKey, newSessionCwd, session?.cwd]);
 
   // Compact error auto-dismiss
   useEffect(() => {
@@ -645,6 +659,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     agentRunning, modelNames, modelList, modelThinkingLevels, modelThinkingLevelMaps, newSessionModel, toolPreset, thinkingLevel,
     retryInfo, contextUsage, systemPrompt, forkingEntryId,
     isCompacting, compactError, currentModel, displayModel, sessionStats,
+    isAutoModelSelection: isNew && newSessionModel === null,
     agentPhase,
     isNew,
     // Refs
