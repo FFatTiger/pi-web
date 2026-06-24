@@ -30,7 +30,16 @@ interface Props {
 async function fetchEntries(dirPath: string): Promise<FileNode[]> {
   const encoded = encodeFilePathForApi(dirPath);
   const res = await fetch(`/api/files/${encoded}?type=list`);
-  if (!res.ok) return [];
+  if (!res.ok) {
+    let message = `Failed to load files (HTTP ${res.status})`;
+    try {
+      const data = await res.json() as { error?: string };
+      if (data.error) message = data.error;
+    } catch {
+      // ignore non-JSON error bodies
+    }
+    throw new Error(message);
+  }
   const data = await res.json() as { entries?: FileEntry[] };
   return (data.entries ?? []).map((e) => ({
     name: e.name,
@@ -234,7 +243,7 @@ export function FileExplorer({ cwd, onOpenFile, refreshKey, onAtMention }: Props
     setError(null);
     fetchEntries(cwd)
       .then((entries) => setRoots(entries))
-      .catch((e) => setError(String(e)))
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
   }, [cwd, refreshKey]);
 
