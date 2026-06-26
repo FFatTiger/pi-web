@@ -64,6 +64,13 @@ export function MarkdownBody({ children, className, isStreaming }: MarkdownBodyP
           pre({ children }) {
             return <>{children}</>;
           },
+          table({ children }) {
+            return (
+              <div className="markdown-table-wrap">
+                <table>{children}</table>
+              </div>
+            );
+          },
         }}
       >
         {normalizedMarkdown}
@@ -152,15 +159,7 @@ function MermaidBlock({ code, isStreaming }: { code: string; isStreaming?: boole
       onClick={() => setShowPreview((v) => !v)}
       disabled={isStreaming}
       title={isStreaming ? "Preview available after streaming" : (showPreview ? "Show Mermaid source" : "Preview Mermaid diagram")}
-      style={{
-        background: showPreview ? "var(--bg-selected)" : "none",
-        border: "1px solid var(--border)",
-        color: isStreaming ? "var(--text-dim)" : "var(--text-muted)",
-        cursor: isStreaming ? "not-allowed" : "pointer",
-        fontSize: 11,
-        borderRadius: 4,
-        padding: "1px 6px",
-      }}
+      className={["markdown-code-action", showPreview ? "is-active" : ""].filter(Boolean).join(" ")}
     >
       {showPreview ? "Source" : "Preview"}
     </button>
@@ -183,29 +182,9 @@ function MermaidBlock({ code, isStreaming }: { code: string; isStreaming?: boole
     );
 
   return (
-    <div
-      style={{
-        position: "relative",
-        marginTop: 4,
-        marginBottom: 4,
-        borderRadius: 6,
-        overflow: "hidden",
-        border: "1px solid var(--border)",
-      }}
-    >
-      <div
-        style={{
-          padding: "3px 10px",
-          background: "var(--bg-panel)",
-          borderBottom: "1px solid var(--border)",
-          fontSize: 11,
-          color: "var(--text-dim)",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-        }}
-      >
-        <span>mermaid</span>
+    <div className="markdown-code-block">
+      <div className="markdown-code-header">
+        <span className="markdown-code-lang">mermaid</span>
         {previewButton}
       </div>
       {body}
@@ -225,40 +204,14 @@ function CodeBlock({ code, lang, headerAction }: { code: string; lang: string; h
   };
 
   return (
-    <div
-      style={{
-        position: "relative",
-        marginTop: 4,
-        marginBottom: 4,
-        borderRadius: 6,
-        overflow: "hidden",
-        border: "1px solid var(--border)",
-      }}
-    >
-      <div
-        style={{
-          padding: "3px 10px",
-          background: "var(--bg-panel)",
-          borderBottom: "1px solid var(--border)",
-          fontSize: 11,
-          color: "var(--text-dim)",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-        }}
-      >
-        <span>{lang}</span>
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+    <div className="markdown-code-block">
+      <div className="markdown-code-header">
+        <span className="markdown-code-lang">{lang || "text"}</span>
+        <div className="markdown-code-actions">
           {headerAction}
           <button
             onClick={copy}
-            style={{
-              background: "none",
-              border: "none",
-              color: "var(--text-muted)",
-              cursor: "pointer",
-              fontSize: 11,
-            }}
+            className="markdown-code-action"
           >
             {copied ? "copied" : "copy"}
           </button>
@@ -271,11 +224,11 @@ function CodeBlock({ code, lang, headerAction }: { code: string; lang: string; h
         lineNumberStyle={{ color: "var(--text-dim)", fontStyle: "normal" }}
         customStyle={{
           margin: 0,
-          padding: "10px 12px",
+          padding: "12px 14px",
           fontSize: 12.5,
-          lineHeight: 1.6,
+          lineHeight: 1.65,
           borderRadius: 0,
-          background: "var(--bg)",
+          background: "color-mix(in srgb, var(--bg) 92%, var(--bg-panel))",
         }}
         codeTagProps={{ style: { fontFamily: "var(--font-mono)" } }}
       >

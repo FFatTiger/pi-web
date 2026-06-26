@@ -121,22 +121,40 @@ pre, code {
 .markdown-body h1, .markdown-body h2, .markdown-body h3,
 .markdown-body h4, .markdown-body h5, .markdown-body h6 {
   font-weight: 600;
-  margin: 10px 0 4px;
+  margin: 12px 0 6px;
   color: var(--text);
+  line-height: 1.35;
+  letter-spacing: 0;
 }
-.markdown-body h1 { font-size: 1.15em; }
-.markdown-body h2 { font-size: 1.05em; }
-.markdown-body h3 { font-size: 0.95em; }
+.markdown-body h1 { font-size: 1.16em; }
+.markdown-body h2 { font-size: 1.08em; }
+.markdown-body h3 { font-size: 0.98em; color: color-mix(in srgb, var(--text) 88%, var(--text-muted)); }
 .markdown-body ul, .markdown-body ol {
-  padding-left: 20px;
-  margin: 4px 0 8px;
+  padding-left: 22px;
+  margin: 6px 0 10px;
   list-style-position: outside;
 }
-.markdown-body li { margin: 2px 0; }
+.markdown-body li { margin: 4px 0; padding-left: 2px; }
 .markdown-body ul > li { list-style-type: disc; }
 .markdown-body ol > li { list-style-type: decimal; }
 .markdown-body li > p { margin: 0; }
-.markdown-body a { color: var(--accent); text-decoration: underline; }
+.markdown-body li::marker {
+  color: color-mix(in srgb, var(--accent) 72%, var(--text-muted));
+  font-weight: 600;
+}
+.markdown-body strong {
+  color: color-mix(in srgb, var(--text) 88%, var(--accent));
+  font-weight: 700;
+}
+.markdown-body em { color: var(--text-muted); }
+.markdown-body a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  text-decoration-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.markdown-body a:hover { text-decoration-color: var(--accent); }
 .markdown-body .markdown-inline-code {
   background: var(--bg-subtle);
   border-radius: 5px;
@@ -146,25 +164,83 @@ pre, code {
   font-size: 0.92em;
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--border) 70%, transparent);
 }
+.markdown-body .contains-task-list {
+  padding-left: 0;
+  list-style: none;
+}
+.markdown-body .task-list-item {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 7px;
+  align-items: start;
+  padding-left: 0;
+}
+.markdown-body .task-list-item::marker { content: ""; }
+.markdown-body .task-list-item input[type="checkbox"] {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin: 5px 0 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  display: inline-grid;
+  place-content: center;
+}
+.markdown-body .task-list-item input[type="checkbox"]:checked {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg));
+}
+.markdown-body .task-list-item input[type="checkbox"]:checked::before {
+  content: "";
+  width: 4px;
+  height: 8px;
+  border: solid var(--accent);
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg) translateY(-1px);
+}
 .markdown-body blockquote {
-  border-left: 3px solid var(--border);
-  margin: 4px 0;
-  padding: 2px 10px;
+  border-left: 3px solid color-mix(in srgb, var(--border) 75%, var(--text-muted));
+  border-radius: 0 6px 6px 0;
+  margin: 8px 0;
+  padding: 8px 12px;
+  background: var(--bg-subtle);
   color: var(--text-muted);
 }
-.markdown-body table {
-  border-collapse: collapse;
+.markdown-table-wrap {
   width: 100%;
-  margin: 8px 0;
+  margin: 10px 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+.markdown-body table {
+  border-collapse: separate;
+  border-spacing: 0;
+  min-width: 100%;
   font-size: 13px;
 }
 .markdown-body th, .markdown-body td {
-  border: 1px solid var(--border);
-  padding: 5px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  padding: 7px 10px;
   text-align: left;
+  vertical-align: top;
 }
-.markdown-body th { background: var(--bg-panel); font-weight: 600; }
-.markdown-body hr { border: none; border-top: 1px solid var(--border); margin: 10px 0; }
+.markdown-body tr:last-child td { border-bottom: 0; }
+.markdown-body th {
+  background: var(--bg-panel);
+  color: color-mix(in srgb, var(--text) 88%, var(--text-muted));
+  font-weight: 650;
+}
+.markdown-body tbody tr:nth-child(even) td { background: var(--bg-subtle); }
+.markdown-body hr {
+  border: none;
+  height: 1px;
+  margin: 14px 0;
+  background: linear-gradient(90deg, transparent, var(--border), transparent);
+}
 .markdown-body .katex-display {
   margin: 0.6em 0;
   overflow-x: auto;
@@ -178,10 +254,65 @@ pre, code {
   white-space: pre-wrap;
 }
 
+.markdown-code-block {
+  position: relative;
+  margin: 8px 0;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  overflow: hidden;
+  background: var(--bg);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--border) 42%, transparent);
+}
+.markdown-code-header {
+  padding: 6px 10px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 11px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.markdown-code-lang {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-weight: 650;
+}
+.markdown-code-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.markdown-code-action {
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 2px 7px;
+  background: var(--bg);
+  color: var(--text-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.25;
+}
+.markdown-code-action:hover:not(:disabled) {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--border) 70%, var(--text-muted));
+}
+.markdown-code-action:disabled {
+  color: var(--text-dim);
+  cursor: not-allowed;
+  opacity: 0.75;
+}
+.markdown-code-action.is-active {
+  background: var(--bg-selected);
+  color: var(--text);
+}
+
 .mermaid-block {
   padding: 12px;
   overflow-x: auto;
-  background: var(--bg);
+  background: color-mix(in srgb, var(--bg) 92%, var(--bg-panel));
 }
 .mermaid-block svg {
   display: block;
