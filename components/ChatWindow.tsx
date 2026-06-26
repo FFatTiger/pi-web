@@ -96,14 +96,16 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     agentRunning, modelNames, modelList, modelThinkingLevels, modelThinkingLevelMaps, toolPreset, thinkingLevel,
     retryInfo, contextUsage, forkingEntryId,
     isCompacting, compactError, compactResult, displayModel: displayModelValue, sessionStats,
+    slashCommands, slashCommandsLoading, slashCommandNotice,
     isAutoModelSelection,
     agentPhase,
     isNew,
     messagesEndRef, scrollContainerRef,
     lastUserMsgRef,
     handleSend, handleAbort, handleFork, handleNavigate, handleModelChange,
-    handleCompact, handleSteer, handleFollowUp, handleAbortCompaction,
-    handleToolPresetChange, handleThinkingLevelChange, handleAgentEventRef,
+    handleCompact, handleSteer, handleFollowUp, handlePromptWithStreamingBehavior, handleAbortCompaction,
+    handleBuiltinSlashCommand, setSlashCommandNotice,
+    handleToolPresetChange, handleThinkingLevelChange, loadSlashCommands, handleAgentEventRef,
   } = useAgentSession({
     session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked,
     modelsRefreshKey, onBranchDataChange, onSystemPromptChange,
@@ -175,6 +177,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
       onAbort={handleAbort}
       onSteer={agentRunning ? handleSteer : undefined}
       onFollowUp={agentRunning ? handleFollowUp : undefined}
+      onPromptWithStreamingBehavior={agentRunning ? handlePromptWithStreamingBehavior : undefined}
       isStreaming={agentRunning}
       model={displayModelValue}
       isAutoModelSelection={isAutoModelSelection}
@@ -193,6 +196,12 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
       availableThinkingLevels={availableThinkingLevels}
       thinkingLevelMap={currentThinkingLevelMap}
       retryInfo={retryInfo}
+      slashCommands={slashCommands}
+      slashCommandsLoading={slashCommandsLoading}
+      onLoadSlashCommands={loadSlashCommands}
+      slashCommandNotice={slashCommandNotice}
+      onBuiltinCommand={handleBuiltinSlashCommand}
+      onSlashCommandNotice={setSlashCommandNotice}
       soundEnabled={soundEnabled}
       onSoundToggle={onSoundToggle}
     />

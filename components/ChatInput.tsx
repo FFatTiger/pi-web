@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useRef, useState, useCallback, useEffect, useImperativeHandle, forwardRef, KeyboardEvent } from "react";
-import type { CompactResultInfo } from "@/hooks/useAgentSession";
+import type { BuiltinSlashCommandResult, CompactResultInfo, SlashCommandInfo } from "@/hooks/useAgentSession";
 
 export interface AttachedImage {
   data: string;   // base64, no prefix
@@ -20,6 +20,7 @@ interface Props {
   onAbort: () => void;
   onSteer?: (message: string, images?: AttachedImage[]) => void;
   onFollowUp?: (message: string, images?: AttachedImage[]) => void;
+  onPromptWithStreamingBehavior?: (message: string, behavior: "steer" | "followUp", images?: AttachedImage[]) => void;
   isStreaming: boolean;
   model?: { provider: string; modelId: string } | null;
   isAutoModelSelection?: boolean;
@@ -38,6 +39,12 @@ interface Props {
   availableThinkingLevels?: string[] | null;
   thinkingLevelMap?: Record<string, string | null> | null;
   retryInfo?: { attempt: number; maxAttempts: number; errorMessage?: string } | null;
+  slashCommands?: SlashCommandInfo[];
+  slashCommandsLoading?: boolean;
+  onLoadSlashCommands?: () => Promise<SlashCommandInfo[]> | SlashCommandInfo[];
+  slashCommandNotice?: { type: "success" | "error"; message: string } | null;
+  onBuiltinCommand?: (message: string) => Promise<BuiltinSlashCommandResult>;
+  onSlashCommandNotice?: (notice: { type: "success" | "error"; message: string } | null) => void;
   soundEnabled?: boolean;
   onSoundToggle?: () => void;
 }
@@ -76,12 +83,52 @@ function formatTokenCount(tokens: number): string {
   return tokens.toLocaleString();
 }
 
+type SlashCommandPaletteItem = SlashCommandInfo | {
+  name: string;
+  description: string;
+  source: "builtin";
+};
+
+const BUILTIN_SLASH_COMMANDS: SlashCommandPaletteItem[] = [
+  { name: "compact", description: "Compress context, optionally with instructions", source: "builtin" },
+  { name: "name", description: "Set the session display name", source: "builtin" },
+  { name: "session", description: "Show session message, token, and cost stats", source: "builtin" },
+  { name: "copy", description: "Copy the last assistant message", source: "builtin" },
+];
+
+const SLASH_SOURCE_LABEL: Record<SlashCommandPaletteItem["source"], string> = {
+  builtin: "built-in",
+  extension: "extension",
+  prompt: "prompt",
+  skill: "skill",
+};
+
+const SLASH_SOURCE_ORDER: Record<SlashCommandPaletteItem["source"], number> = {
+  builtin: 0,
+  extension: 1,
+  prompt: 2,
+  skill: 3,
+};
+
+function slashMatchRank(command: SlashCommandPaletteItem, query: string): number {
+  const name = command.name.toLowerCase();
+  const description = command.description?.toLowerCase() ?? "";
+  if (name === query) return 0;
+  if (name.startsWith(query)) return 1;
+  if (name.includes(query)) return 2;
+  if (description.includes(query)) return 3;
+  return 4;
+}
+
 export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   onSend, onAbort, onSteer, onFollowUp, isStreaming, model, isAutoModelSelection, modelNames, modelList, onModelChange,
   onCompact, onAbortCompaction, isCompacting, compactError, compactResult, toolPreset, onToolPresetChange,
   thinkingLevel, onThinkingLevelChange, availableThinkingLevels, thinkingLevelMap,
   retryInfo,
+  slashCommands, slashCommandsLoading, onLoadSlashCommands,
+  slashCommandNotice, onBuiltinCommand, onSlashCommandNotice,
   soundEnabled, onSoundToggle,
+  onPromptWithStreamingBehavior,
 }: Props, ref) {
   const [value, setValue] = useState("");
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
@@ -89,6 +136,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const [toolDropdownOpen, setToolDropdownOpen] = useState(false);
   const [thinkingDropdownOpen, setThinkingDropdownOpen] = useState(false);
   const [attachedImages, setAttachedImages] = useState<AttachedImage[]>([]);
+  const [slashMenuOpen, setSlashMenuOpen] = useState(false);
+  const [slashActiveIndex, setSlashActiveIndex] = useState(0);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -98,6 +147,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isComposingRef = useRef(false);
   const lastCompositionEndAtRef = useRef(0);
+  const slashCommandsRequestedRef = useRef(false);
 
   useImperativeHandle(ref, () => ({
     insertIfEmpty(text: string) {
@@ -177,21 +227,80 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     });
   }, []);
 
-  const handleSend = useCallback(() => {
-    const msg = value.trim();
-    if (!msg && !attachedImages.length) return;
-    if (isStreaming) return;
-    onSend(msg, attachedImages.length ? attachedImages : undefined);
+  const clearInput = useCallback(() => {
     setValue("");
     clearImages();
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
-  }, [value, attachedImages, isStreaming, onSend, clearImages]);
+  }, [clearImages]);
+
+  const handleSend = useCallback(async () => {
+    const msg = value.trim();
+    if (!msg && !attachedImages.length) return;
+    if (isStreaming) return;
+    if (!attachedImages.length && msg.startsWith("/") && onBuiltinCommand) {
+      const result = await onBuiltinCommand(msg);
+      if (result.handled) {
+        onSlashCommandNotice?.(result.error
+          ? { type: "error", message: result.error }
+          : { type: "success", message: result.message ?? "Command completed" });
+        if (!result.error) clearInput();
+        return;
+      }
+    }
+    onSend(msg, attachedImages.length ? attachedImages : undefined);
+    clearInput();
+  }, [value, attachedImages, isStreaming, onBuiltinCommand, onSlashCommandNotice, onSend, clearInput]);
+
+  const slashQuery = value.startsWith("/") && !/\s/.test(value.slice(1))
+    ? value.slice(1).toLowerCase()
+    : null;
+
+  const filteredSlashCommands = (() => {
+    if (slashQuery === null) return [];
+    const commands = [...(isStreaming ? [] : BUILTIN_SLASH_COMMANDS), ...(slashCommands ?? [])];
+    return [...commands]
+      .filter((command) => {
+        const name = command.name.toLowerCase();
+        const description = command.description?.toLowerCase() ?? "";
+        return name.includes(slashQuery) || description.includes(slashQuery);
+      })
+      .sort((a, b) => {
+        const rankDelta = slashMatchRank(a, slashQuery) - slashMatchRank(b, slashQuery);
+        if (rankDelta !== 0) return rankDelta;
+        return SLASH_SOURCE_ORDER[a.source] - SLASH_SOURCE_ORDER[b.source]
+          || MODEL_OPTION_COLLATOR.compare(a.name, b.name);
+      })
+      .slice(0, 10);
+  })();
+
+  const applySlashCommand = useCallback((command: SlashCommandPaletteItem) => {
+    const nextValue = `/${command.name} `;
+    setValue(nextValue);
+    setSlashMenuOpen(false);
+    setSlashActiveIndex(0);
+    requestAnimationFrame(() => {
+      const ta = textareaRef.current;
+      if (!ta) return;
+      ta.focus();
+      ta.setSelectionRange(nextValue.length, nextValue.length);
+      ta.style.height = "auto";
+      ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
+    });
+  }, []);
 
   const sendQueued = useCallback((mode: "steer" | "followup") => {
     const msg = value.trim();
     if (!msg && !attachedImages.length) return;
+    const streamingBehavior = mode === "steer" ? "steer" : "followUp";
+    if (msg.startsWith("/") && onPromptWithStreamingBehavior) {
+      onPromptWithStreamingBehavior(msg, streamingBehavior, attachedImages.length ? attachedImages : undefined);
+      setValue("");
+      clearImages();
+      if (textareaRef.current) textareaRef.current.style.height = "auto";
+      return;
+    }
     if (mode === "steer" && onSteer) {
       onSteer(msg, attachedImages.length ? attachedImages : undefined);
     } else if (mode === "followup" && onFollowUp) {
@@ -200,7 +309,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     setValue("");
     clearImages();
     if (textareaRef.current) textareaRef.current.style.height = "auto";
-  }, [value, attachedImages, onSteer, onFollowUp, clearImages]);
+  }, [value, attachedImages, onPromptWithStreamingBehavior, onSteer, onFollowUp, clearImages]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -216,6 +325,29 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         return;
       }
 
+      if (slashMenuOpen && slashQuery !== null) {
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          setSlashActiveIndex((idx) => Math.min(idx + 1, Math.max(0, filteredSlashCommands.length - 1)));
+          return;
+        }
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          setSlashActiveIndex((idx) => Math.max(0, idx - 1));
+          return;
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          setSlashMenuOpen(false);
+          return;
+        }
+        if ((e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) && filteredSlashCommands[slashActiveIndex]) {
+          e.preventDefault();
+          applySlashCommand(filteredSlashCommands[slashActiveIndex]);
+          return;
+        }
+      }
+
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         if (isStreaming && (onSteer || onFollowUp)) {
@@ -226,7 +358,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         }
       }
     },
-    [isStreaming, onSteer, onFollowUp, sendQueued, handleSend]
+    [isStreaming, onSteer, onFollowUp, slashMenuOpen, slashQuery, filteredSlashCommands, slashActiveIndex, applySlashCommand, sendQueued, handleSend]
   );
 
   const handleInput = useCallback(() => {
@@ -244,6 +376,35 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     const files = imageItems.map((item) => item.getAsFile()).filter((f): f is File => f !== null);
     processImageFiles(files);
   }, [processImageFiles]);
+
+  useEffect(() => {
+    if (slashQuery === null) {
+      setSlashMenuOpen(false);
+      setSlashActiveIndex(0);
+      slashCommandsRequestedRef.current = false;
+      return;
+    }
+    setSlashMenuOpen(true);
+    setSlashActiveIndex(0);
+    if (!slashCommandsRequestedRef.current && onLoadSlashCommands) {
+      slashCommandsRequestedRef.current = true;
+      Promise.resolve(onLoadSlashCommands()).catch(() => {
+        slashCommandsRequestedRef.current = false;
+      });
+    }
+  }, [slashQuery, onLoadSlashCommands]);
+
+  useEffect(() => {
+    if (slashActiveIndex >= filteredSlashCommands.length) {
+      setSlashActiveIndex(Math.max(0, filteredSlashCommands.length - 1));
+    }
+  }, [filteredSlashCommands.length, slashActiveIndex]);
+
+  useEffect(() => {
+    if (!slashCommandNotice) return;
+    const t = setTimeout(() => onSlashCommandNotice?.(null), 5000);
+    return () => clearTimeout(t);
+  }, [slashCommandNotice, onSlashCommandNotice]);
 
 
 
@@ -355,6 +516,23 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             {compactResultText}
           </div>
         )}
+        {slashCommandNotice && (
+          <div style={{
+            marginBottom: 8, padding: "5px 10px",
+            background: slashCommandNotice.type === "error" ? "rgba(239,68,68,0.08)" : "rgba(16,185,129,0.08)",
+            border: `1px solid ${slashCommandNotice.type === "error" ? "rgba(239,68,68,0.24)" : "rgba(16,185,129,0.24)"}`,
+            borderRadius: 6, fontSize: 12,
+            color: slashCommandNotice.type === "error" ? "#ef4444" : "rgba(5,150,105,0.95)",
+            display: "flex", alignItems: "center", gap: 6,
+          }}>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+              {slashCommandNotice.type === "error"
+                ? <><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></>
+                : <polyline points="20 6 9 17 4 12" />}
+            </svg>
+            {slashCommandNotice.message}
+          </div>
+        )}
         {/* Image previews */}
         {attachedImages.length > 0 && (
           <div style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
@@ -386,25 +564,117 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         )}
 
         {/* Main input */}
-        <div
-          style={{
-            display: "flex",
-            gap: 8,
-            alignItems: "center",
-            background: "var(--bg)",
-            border: `1px solid ${isStreaming && (onSteer || onFollowUp)
-              ? "rgba(234,179,8,0.4)"
-              : "color-mix(in srgb, var(--border) 70%, transparent)"}`,
-            borderRadius: 14,
-            padding: "10px 10px 10px 14px",
-            boxShadow: "0 1px 2px rgba(15,23,42,0.04), 0 8px 24px -12px rgba(15,23,42,0.10)",
-            transition: "border-color 0.15s, background 0.15s, box-shadow 0.15s",
-          } as React.CSSProperties}
-        >
+        <div style={{ position: "relative" }}>
+          {slashMenuOpen && slashQuery !== null && (
+            <div
+              style={{
+                position: "absolute",
+                left: 0,
+                right: 0,
+                bottom: "calc(100% + 8px)",
+                zIndex: 120,
+                background: "var(--bg)",
+                border: "1px solid var(--border)",
+                borderRadius: 8,
+                boxShadow: "0 -6px 20px rgba(0,0,0,0.12)",
+                overflow: "hidden",
+                maxHeight: 280,
+              }}
+            >
+              <div
+                style={{
+                  padding: "7px 10px",
+                  borderBottom: "1px solid var(--border)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 8,
+                  fontSize: 11,
+                  color: "var(--text-dim)",
+                }}
+              >
+                <span>{slashCommandsLoading ? "Loading commands..." : "Slash commands"}</span>
+                <span style={{ fontFamily: "var(--font-mono)" }}>Tab / Enter</span>
+              </div>
+              <div style={{ maxHeight: 240, overflowY: "auto" }}>
+                {!slashCommandsLoading && filteredSlashCommands.length === 0 ? (
+                  <div style={{ padding: "10px 12px", fontSize: 12, color: "var(--text-dim)" }}>
+                    No extension, prompt, or skill commands found
+                  </div>
+                ) : (
+                  filteredSlashCommands.map((command, index) => {
+                    const active = index === slashActiveIndex;
+                    return (
+                      <button
+                        key={`${command.source}:${command.name}`}
+                        type="button"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          applySlashCommand(command);
+                        }}
+                        style={{
+                          width: "100%",
+                          display: "grid",
+                          gridTemplateColumns: "minmax(0, 1fr) auto",
+                          gap: 8,
+                          alignItems: "center",
+                          padding: "8px 10px",
+                          border: "none",
+                          background: active ? "var(--bg-selected)" : "transparent",
+                          color: active ? "var(--text)" : "var(--text-muted)",
+                          cursor: "pointer",
+                          textAlign: "left",
+                        }}
+                      >
+                        <span style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
+                          <span style={{ fontSize: 13, fontFamily: "var(--font-mono)", color: active ? "var(--text)" : "var(--text)" }}>
+                            /{command.name}
+                          </span>
+                          {command.description && (
+                            <span style={{ fontSize: 11, color: "var(--text-dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {command.description}
+                            </span>
+                          )}
+                        </span>
+                        <span
+                          style={{
+                            fontSize: 10,
+                            color: active ? "var(--accent)" : "var(--text-dim)",
+                            fontFamily: "var(--font-mono)",
+                            textTransform: "uppercase",
+                          }}
+                        >
+                          {SLASH_SOURCE_LABEL[command.source]}
+                        </span>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          )}
+          <div
+            style={{
+              display: "flex",
+              gap: 8,
+              alignItems: "center",
+              background: "var(--bg)",
+              border: `1px solid ${isStreaming && (onSteer || onFollowUp)
+                ? "rgba(234,179,8,0.4)"
+                : "color-mix(in srgb, var(--border) 70%, transparent)"}`,
+              borderRadius: 14,
+              padding: "10px 10px 10px 14px",
+              boxShadow: "0 1px 2px rgba(15,23,42,0.04), 0 8px 24px -12px rgba(15,23,42,0.10)",
+              transition: "border-color 0.15s, background 0.15s, box-shadow 0.15s",
+            } as React.CSSProperties}
+          >
           <textarea
             ref={textareaRef}
             value={value}
-            onChange={(e) => setValue(e.target.value)}
+            onChange={(e) => {
+              setValue(e.target.value);
+              if (slashCommandNotice) onSlashCommandNotice?.(null);
+            }}
             onKeyDown={handleKeyDown}
             onCompositionStart={() => {
               isComposingRef.current = true;
@@ -516,6 +786,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               Send
             </button>
           )}
+          </div>
         </div>
 
         {/* Bottom bar: left | center (context) | right */}

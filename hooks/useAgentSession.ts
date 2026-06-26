@@ -54,6 +54,10 @@ interface CompactCommandResult {
   estimatedTokensAfter?: number;
 }
 
+interface LastAssistantTextResponse {
+  text?: string;
+}
+
 export type AgentPhase =
   | { kind: "waiting_model" }
   | { kind: "running_tools"; tools: { id: string; name: string }[] }
@@ -64,6 +68,23 @@ export interface CompactResultInfo {
   tokensBefore: number;
   estimatedTokensAfter: number;
 }
+
+export interface SlashCommandInfo {
+  name: string;
+  description?: string;
+  source: "extension" | "prompt" | "skill";
+  sourceInfo?: {
+    path: string;
+    source: string;
+    scope: "user" | "project" | "temporary";
+    origin: "package" | "top-level";
+    baseDir?: string;
+  };
+}
+
+export type BuiltinSlashCommandResult =
+  | { handled: false }
+  | { handled: true; message?: string; error?: string };
 
 export interface UseAgentSessionOptions {
   session: SessionInfo | null;
@@ -113,6 +134,10 @@ type ModelsResponse = {
   thinkingLevelMaps?: Record<string, Record<string, string | null>>;
 };
 
+type SlashCommandsResponse = {
+  commands?: SlashCommandInfo[];
+};
+
 export function useAgentSession(opts: UseAgentSessionOptions) {
   const {
     session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked,
@@ -147,6 +172,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [compactError, setCompactError] = useState<string | null>(null);
   const [compactResult, setCompactResult] = useState<CompactResultInfo | null>(null);
   const [agentPhase, setAgentPhase] = useState<AgentPhase>(null);
+  const [slashCommands, setSlashCommands] = useState<SlashCommandInfo[]>([]);
+  const [slashCommandsLoading, setSlashCommandsLoading] = useState(false);
+  const [slashCommandNotice, setSlashCommandNotice] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
   const eventSourceRef = useRef<EventSource | null>(null);
   const sessionIdRef = useRef<string | null>(session?.id ?? null);
@@ -160,6 +188,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const ignoreProgrammaticScrollUntilRef = useRef(0);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const ensuringNewSessionRef = useRef<Promise<string | null> | null>(null);
+  const newSessionPromotedRef = useRef(false);
 
   const setToolPresetState = opts.setToolPreset ?? setToolPreset;
 
@@ -246,6 +276,79 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       console.error("Failed to load tools:", e);
     }
   }, [setToolPresetState]);
+
+  const promoteNewSession = useCallback((messageCount = 0, firstMessage = "(no messages)") => {
+    const sid = sessionIdRef.current;
+    if (!isNew || !newSessionCwd || !sid || newSessionPromotedRef.current) return;
+    newSessionPromotedRef.current = true;
+    onSessionCreated?.({
+      id: sid,
+      path: "",
+      cwd: newSessionCwd,
+      name: undefined,
+      created: new Date().toISOString(),
+      modified: new Date().toISOString(),
+      messageCount,
+      firstMessage,
+    });
+  }, [isNew, newSessionCwd, onSessionCreated]);
+
+  const ensureNewSession = useCallback(async () => {
+    if (sessionIdRef.current) return sessionIdRef.current;
+    if (!isNew || !newSessionCwd) return sessionIdRef.current;
+    if (ensuringNewSessionRef.current) return ensuringNewSessionRef.current;
+
+    const promise = (async () => {
+      const selectedModel = newSessionModel ?? newSessionDefaultModel;
+      if (selectedModel) setPendingModel(selectedModel);
+      const { PRESET_NONE, PRESET_DEFAULT, PRESET_FULL } = await import("@/components/ToolPanel");
+      const toolNames = toolPreset === "none" ? PRESET_NONE : toolPreset === "default" ? PRESET_DEFAULT : PRESET_FULL;
+      const res = await fetch("/api/agent/new", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cwd: newSessionCwd,
+          type: "ensure_session",
+          toolNames,
+          ...(selectedModel ? { provider: selectedModel.provider, modelId: selectedModel.modelId } : {}),
+          ...(thinkingLevel !== "auto" ? { thinkingLevel } : {}),
+        }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const result = await res.json() as { sessionId: string };
+      const realId = result.sessionId;
+      sessionIdRef.current = realId;
+      return realId;
+    })();
+
+    ensuringNewSessionRef.current = promise;
+    try {
+      return await promise;
+    } finally {
+      ensuringNewSessionRef.current = null;
+    }
+  }, [isNew, newSessionCwd, newSessionModel, newSessionDefaultModel, toolPreset, thinkingLevel]);
+
+  const loadSlashCommands = useCallback(async () => {
+    const sid = sessionIdRef.current ?? await ensureNewSession();
+    if (!sid) {
+      setSlashCommands([]);
+      return [] as SlashCommandInfo[];
+    }
+    setSlashCommandsLoading(true);
+    try {
+      const data = await sendAgentCommand<SlashCommandsResponse>(sid, { type: "get_commands" });
+      const commands = data?.commands ?? [];
+      setSlashCommands(commands);
+      return commands;
+    } catch (e) {
+      console.error("Failed to load slash commands:", e);
+      setSlashCommands([]);
+      return [] as SlashCommandInfo[];
+    } finally {
+      setSlashCommandsLoading(false);
+    }
+  }, [ensureNewSession]);
 
   const connectEvents = useCallback((sid: string) => {
     if (eventSourceRef.current) {
@@ -396,37 +499,44 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     try {
       if (isNew && newSessionCwd) {
         const selectedModel = newSessionModel;
-        if (selectedModel) setPendingModel(selectedModel);
-        const { PRESET_NONE, PRESET_DEFAULT, PRESET_FULL } = await import("@/components/ToolPanel");
-        const toolNames = toolPreset === "none" ? PRESET_NONE : toolPreset === "default" ? PRESET_DEFAULT : PRESET_FULL;
-        const res = await fetch("/api/agent/new", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            cwd: newSessionCwd,
+        const existingSid = sessionIdRef.current ?? await ensuringNewSessionRef.current;
+
+        if (existingSid) {
+          if (selectedModel) {
+            setPendingModel(selectedModel);
+            await sendAgentCommand(existingSid, { type: "set_model", provider: selectedModel.provider, modelId: selectedModel.modelId });
+          }
+          connectEvents(existingSid);
+          await sendAgentCommand(existingSid, {
             type: "prompt",
             message,
-            toolNames,
             ...(piImages?.length ? { images: piImages } : {}),
-            ...(selectedModel ? { provider: selectedModel.provider, modelId: selectedModel.modelId } : {}),
-            ...(thinkingLevel !== "auto" ? { thinkingLevel } : {}),
-          }),
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const result = await res.json() as { sessionId: string };
-        const realId = result.sessionId;
-        sessionIdRef.current = realId;
-        connectEvents(realId);
-        onSessionCreated?.({
-          id: realId,
-          path: "",
-          cwd: newSessionCwd,
-          name: undefined,
-          created: new Date().toISOString(),
-          modified: new Date().toISOString(),
-          messageCount: 1,
-          firstMessage: message,
-        });
+          });
+          promoteNewSession(1, message);
+        } else {
+          if (selectedModel) setPendingModel(selectedModel);
+          const { PRESET_NONE, PRESET_DEFAULT, PRESET_FULL } = await import("@/components/ToolPanel");
+          const toolNames = toolPreset === "none" ? PRESET_NONE : toolPreset === "default" ? PRESET_DEFAULT : PRESET_FULL;
+          const res = await fetch("/api/agent/new", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              cwd: newSessionCwd,
+              type: "prompt",
+              message,
+              toolNames,
+              ...(piImages?.length ? { images: piImages } : {}),
+              ...(selectedModel ? { provider: selectedModel.provider, modelId: selectedModel.modelId } : {}),
+              ...(thinkingLevel !== "auto" ? { thinkingLevel } : {}),
+            }),
+          });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const result = await res.json() as { sessionId: string };
+          const realId = result.sessionId;
+          sessionIdRef.current = realId;
+          connectEvents(realId);
+          promoteNewSession(1, message);
+        }
       } else if (session) {
         connectEvents(session.id);
         await sendAgentCommand(session.id, {
@@ -442,7 +552,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       setAgentPhase(null);
       dispatch({ type: "end" });
     }
-  }, [isNew, newSessionCwd, newSessionModel, toolPreset, thinkingLevel, session, agentRunning, connectEvents, onSessionCreated]);
+  }, [isNew, newSessionCwd, newSessionModel, toolPreset, thinkingLevel, session, agentRunning, connectEvents, promoteNewSession]);
 
   const handleAbort = useCallback(async () => {
     const sid = sessionIdRef.current;
@@ -495,6 +605,14 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const handleModelChange = useCallback(async (provider: string, modelId: string) => {
     if (isNew) {
       setNewSessionModel({ provider, modelId });
+      setPendingModel({ provider, modelId });
+      const sid = sessionIdRef.current ?? await ensuringNewSessionRef.current;
+      if (!sid) return;
+      try {
+        await sendAgentCommand(sid, { type: "set_model", provider, modelId });
+      } catch (e) {
+        console.error("Failed to set model:", e);
+      }
       return;
     }
     const sid = sessionIdRef.current;
@@ -525,6 +643,74 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, [isCompacting, loadSession]);
 
+  const handleBuiltinSlashCommand = useCallback(async (text: string): Promise<BuiltinSlashCommandResult> => {
+    if (!text.startsWith("/")) return { handled: false };
+    const match = text.match(/^\/([^\s]+)(?:\s+([\s\S]*))?$/);
+    if (!match) return { handled: false };
+
+    const [, commandName, rawArgs = ""] = match;
+    const args = rawArgs.trim();
+    const sid = sessionIdRef.current;
+
+    try {
+      switch (commandName) {
+        case "compact": {
+          if (!sid || isCompacting) return { handled: true, error: "No active session to compact" };
+          setIsCompacting(true);
+          setCompactError(null);
+          setCompactResult(null);
+          const result = await sendAgentCommand<CompactCommandResult>(sid, {
+            type: "compact",
+            ...(args ? { customInstructions: args } : {}),
+          });
+          setCompactResult(readCompactResult(result, "manual"));
+          if (await loadSession(sid, true)) promoteNewSession();
+          return { handled: true, message: "Compacted context" };
+        }
+
+        case "name": {
+          if (!sid) return { handled: true, error: "No active session to name" };
+          if (!args) return { handled: true, error: "Usage: /name <name>" };
+          await sendAgentCommand(sid, { type: "set_session_name", name: args });
+          if (await loadSession(sid)) promoteNewSession();
+          return { handled: true, message: `Session renamed to ${args}` };
+        }
+
+        case "session": {
+          if (!sid) return { handled: true, error: "No active session" };
+          const stats = await sendAgentCommand<Record<string, unknown>>(sid, { type: "get_session_stats" });
+          const totalMessages = typeof stats.totalMessages === "number" ? stats.totalMessages : null;
+          const cost = typeof stats.cost === "number" ? stats.cost : null;
+          const tokens = stats.tokens && typeof stats.tokens === "object" && "total" in stats.tokens
+            ? (stats.tokens as { total?: unknown }).total
+            : null;
+          const pieces = [
+            totalMessages !== null ? `${totalMessages} messages` : null,
+            typeof tokens === "number" ? `${tokens.toLocaleString()} tokens` : null,
+            cost !== null ? `$${cost.toFixed(4)}` : null,
+          ].filter(Boolean);
+          return { handled: true, message: pieces.length ? pieces.join(" · ") : "Session stats loaded" };
+        }
+
+        case "copy": {
+          if (!sid) return { handled: true, error: "No active session" };
+          const data = await sendAgentCommand<LastAssistantTextResponse>(sid, { type: "get_last_assistant_text" });
+          const textToCopy = data?.text ?? "";
+          if (!textToCopy) return { handled: true, error: "No assistant message to copy" };
+          await navigator.clipboard.writeText(textToCopy);
+          return { handled: true, message: "Copied last assistant message" };
+        }
+
+        default:
+          return { handled: false };
+      }
+    } catch (e) {
+      return { handled: true, error: e instanceof Error ? e.message : String(e) };
+    } finally {
+      if (commandName === "compact") setIsCompacting(false);
+    }
+  }, [isCompacting, loadSession, promoteNewSession]);
+
   const handleSteer = useCallback(async (message: string, images?: AttachedImage[]) => {
     const sid = sessionIdRef.current;
     if (!sid) return;
@@ -538,6 +724,31 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       });
     } catch (e) {
       console.error("Failed to steer:", e);
+    }
+  }, []);
+
+  const handlePromptWithStreamingBehavior = useCallback(async (
+    message: string,
+    behavior: "steer" | "followUp",
+    images?: AttachedImage[],
+  ) => {
+    const sid = sessionIdRef.current;
+    if (!sid) return;
+    setMessages((prev) => [...prev, {
+      role: "user",
+      content: behavior === "steer" ? `[steer] ${message}` : message,
+      timestamp: Date.now(),
+    } as AgentMessage]);
+    const piImages = images?.map((img) => ({ type: "image" as const, data: img.data, mimeType: img.mimeType }));
+    try {
+      await sendAgentCommand(sid, {
+        type: "prompt",
+        message,
+        streamingBehavior: behavior,
+        ...(piImages?.length ? { images: piImages } : {}),
+      });
+    } catch (e) {
+      console.error("Failed to queue prompt:", e);
     }
   }, []);
 
@@ -570,7 +781,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const handleThinkingLevelChange = useCallback(async (level: ThinkingLevelOption) => {
     setThinkingLevel(level);
     if (level === "auto") return; // "auto" leaves pi's current setting untouched
-    const sid = sessionIdRef.current;
+    const sid = sessionIdRef.current ?? await ensuringNewSessionRef.current;
     if (!sid) return;
     try {
       await sendAgentCommand(sid, { type: "set_thinking_level", level });
@@ -583,7 +794,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     const { PRESET_NONE, PRESET_DEFAULT, PRESET_FULL } = await import("@/components/ToolPanel");
     const toolNames = preset === "none" ? PRESET_NONE : preset === "default" ? PRESET_DEFAULT : PRESET_FULL;
     setToolPresetState(preset);
-    const sid = sessionIdRef.current;
+    const sid = sessionIdRef.current ?? await ensuringNewSessionRef.current;
     if (!sid) return;
     try {
       await sendAgentCommand(sid, { type: "set_tools", toolNames });
@@ -741,6 +952,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     agentRunning, modelNames, modelList, modelThinkingLevels, modelThinkingLevelMaps, newSessionModel, toolPreset, thinkingLevel,
     retryInfo, contextUsage, systemPrompt, forkingEntryId,
     isCompacting, compactError, compactResult, currentModel, displayModel, sessionStats,
+    slashCommands, slashCommandsLoading, slashCommandNotice,
     isAutoModelSelection: isNew && newSessionModel === null,
     agentPhase,
     isNew,
@@ -749,8 +961,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     lastUserMsgRef, pendingScrollToUserRef, initialScrollDoneRef,
     // Actions
     handleSend, handleAbort, handleFork, handleNavigate, handleModelChange,
-    handleCompact, handleSteer, handleFollowUp, handleAbortCompaction,
-    handleToolPresetChange, handleThinkingLevelChange, loadTools, setActiveLeafId, setData, setMessages,
+    handleCompact, handleSteer, handleFollowUp, handlePromptWithStreamingBehavior, handleAbortCompaction,
+    handleBuiltinSlashCommand, setSlashCommandNotice,
+    handleToolPresetChange, handleThinkingLevelChange, loadTools, loadSlashCommands, setActiveLeafId, setData, setMessages,
     dispatch, setAgentRunning, setForkingEntryId,
     // Subscriptions
     handleAgentEventRef,

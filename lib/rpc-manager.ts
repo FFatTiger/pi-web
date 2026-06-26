@@ -1,5 +1,6 @@
 import { createAgentSession, SessionManager } from "@earendil-works/pi-coding-agent";
 import { cacheSessionPath } from "./session-reader";
+import type { SlashCommandInfo } from "@earendil-works/pi-coding-agent";
 import type { AgentSessionLike, ToolInfo } from "./pi-types";
 
 // ============================================================================
@@ -86,7 +87,12 @@ export class AgentSessionWrapper {
       case "prompt": {
         // Fire and forget — events come via subscribe
         const promptImages = command.images as Array<{ type: "image"; data: string; mimeType: string }> | undefined;
-        this.inner.prompt(command.message as string, promptImages?.length ? { images: promptImages } : undefined).catch(() => {});
+        const streamingBehavior = command.streamingBehavior as "steer" | "followUp" | undefined;
+        this.inner.prompt(command.message as string, {
+          ...(promptImages?.length ? { images: promptImages } : {}),
+          ...(streamingBehavior ? { streamingBehavior } : {}),
+          source: "rpc",
+        }).catch(() => {});
         return null;
       }
 
@@ -179,6 +185,21 @@ export class AgentSessionWrapper {
         return result;
       }
 
+      case "set_session_name": {
+        const name = (command.name as string | undefined)?.trim();
+        if (!name) throw new Error("Session name cannot be empty");
+        this.inner.setSessionName(name);
+        return null;
+      }
+
+      case "get_session_stats": {
+        return this.inner.getSessionStats();
+      }
+
+      case "get_last_assistant_text": {
+        return { text: this.inner.getLastAssistantText() ?? "" };
+      }
+
       case "set_auto_compaction": {
         this.inner.setAutoCompactionEnabled(command.enabled as boolean);
         return null;
@@ -204,6 +225,35 @@ export class AgentSessionWrapper {
           description: t.description,
           active: active.has(t.name),
         }));
+      }
+
+      case "get_commands": {
+        const commands: SlashCommandInfo[] = [];
+        for (const registered of this.inner.extensionRunner.getRegisteredCommands()) {
+          commands.push({
+            name: registered.invocationName,
+            description: registered.description,
+            source: "extension",
+            sourceInfo: registered.sourceInfo,
+          });
+        }
+        for (const template of this.inner.promptTemplates) {
+          commands.push({
+            name: template.name,
+            description: template.description,
+            source: "prompt",
+            sourceInfo: template.sourceInfo,
+          });
+        }
+        for (const skill of this.inner.resourceLoader.getSkills().skills) {
+          commands.push({
+            name: `skill:${skill.name}`,
+            description: skill.description,
+            source: "skill",
+            sourceInfo: skill.sourceInfo,
+          });
+        }
+        return { commands };
       }
 
       case "set_tools": {

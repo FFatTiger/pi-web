@@ -3,8 +3,9 @@ import { existsSync } from "fs";
 import { allowFileRoot } from "@/lib/file-access";
 import { startRpcSession } from "@/lib/rpc-manager";
 
-// POST /api/agent/new  body: { cwd: string; type: string; message: string; ... }
-// Spawns a brand-new pi session and immediately sends the first command.
+// POST /api/agent/new  body: { cwd: string; type: string; message?: string; ... }
+// Spawns a brand-new pi session. Most calls immediately send the first command;
+// type:"ensure_session" only creates the runtime so clients can query commands.
 // Returns { sessionId, data } where sessionId is pi's real session id.
 export async function POST(req: Request) {
   try {
@@ -37,6 +38,10 @@ export async function POST(req: Request) {
     // Apply pre-selected thinking level before sending the prompt
     if (thinkingLevel) {
       await session.send({ type: "set_thinking_level", level: thinkingLevel });
+    }
+
+    if (promptCommand.type === "ensure_session") {
+      return NextResponse.json({ success: true, sessionId: realSessionId, data: null });
     }
 
     const result = await session.send(promptCommand);
