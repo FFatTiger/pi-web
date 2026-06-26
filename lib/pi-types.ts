@@ -27,6 +27,26 @@ export interface NavigateTreeResult {
   aborted?: boolean;
 }
 
+export interface SessionStatsInfo {
+  sessionFile?: string;
+  sessionId: string;
+  sessionName?: string;
+  userMessages: number;
+  assistantMessages: number;
+  toolCalls: number;
+  toolResults: number;
+  totalMessages: number;
+  tokens: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    total: number;
+  };
+  cost: number;
+  contextUsage?: ContextUsage;
+}
+
 interface PromptTemplateLike {
   name: string;
   description?: string;
@@ -79,7 +99,7 @@ export interface AgentSessionLike {
   setThinkingLevel(level: string): void;
   compact(customInstructions?: string): Promise<unknown>;
   setSessionName(name: string): void;
-  getSessionStats(): unknown;
+  getSessionStats(): Omit<SessionStatsInfo, "sessionName">;
   getLastAssistantText(): string | undefined;
   setAutoCompactionEnabled(enabled: boolean): void;
   setAutoRetryEnabled(enabled: boolean): void;

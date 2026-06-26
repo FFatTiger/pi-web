@@ -193,7 +193,10 @@ export class AgentSessionWrapper {
       }
 
       case "get_session_stats": {
-        return this.inner.getSessionStats();
+        return {
+          ...this.inner.getSessionStats(),
+          sessionName: this.inner.sessionManager.getSessionName(),
+        };
       }
 
       case "get_last_assistant_text": {

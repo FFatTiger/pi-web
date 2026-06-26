@@ -5,6 +5,7 @@ import type { AgentMessage, SessionInfo, SessionTreeNode } from "@/lib/types";
 import { normalizeToolCalls } from "@/lib/normalize";
 import { sendAgentCommand } from "@/lib/agent-client";
 import type { ToolEntry } from "@/components/ToolPanel";
+import type { SessionStatsInfo } from "@/lib/pi-types";
 
 export interface SessionData {
   sessionId: string;
@@ -84,7 +85,7 @@ export interface SlashCommandInfo {
 
 export type BuiltinSlashCommandResult =
   | { handled: false }
-  | { handled: true; message?: string; error?: string };
+  | { handled: true; message?: string; error?: string; action?: "openSessionStats" };
 
 export interface UseAgentSessionOptions {
   session: SessionInfo | null;
@@ -96,6 +97,7 @@ export interface UseAgentSessionOptions {
   chatInputRef?: React.RefObject<ChatInputHandle | null>;
   onBranchDataChange?: (tree: SessionTreeNode[], activeLeafId: string | null, onLeafChange: (leafId: string | null) => void) => void;
   onSystemPromptChange?: (prompt: string | null) => void;
+  onSessionStatsPanelOpen?: () => void;
   setToolPreset?: (preset: "none" | "default" | "full") => void;
 }
 
@@ -141,7 +143,7 @@ type SlashCommandsResponse = {
 export function useAgentSession(opts: UseAgentSessionOptions) {
   const {
     session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked,
-    modelsRefreshKey, onBranchDataChange, onSystemPromptChange,
+    modelsRefreshKey, onBranchDataChange, onSystemPromptChange, onSessionStatsPanelOpen,
   } = opts;
 
   const isNew = session === null && newSessionCwd !== null;
@@ -175,6 +177,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [slashCommands, setSlashCommands] = useState<SlashCommandInfo[]>([]);
   const [slashCommandsLoading, setSlashCommandsLoading] = useState(false);
   const [slashCommandNotice, setSlashCommandNotice] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [sessionStatsOverride, setSessionStatsOverride] = useState<SessionStatsInfo | null>(null);
 
   const eventSourceRef = useRef<EventSource | null>(null);
   const sessionIdRef = useRef<string | null>(session?.id ?? null);
@@ -197,11 +200,20 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const displayModel = isNew ? (newSessionModel ?? newSessionDefaultModel) : currentModel;
 
   const sessionStats = (() => {
-    const tokens = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+    if (sessionStatsOverride) return sessionStatsOverride;
+    const tokens = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
     let cost = 0;
+    let userMessages = 0;
+    let assistantMessages = 0;
+    let toolResults = 0;
+    let toolCalls = 0;
     for (const msg of messages) {
+      if (msg.role === "user") userMessages += 1;
+      if (msg.role === "toolResult") toolResults += 1;
       if (msg.role !== "assistant") continue;
+      assistantMessages += 1;
       const u = (msg as import("@/lib/types").AssistantMessage).usage;
+      toolCalls += (msg as import("@/lib/types").AssistantMessage).content.filter((c) => c.type === "toolCall").length;
       if (!u) continue;
       tokens.input += u.input ?? 0;
       tokens.output += u.output ?? 0;
@@ -209,8 +221,21 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       tokens.cacheWrite += u.cacheWrite ?? 0;
       cost += u.cost?.total ?? 0;
     }
-    const total = tokens.input + tokens.output + tokens.cacheRead + tokens.cacheWrite;
-    return total > 0 ? { tokens, cost } : null;
+    tokens.total = tokens.input + tokens.output + tokens.cacheRead + tokens.cacheWrite;
+    if (tokens.total === 0 && messages.length === 0) return null;
+    return {
+      sessionFile: data?.filePath || undefined,
+      sessionId: sessionIdRef.current ?? session?.id ?? "",
+      sessionName: session?.name,
+      userMessages,
+      assistantMessages,
+      toolCalls,
+      toolResults,
+      totalMessages: messages.length,
+      tokens,
+      cost,
+      ...(contextUsage ? { contextUsage } : {}),
+    } satisfies SessionStatsInfo;
   })();
 
   const loadSession = useCallback(async (sid: string, showLoading = false, includeState = false) => {
@@ -650,7 +675,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
     const [, commandName, rawArgs = ""] = match;
     const args = rawArgs.trim();
-    const sid = sessionIdRef.current;
+    const sid = sessionIdRef.current ?? await ensureNewSession();
 
     try {
       switch (commandName) {
@@ -678,18 +703,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
         case "session": {
           if (!sid) return { handled: true, error: "No active session" };
-          const stats = await sendAgentCommand<Record<string, unknown>>(sid, { type: "get_session_stats" });
-          const totalMessages = typeof stats.totalMessages === "number" ? stats.totalMessages : null;
-          const cost = typeof stats.cost === "number" ? stats.cost : null;
-          const tokens = stats.tokens && typeof stats.tokens === "object" && "total" in stats.tokens
-            ? (stats.tokens as { total?: unknown }).total
-            : null;
-          const pieces = [
-            totalMessages !== null ? `${totalMessages} messages` : null,
-            typeof tokens === "number" ? `${tokens.toLocaleString()} tokens` : null,
-            cost !== null ? `$${cost.toFixed(4)}` : null,
-          ].filter(Boolean);
-          return { handled: true, message: pieces.length ? pieces.join(" · ") : "Session stats loaded" };
+          const stats = await sendAgentCommand<SessionStatsInfo>(sid, { type: "get_session_stats" });
+          if (stats) {
+            setSessionStatsOverride(stats);
+            setSlashCommandNotice(null);
+          }
+          onSessionStatsPanelOpen?.();
+          return { handled: true, action: "openSessionStats" };
         }
 
         case "copy": {
@@ -709,7 +729,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } finally {
       if (commandName === "compact") setIsCompacting(false);
     }
-  }, [isCompacting, loadSession, promoteNewSession]);
+  }, [ensureNewSession, isCompacting, loadSession, promoteNewSession, onSessionStatsPanelOpen]);
 
   const handleSteer = useCallback(async (message: string, images?: AttachedImage[]) => {
     const sid = sessionIdRef.current;
@@ -945,6 +965,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     const t = setTimeout(() => setCompactResult(null), 6000);
     return () => clearTimeout(t);
   }, [compactResult]);
+
+  useEffect(() => {
+    setSessionStatsOverride(null);
+  }, [messages.length, contextUsage?.tokens, contextUsage?.percent, contextUsage?.contextWindow]);
 
   return {
     // State

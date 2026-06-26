@@ -242,9 +242,13 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     if (!attachedImages.length && msg.startsWith("/") && onBuiltinCommand) {
       const result = await onBuiltinCommand(msg);
       if (result.handled) {
-        onSlashCommandNotice?.(result.error
-          ? { type: "error", message: result.error }
-          : { type: "success", message: result.message ?? "Command completed" });
+        if (result.error) {
+          onSlashCommandNotice?.({ type: "error", message: result.error });
+        } else if (result.action === "openSessionStats") {
+          onSlashCommandNotice?.(null);
+        } else {
+          onSlashCommandNotice?.({ type: "success", message: result.message ?? "Command completed" });
+        }
         if (!result.error) clearInput();
         return;
       }

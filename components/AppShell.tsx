@@ -12,6 +12,28 @@ import { BranchNavigator } from "./BranchNavigator";
 import { useTheme } from "@/hooks/useTheme";
 import type { SessionInfo, SessionTreeNode } from "@/lib/types";
 import type { ChatInputHandle } from "./ChatInput";
+import type { SessionStatsInfo } from "@/lib/pi-types";
+
+type SessionCopyField = "file" | "id";
+
+function copyText(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    return navigator.clipboard.writeText(text);
+  }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    document.body.removeChild(ta);
+    return Promise.resolve();
+  } catch {
+    return Promise.reject();
+  }
+}
 
 export function AppShell() {
   const router = useRouter();
@@ -53,9 +75,24 @@ export function AppShell() {
   }, []);
 
   // Session stats (tokens + cost) — populated by ChatWindow, displayed in top bar
-  const [sessionStats, setSessionStats] = useState<{ tokens: { input: number; output: number; cacheRead: number; cacheWrite: number }; cost?: number } | null>(null);
-  const handleSessionStatsChange = useCallback((stats: { tokens: { input: number; output: number; cacheRead: number; cacheWrite: number }; cost?: number } | null) => {
+  const [sessionStats, setSessionStats] = useState<SessionStatsInfo | null>(null);
+  const handleSessionStatsChange = useCallback((stats: SessionStatsInfo | null) => {
     setSessionStats(stats);
+  }, []);
+  const [copiedSessionField, setCopiedSessionField] = useState<SessionCopyField | null>(null);
+  const sessionCopyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleCopySessionField = useCallback((field: SessionCopyField, value: string) => {
+    void copyText(value).then(() => {
+      if (sessionCopyTimerRef.current) clearTimeout(sessionCopyTimerRef.current);
+      setCopiedSessionField(field);
+      sessionCopyTimerRef.current = setTimeout(() => setCopiedSessionField(null), 1400);
+    });
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (sessionCopyTimerRef.current) clearTimeout(sessionCopyTimerRef.current);
+    };
   }, []);
 
   // Context usage — populated by ChatWindow, displayed in top bar
@@ -65,11 +102,15 @@ export function AppShell() {
   }, []);
 
   // Single active panel — only one dropdown open at a time
-  const [activeTopPanel, setActiveTopPanel] = useState<"branches" | "system" | null>(null);
+  const [activeTopPanel, setActiveTopPanel] = useState<"branches" | "system" | "session" | null>(null);
   const [topPanelPos, setTopPanelPos] = useState<{ top: number; left: number; width: number } | null>(null);
 
-  const toggleTopPanel = useCallback((panel: "branches" | "system") => {
+  const toggleTopPanel = useCallback((panel: "branches" | "system" | "session") => {
     setActiveTopPanel((cur) => cur === panel ? null : panel);
+  }, []);
+
+  const openSessionStatsPanel = useCallback(() => {
+    setActiveTopPanel("session");
   }, []);
 
   useEffect(() => {
@@ -304,6 +345,67 @@ export function AppShell() {
 
   return (
     <>
+    <style>{`
+      @keyframes session-info-pop {
+        0% {
+          opacity: 0;
+          transform: translateY(-24px);
+          filter: blur(6px);
+          box-shadow: 0 2px 8px rgba(0,0,0,0);
+        }
+        55% {
+          opacity: 1;
+          transform: translateY(0);
+          filter: blur(0);
+          background: color-mix(in srgb, var(--accent) 8%, var(--bg-panel));
+          box-shadow: 0 18px 44px rgba(37,99,235,0.16);
+        }
+        100% {
+          opacity: 1;
+          transform: translateY(0);
+          filter: blur(0);
+          background: var(--bg-panel);
+          box-shadow: 0 10px 28px rgba(0,0,0,0.10);
+        }
+      }
+      @keyframes session-info-light-wash {
+        0% {
+          opacity: 0;
+          transform: translateX(-110%) skewX(-16deg);
+        }
+        24% {
+          opacity: 0.42;
+        }
+        100% {
+          opacity: 0;
+          transform: translateX(115%) skewX(-16deg);
+        }
+      }
+      .session-info-popover {
+        position: relative;
+        overflow: hidden;
+        transform-origin: top right;
+        animation: session-info-pop 360ms ease-out both;
+        will-change: transform, opacity, filter, background, box-shadow;
+      }
+      .session-info-popover::after {
+        content: "";
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        width: 44%;
+        pointer-events: none;
+        background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 24%, transparent), transparent);
+        animation: session-info-light-wash 620ms ease-out both;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .session-info-popover,
+        .session-info-popover::after {
+          animation: none;
+        }
+      }
+    `}</style>
     <div style={{ display: "flex", height: "100dvh", overflow: "hidden", background: "var(--bg)" }}>
       {/* Mobile overlay backdrop */}
       <div
@@ -514,18 +616,26 @@ export function AppShell() {
             const tooltip = tooltipParts.join("  |  ");
 
             return (
-              <div
-                title={tooltip}
+              <button
+                type="button"
+                onClick={() => toggleTopPanel("session")}
+                title={tooltip || "Session info"}
                 style={{
                   marginLeft: "auto",
                   display: "flex", alignItems: "center", gap: 10,
                   paddingLeft: 12,
                   paddingRight: rightPanelOpen ? 12 : 48,
                   height: "100%",
+                  background: activeTopPanel === "session" ? "var(--bg-selected)" : "none",
+                  border: "none",
+                  borderTop: activeTopPanel === "session" ? "2px solid var(--accent)" : "2px solid transparent",
                   fontSize: 11, color: "var(--text-muted)",
-                  whiteSpace: "nowrap", cursor: "default",
+                  whiteSpace: "nowrap", cursor: "pointer",
                   fontVariantNumeric: "tabular-nums",
+                  transition: "color 0.1s, background 0.1s",
                 }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = activeTopPanel === "session" ? "var(--text)" : "var(--text-muted)"; }}
               >
                 {t && t.input > 0 && (
                   <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
@@ -564,7 +674,7 @@ export function AppShell() {
                     {ctxStr}
                   </span>
                 )}
-              </div>
+              </button>
             );
           })()}
           {/* Top panel dropdown — shared, only one active at a time */}
@@ -605,6 +715,158 @@ export function AppShell() {
                   )}
                 </div>
               )}
+              {activeTopPanel === "session" && (
+                <div className="session-info-popover" style={{
+                  background: "var(--bg-panel)",
+                  borderBottom: "1px solid var(--border)",
+                  boxShadow: "0 10px 28px rgba(0,0,0,0.10)",
+                  padding: "12px 16px",
+                }}>
+                  {sessionStats ? (() => {
+                    const sessionRows = [
+                      ...(sessionStats.sessionName ? [{ label: "Name", value: sessionStats.sessionName, copyField: null }] : []),
+                      { label: "File", value: sessionStats.sessionFile ?? "In-memory", copyField: "file" as const },
+                      { label: "ID", value: sessionStats.sessionId, copyField: "id" as const },
+                    ];
+                    const messageRows = [
+                      ["User", sessionStats.userMessages.toLocaleString()],
+                      ["Assistant", sessionStats.assistantMessages.toLocaleString()],
+                      ["Tool Calls", sessionStats.toolCalls.toLocaleString()],
+                      ["Tool Results", sessionStats.toolResults.toLocaleString()],
+                      ["Total", sessionStats.totalMessages.toLocaleString()],
+                    ];
+                    const tokenRows = [
+                      ["Input", sessionStats.tokens.input.toLocaleString()],
+                      ["Output", sessionStats.tokens.output.toLocaleString()],
+                      ...(sessionStats.tokens.cacheRead > 0 ? [["Cache Read", sessionStats.tokens.cacheRead.toLocaleString()]] : []),
+                      ...(sessionStats.tokens.cacheWrite > 0 ? [["Cache Write", sessionStats.tokens.cacheWrite.toLocaleString()]] : []),
+                      ["Total", sessionStats.tokens.total.toLocaleString()],
+                    ];
+                    const ctx = contextUsage ?? sessionStats.contextUsage;
+                    const formatCompact = (n: number) => n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(0)}k` : String(n);
+                    const extraTokenRows = [
+                      ...(sessionStats.cost > 0 ? [["Cost", `$${sessionStats.cost.toFixed(4)}`]] : []),
+                      ...(ctx?.contextWindow ? [["Context", `${ctx.percent !== null ? `${ctx.percent.toFixed(1)}%` : "?"} / ${formatCompact(ctx.contextWindow)}`]] : []),
+                    ];
+                    const section = (
+                      title: string,
+                      sectionRows: string[][],
+                      valueAlign: "left" | "right" = "left",
+                      compact = false,
+                    ) => (
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text)", marginBottom: 6 }}>{title}</div>
+                          <div style={{
+                            display: "grid",
+                            gridTemplateColumns: compact ? "max-content max-content" : "auto minmax(0, 1fr)",
+                            columnGap: compact ? 14 : 12,
+                            rowGap: 4,
+                            justifyContent: compact ? "start" : undefined,
+                          }}>
+                            {sectionRows.map(([label, value]) => (
+                              <div key={`${title}:${label}`} style={{ display: "contents" }}>
+                                <div style={{ color: "var(--text-dim)", whiteSpace: "nowrap" }}>{label}</div>
+                                <div style={{
+                                  color: "var(--text-muted)",
+                                  minWidth: 0,
+                                  overflowWrap: compact ? "normal" : "anywhere",
+                                  textAlign: valueAlign,
+                                  whiteSpace: valueAlign === "right" ? "nowrap" : "normal",
+                                }}>{value}</div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    const copyButton = (field: SessionCopyField, value: string) => {
+                      const copied = copiedSessionField === field;
+                      return (
+                        <button
+                          type="button"
+                          title={copied ? "Copied" : `Copy ${field === "file" ? "file path" : "session ID"}`}
+                          onClick={() => handleCopySessionField(field, value)}
+                          style={{
+                            alignSelf: "start",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            width: 22,
+                            height: 22,
+                            marginTop: -2,
+                            color: copied ? "var(--accent)" : "var(--text-dim)",
+                            background: "transparent",
+                            border: "1px solid var(--border)",
+                            borderRadius: 4,
+                            cursor: "pointer",
+                            flex: "0 0 auto",
+                            transition: "color 0.12s, border-color 0.12s, background 0.12s",
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.color = "var(--accent)";
+                            e.currentTarget.style.borderColor = "var(--accent)";
+                            e.currentTarget.style.background = "var(--bg-hover)";
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.color = copied ? "var(--accent)" : "var(--text-dim)";
+                            e.currentTarget.style.borderColor = "var(--border)";
+                            e.currentTarget.style.background = "transparent";
+                          }}
+                        >
+                          {copied ? (
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                              <polyline points="20 6 9 17 4 12" />
+                            </svg>
+                          ) : (
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                            </svg>
+                          )}
+                        </button>
+                      );
+                    };
+                    const sessionInfoSection = (
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text)", marginBottom: 6 }}>Session Info</div>
+                        <div style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr) auto", columnGap: 12, rowGap: 8, alignItems: "start" }}>
+                          {sessionRows.map((row) => (
+                            <div key={`session-info:${row.label}`} style={{ display: "contents" }}>
+                              <div style={{ color: "var(--text-dim)", whiteSpace: "nowrap" }}>{row.label}</div>
+                              <div style={{
+                                color: "var(--text-muted)",
+                                minWidth: 0,
+                                overflowWrap: "anywhere",
+                                wordBreak: "break-word",
+                                whiteSpace: "normal",
+                              }}>{row.value}</div>
+                              <div>{row.copyField ? copyButton(row.copyField, row.value) : null}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+
+                    return (
+                      <div style={{
+                        display: "grid",
+                        gridTemplateColumns: "minmax(360px, 1.7fr) minmax(140px, 0.55fr) minmax(190px, 0.75fr)",
+                        gap: 24,
+                        fontSize: 12,
+                        lineHeight: 1.5,
+                        fontFamily: "var(--font-mono)",
+                      }}>
+                        {sessionInfoSection}
+                        {section("Messages", messageRows)}
+                        {section("Tokens", [...tokenRows, ...extraTokenRows], "right", true)}
+                      </div>
+                    );
+                  })() : (
+                    <div style={{ fontSize: 12, color: "var(--text-muted)", fontStyle: "italic" }}>
+                      Send a message or run /session to load session info
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -625,6 +887,7 @@ export function AppShell() {
               onBranchDataChange={handleBranchDataChange}
               onSystemPromptChange={handleSystemPromptChange}
               onSessionStatsChange={handleSessionStatsChange}
+              onSessionStatsPanelOpen={openSessionStatsPanel}
               onContextUsageChange={handleContextUsageChange}
             />
           ) : showPlaceholder ? (
