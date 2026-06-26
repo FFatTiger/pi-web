@@ -5,7 +5,7 @@ import type { AgentMessage, ExtensionUiRequest, SessionInfo, SessionTreeNode } f
 import { MessageView } from "./MessageView";
 import { ChatInput, type ChatInputHandle } from "./ChatInput";
 import { ChatMinimap, useMessageRefs } from "./ChatMinimap";
-import { useAgentSession, type AgentPhase } from "@/hooks/useAgentSession";
+import { useAgentSession, type AgentPhase, type NoticeItem } from "@/hooks/useAgentSession";
 import { useAudio } from "@/hooks/useAudio";
 import { useDragDrop } from "@/hooks/useDragDrop";
 import type { SessionStatsInfo } from "@/lib/pi-types";
@@ -103,8 +103,8 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     agentRunning, modelNames, modelList, modelThinkingLevels, modelThinkingLevelMaps, toolPreset, thinkingLevel,
     retryInfo, contextUsage, forkingEntryId,
     isCompacting, compactError, compactResult, displayModel: displayModelValue, sessionStats,
-    slashCommands, slashCommandsLoading, slashCommandNotice,
-    extensionDialog, extensionNotices, extensionStatuses, extensionWidgets, respondToExtensionUi,
+    slashCommands, slashCommandsLoading,
+    notices, extensionDialog, extensionStatuses, extensionWidgets, respondToExtensionUi,
     isAutoModelSelection,
     agentPhase,
     isNew,
@@ -112,7 +112,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     lastUserMsgRef,
     handleSend, handleAbort, handleFork, handleNavigate, handleModelChange,
     handleCompact, handleSteer, handleFollowUp, handlePromptWithStreamingBehavior, handleAbortCompaction,
-    handleBuiltinSlashCommand, setSlashCommandNotice,
+    handleBuiltinSlashCommand,
     handleToolPresetChange, handleThinkingLevelChange, loadSlashCommands, handleAgentEventRef,
   } = useAgentSession({
     session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked,
@@ -222,9 +222,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
       slashCommands={slashCommands}
       slashCommandsLoading={slashCommandsLoading}
       onLoadSlashCommands={loadSlashCommands}
-      slashCommandNotice={slashCommandNotice}
       onBuiltinCommand={handleBuiltinSlashCommand}
-      onSlashCommandNotice={setSlashCommandNotice}
       soundEnabled={soundEnabled}
       onSoundToggle={onSoundToggle}
     />
@@ -289,7 +287,6 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
         </div>
       )}
 
-      <ExtensionToasts notices={extensionNotices} />
       {extensionDialog && (
         <ExtensionDialog
           request={extensionDialog}
@@ -328,17 +325,33 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                 </span>
               </div>
             </div>
+            <NoticeShelf notices={notices} align="right" />
             {chatInputElement}
           </div>
         </div>
       ) : (
       <>
       <div className="relative flex flex-1 overflow-hidden">
+        <div
+          style={{
+            position: "absolute",
+            top: 12,
+            left: 0,
+            right: CHAT_MINIMAP_WIDTH,
+            zIndex: 40,
+            padding: `0 ${CHAT_COLUMN_PADDING}px`,
+            pointerEvents: "none",
+          }}
+        >
+          <div style={{ maxWidth: 820, margin: "0 auto" }}>
+            <NoticeShelf notices={notices} floating align="right" />
+          </div>
+        </div>
         <div ref={scrollContainerRef} className="flex-1 overflow-y-auto pt-4 [scrollbar-width:none]">
           <div style={{ padding: `0 ${CHAT_COLUMN_PADDING}px` }}>
             <div style={{ maxWidth: 820, margin: "0 auto" }}>
-            <ExtensionStatusBar statuses={extensionStatuses} />
-            <ExtensionWidgets widgets={aboveEditorWidgets} />
+              <ExtensionStatusBar statuses={extensionStatuses} />
+              <ExtensionWidgets widgets={aboveEditorWidgets} />
 
             {(() => {
               const toolResultsMap = new Map<string, import("@/lib/types").ToolResultMessage>();
@@ -499,27 +512,68 @@ function ExtensionWidgets({ widgets }: { widgets: Array<{ key: string; lines: st
   );
 }
 
-function ExtensionToasts({ notices }: { notices: Array<{ id: string; message: string; type: "info" | "warning" | "error" }> }) {
+function NoticeShelf({ notices, floating = false, align = "left" }: { notices: NoticeItem[]; floating?: boolean; align?: "left" | "right" }) {
   if (notices.length === 0) return null;
   return (
-    <div style={{ position: "absolute", top: 12, right: 52, zIndex: 80, display: "flex", flexDirection: "column", gap: 8, maxWidth: 360 }}>
-      {notices.map((notice) => {
-        const color = notice.type === "error" ? "#ef4444" : notice.type === "warning" ? "#d97706" : "var(--accent)";
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: align === "right" ? "flex-end" : "stretch",
+        marginBottom: floating ? 0 : 10,
+      }}
+    >
+      {notices.map((notice, index) => {
+        const color = notice.type === "error"
+          ? "#ef4444"
+          : notice.type === "warning"
+            ? "#d97706"
+            : notice.type === "success"
+              ? "#10b981"
+              : "var(--accent)";
         return (
           <div
             key={notice.id}
+            className="notice-shelf-item"
             style={{
-              padding: "8px 10px",
-              borderRadius: 7,
-              border: `1px solid color-mix(in srgb, ${color} 34%, var(--border))`,
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              minHeight: 60,
+              height: 60,
+              maxHeight: 60,
+              marginBottom: index === notices.length - 1 ? 0 : 6,
+              overflow: "hidden",
+              borderRadius: 14,
+              border: "1px solid color-mix(in srgb, var(--border) 70%, transparent)",
               background: "var(--bg)",
-              color: "var(--text)",
-              boxShadow: "0 10px 28px rgba(0,0,0,0.14)",
-              fontSize: 12,
+              color: "var(--text-muted)",
+              width: "fit-content",
+              maxWidth: "min(100%, 620px)",
+              boxShadow: floating
+                ? "0 1px 2px rgba(15,23,42,0.05), 0 10px 28px -14px rgba(15,23,42,0.24)"
+                : "0 1px 2px rgba(15,23,42,0.04), 0 8px 24px -12px rgba(15,23,42,0.10)",
+              fontSize: 18,
               lineHeight: 1.45,
+              transformOrigin: "top center",
+              animation: notice.exiting
+                ? "notice-shelf-out 0.18s ease-in forwards"
+                : "notice-shelf-in 0.18s ease-out both",
+              padding: "0 12px",
             }}
           >
-            {notice.message}
+            <span
+              style={{
+                width: 7,
+                height: 7,
+                borderRadius: "50%",
+                background: color,
+                flexShrink: 0,
+              }}
+            />
+            <span style={{ padding: "14px 0", minWidth: 0, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {notice.message}
+            </span>
           </div>
         );
       })}

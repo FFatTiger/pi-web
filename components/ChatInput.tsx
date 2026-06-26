@@ -42,9 +42,7 @@ interface Props {
   slashCommands?: SlashCommandInfo[];
   slashCommandsLoading?: boolean;
   onLoadSlashCommands?: () => Promise<SlashCommandInfo[]> | SlashCommandInfo[];
-  slashCommandNotice?: { type: "success" | "error"; message: string } | null;
   onBuiltinCommand?: (message: string) => Promise<BuiltinSlashCommandResult>;
-  onSlashCommandNotice?: (notice: { type: "success" | "error"; message: string } | null) => void;
   soundEnabled?: boolean;
   onSoundToggle?: () => void;
 }
@@ -130,7 +128,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   thinkingLevel, onThinkingLevelChange, availableThinkingLevels, thinkingLevelMap,
   retryInfo,
   slashCommands, slashCommandsLoading, onLoadSlashCommands,
-  slashCommandNotice, onBuiltinCommand, onSlashCommandNotice,
+  onBuiltinCommand,
   soundEnabled, onSoundToggle,
   onPromptWithStreamingBehavior,
 }: Props, ref) {
@@ -247,20 +245,13 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     if (!attachedImages.length && msg.startsWith("/") && onBuiltinCommand) {
       const result = await onBuiltinCommand(msg);
       if (result.handled) {
-        if (result.error) {
-          onSlashCommandNotice?.({ type: "error", message: result.error });
-        } else if (result.action === "openSessionStats") {
-          onSlashCommandNotice?.(null);
-        } else {
-          onSlashCommandNotice?.({ type: "success", message: result.message ?? "Command completed" });
-        }
         if (!result.error) clearInput();
         return;
       }
     }
     onSend(msg, attachedImages.length ? attachedImages : undefined);
     clearInput();
-  }, [value, attachedImages, isStreaming, onBuiltinCommand, onSlashCommandNotice, onSend, clearInput]);
+  }, [value, attachedImages, isStreaming, onBuiltinCommand, onSend, clearInput]);
 
   const slashQuery = value.startsWith("/") && !/\s/.test(value.slice(1))
     ? value.slice(1).toLowerCase()
@@ -487,14 +478,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     slashItemRefs.current[slashActiveIndex]?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [slashActiveIndex, slashMenuOpen]);
 
-  useEffect(() => {
-    if (!slashCommandNotice) return;
-    const t = setTimeout(() => onSlashCommandNotice?.(null), 5000);
-    return () => clearTimeout(t);
-  }, [slashCommandNotice, onSlashCommandNotice]);
-
-
-
   // Build model options: prefer modelList (has provider info), fallback to modelNames
   const modelOptions: ModelOption[] = (() => {
     if (modelList && modelList.length > 0) {
@@ -601,23 +584,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               <polyline points="20 6 9 17 4 12" />
             </svg>
             {compactResultText}
-          </div>
-        )}
-        {slashCommandNotice && (
-          <div style={{
-            marginBottom: 8, padding: "5px 10px",
-            background: slashCommandNotice.type === "error" ? "rgba(239,68,68,0.08)" : "rgba(16,185,129,0.08)",
-            border: `1px solid ${slashCommandNotice.type === "error" ? "rgba(239,68,68,0.24)" : "rgba(16,185,129,0.24)"}`,
-            borderRadius: 6, fontSize: 12,
-            color: slashCommandNotice.type === "error" ? "#ef4444" : "rgba(5,150,105,0.95)",
-            display: "flex", alignItems: "center", gap: 6,
-          }}>
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-              {slashCommandNotice.type === "error"
-                ? <><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></>
-                : <polyline points="20 6 9 17 4 12" />}
-            </svg>
-            {slashCommandNotice.message}
           </div>
         )}
         {/* Image previews */}
@@ -799,10 +765,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           <textarea
             ref={textareaRef}
             value={value}
-            onChange={(e) => {
-              setValue(e.target.value);
-              if (slashCommandNotice) onSlashCommandNotice?.(null);
-            }}
+            onChange={(e) => setValue(e.target.value)}
             onKeyDown={handleKeyDown}
             onCompositionStart={() => {
               isComposingRef.current = true;
