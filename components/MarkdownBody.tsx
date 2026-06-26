@@ -224,9 +224,9 @@ function CodeBlock({ code, lang, headerAction }: { code: string; lang: string; h
         lineNumberStyle={{ color: "var(--text-dim)", fontStyle: "normal" }}
         customStyle={{
           margin: 0,
-          padding: "12px 14px",
+          padding: "11px 13px",
           fontSize: 12.5,
-          lineHeight: 1.65,
+          lineHeight: 1.62,
           borderRadius: 0,
           background: "color-mix(in srgb, var(--bg) 92%, var(--bg-panel))",
         }}

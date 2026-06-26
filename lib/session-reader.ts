@@ -1,5 +1,5 @@
 import { SessionManager, buildSessionContext as piBuildSessionContext, getAgentDir } from "@earendil-works/pi-coding-agent";
-import type { SessionEntry, SessionInfo, SessionContext, SessionTreeNode, AssistantMessage } from "./types";
+import type { AgentMessage, SessionEntry, SessionInfo, SessionContext, SessionTreeNode, AssistantMessage } from "./types";
 import type { SessionEntry as PiSessionEntry, SessionInfo as PiSessionInfo } from "@earendil-works/pi-coding-agent";
 import { normalizeToolCalls } from "./normalize";
 
@@ -140,30 +140,30 @@ export function buildSessionContext(entries: SessionEntry[], leafId?: string | n
     }
   }
 
-  const entryIds: string[] = [];
+  const contextEntryIds: string[] = [];
   if (compactionId) {
     // The first message in piCtx.messages is the synthetic compaction summary — map to compaction entry id
-    entryIds.push(compactionId);
+    contextEntryIds.push(compactionId);
     const compactionIdx = path.findIndex((e) => e.id === compactionId);
     const firstKeptIdx = firstKeptEntryId
       ? path.findIndex((e, i) => i < compactionIdx && e.id === firstKeptEntryId)
       : -1;
     const startIdx = firstKeptIdx >= 0 ? firstKeptIdx : compactionIdx;
     for (let i = startIdx; i < compactionIdx; i++) {
-      if (path[i].type === "message") entryIds.push(path[i].id);
+      if (isContextMessageEntry(path[i])) contextEntryIds.push(path[i].id);
     }
     for (let i = compactionIdx + 1; i < path.length; i++) {
-      if (path[i].type === "message") entryIds.push(path[i].id);
+      if (isContextMessageEntry(path[i])) contextEntryIds.push(path[i].id);
     }
   } else {
     for (const e of path) {
-      if (e.type === "message") entryIds.push(e.id);
+      if (isContextMessageEntry(e)) contextEntryIds.push(e.id);
     }
   }
 
   // pi injects compaction summary as {role:"compactionSummary", summary, tokensBefore}.
   // Convert to {role:"user"} so MessageView can render it the same as before.
-  const messages = (piCtx.messages as AssistantMessage[]).map((msg) => {
+  const contextMessages = (piCtx.messages as AssistantMessage[]).map((msg) => {
     const raw = msg as unknown as Record<string, unknown>;
     if (raw.role === "compactionSummary") {
       return {
@@ -172,12 +172,21 @@ export function buildSessionContext(entries: SessionEntry[], leafId?: string | n
         timestamp: raw.timestamp as number | undefined,
       };
     }
+    if (raw.role === "branchSummary") {
+      return {
+        role: "user" as const,
+        content: `*The conversation briefly explored another branch and returned with this summary:*\n\n${raw.summary ?? ""}`,
+        timestamp: raw.timestamp as number | undefined,
+      };
+    }
     return normalizeToolCalls(msg);
   });
 
+  const display = filterDisplayMessages(contextMessages, contextEntryIds);
+
   return {
-    messages,
-    entryIds,
+    messages: display.messages,
+    entryIds: display.entryIds,
     thinkingLevel: piCtx.thinkingLevel,
     model: piCtx.model,
   };
@@ -188,5 +197,23 @@ export function getLeafId(entries: SessionEntry[]): string | null {
   return entries[entries.length - 1].id;
 }
 
+function isContextMessageEntry(entry: SessionEntry): boolean {
+  return entry.type === "message" || entry.type === "custom_message" || (entry.type === "branch_summary" && !!entry.summary);
+}
 
+function filterDisplayMessages(messages: AgentMessage[], entryIds: string[]): Pick<SessionContext, "messages" | "entryIds"> {
+  const displayMessages: AgentMessage[] = [];
+  const displayEntryIds: string[] = [];
 
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i];
+
+    displayMessages.push(msg);
+    displayEntryIds.push(entryIds[i] ?? "");
+  }
+
+  return {
+    messages: displayMessages,
+    entryIds: displayEntryIds,
+  };
+}

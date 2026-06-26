@@ -254,6 +254,33 @@ pre, code {
   white-space: pre-wrap;
 }
 
+.markdown-custom-message {
+  line-height: 1.32;
+}
+.markdown-custom-message p { margin: 0; }
+.markdown-custom-message h1,
+.markdown-custom-message h2,
+.markdown-custom-message h3,
+.markdown-custom-message h4,
+.markdown-custom-message h5,
+.markdown-custom-message h6 {
+  margin: 4px 0 2px;
+  line-height: 1.18;
+}
+.markdown-custom-message ul,
+.markdown-custom-message ol {
+  margin: 2px 0 3px;
+}
+.markdown-custom-message li { margin: 0; }
+.markdown-custom-message blockquote {
+  margin: 3px 0;
+  padding: 4px 8px;
+}
+.markdown-custom-message .markdown-table-wrap,
+.markdown-custom-message .markdown-code-block {
+  margin: 4px 0;
+}
+
 .markdown-code-block {
   position: relative;
   margin: 6px 0;

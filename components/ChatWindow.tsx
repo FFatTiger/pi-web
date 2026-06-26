@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AgentMessage, SessionInfo, SessionTreeNode } from "@/lib/types";
+import type { AgentMessage, ExtensionUiRequest, SessionInfo, SessionTreeNode } from "@/lib/types";
 import { MessageView } from "./MessageView";
 import { ChatInput, type ChatInputHandle } from "./ChatInput";
 import { ChatMinimap, useMessageRefs } from "./ChatMinimap";
@@ -34,6 +34,7 @@ function phaseLabel(phase: AgentPhase): string {
     return `Running ${names.slice(0, 2).join(", ")} (+${names.length - 2})...`;
   }
   if (phase?.kind === "waiting_model") return "Waiting for model...";
+  if (phase?.kind === "running_command") return "Running command...";
   return "Thinking...";
 }
 
@@ -99,6 +100,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     retryInfo, contextUsage, forkingEntryId,
     isCompacting, compactError, compactResult, displayModel: displayModelValue, sessionStats,
     slashCommands, slashCommandsLoading, slashCommandNotice,
+    extensionDialog, extensionNotices, extensionStatuses, extensionWidgets, respondToExtensionUi,
     isAutoModelSelection,
     agentPhase,
     isNew,
@@ -224,6 +226,9 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     />
   );
 
+  const aboveEditorWidgets = extensionWidgets.filter((widget) => widget.placement !== "belowEditor");
+  const belowEditorWidgets = extensionWidgets.filter((widget) => widget.placement === "belowEditor");
+
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center text-text-muted">
@@ -280,6 +285,14 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
         </div>
       )}
 
+      <ExtensionToasts notices={extensionNotices} />
+      {extensionDialog && (
+        <ExtensionDialog
+          request={extensionDialog}
+          onRespond={respondToExtensionUi}
+        />
+      )}
+
       {isEmptyNew ? (
         <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto px-4 py-8">
           <div className="w-full max-w-[820px]">
@@ -319,6 +332,8 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
       <div className="relative flex flex-1 overflow-hidden">
         <div ref={scrollContainerRef} className="flex-1 overflow-y-auto pt-4 [scrollbar-width:none]">
           <div className="mx-auto max-w-[820px] px-4">
+            <ExtensionStatusBar statuses={extensionStatuses} />
+            <ExtensionWidgets widgets={aboveEditorWidgets} />
 
             {(() => {
               const toolResultsMap = new Map<string, import("@/lib/types").ToolResultMessage>();
@@ -406,10 +421,273 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
       </div>
 
       <div className="relative">
+        <div className="mx-auto max-w-[820px] px-4">
+          <ExtensionWidgets widgets={belowEditorWidgets} />
+        </div>
         {chatInputElement}
       </div>
       </>
       )}
+    </div>
+  );
+}
+
+function ExtensionStatusBar({ statuses }: { statuses: Array<{ key: string; text: string }> }) {
+  if (statuses.length === 0) return null;
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+      {statuses.map((status) => (
+        <div
+          key={status.key}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            maxWidth: "100%",
+            padding: "4px 8px",
+            border: "1px solid color-mix(in srgb, var(--accent) 24%, var(--border))",
+            borderRadius: 6,
+            background: "color-mix(in srgb, var(--accent) 7%, var(--bg))",
+            color: "var(--text-muted)",
+            fontSize: 12,
+          }}
+        >
+          <span style={{ color: "var(--accent)", fontFamily: "var(--font-mono)", fontSize: 11 }}>{status.key}</span>
+          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{status.text}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ExtensionWidgets({ widgets }: { widgets: Array<{ key: string; lines: string[] }> }) {
+  if (widgets.length === 0) return null;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 10 }}>
+      {widgets.map((widget) => (
+        <div
+          key={widget.key}
+          style={{
+            border: "1px solid var(--border)",
+            borderRadius: 7,
+            background: "var(--bg-panel)",
+            overflow: "hidden",
+          }}
+        >
+          <div style={{ padding: "5px 9px", borderBottom: "1px solid var(--border)", color: "var(--text-dim)", fontSize: 11, fontFamily: "var(--font-mono)" }}>
+            {widget.key}
+          </div>
+          <pre style={{ margin: 0, padding: "8px 9px", color: "var(--text-muted)", fontSize: 12, lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word", fontFamily: "var(--font-mono)" }}>
+            {widget.lines.join("\n")}
+          </pre>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ExtensionToasts({ notices }: { notices: Array<{ id: string; message: string; type: "info" | "warning" | "error" }> }) {
+  if (notices.length === 0) return null;
+  return (
+    <div style={{ position: "absolute", top: 12, right: 52, zIndex: 80, display: "flex", flexDirection: "column", gap: 8, maxWidth: 360 }}>
+      {notices.map((notice) => {
+        const color = notice.type === "error" ? "#ef4444" : notice.type === "warning" ? "#d97706" : "var(--accent)";
+        return (
+          <div
+            key={notice.id}
+            style={{
+              padding: "8px 10px",
+              borderRadius: 7,
+              border: `1px solid color-mix(in srgb, ${color} 34%, var(--border))`,
+              background: "var(--bg)",
+              color: "var(--text)",
+              boxShadow: "0 10px 28px rgba(0,0,0,0.14)",
+              fontSize: 12,
+              lineHeight: 1.45,
+            }}
+          >
+            {notice.message}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+type ExtensionDialogRequest = Extract<ExtensionUiRequest, { method: "select" | "confirm" | "input" | "editor" }>;
+
+function ExtensionDialog({
+  request,
+  onRespond,
+}: {
+  request: ExtensionDialogRequest;
+  onRespond: (request: ExtensionDialogRequest, response: { value: string } | { confirmed: boolean } | { cancelled: true }) => void;
+}) {
+  const [value, setValue] = useState(request.method === "editor" ? request.prefill ?? "" : "");
+
+  useEffect(() => {
+    setValue(request.method === "editor" ? request.prefill ?? "" : "");
+  }, [request]);
+
+  const submitValue = () => {
+    if (request.method === "confirm") {
+      onRespond(request, { confirmed: true });
+    } else {
+      onRespond(request, { value });
+    }
+  };
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        inset: 0,
+        zIndex: 90,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 20,
+        background: "rgba(0,0,0,0.18)",
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        style={{
+          width: "min(560px, 100%)",
+          border: "1px solid var(--border)",
+          borderRadius: 8,
+          background: "var(--bg)",
+          boxShadow: "0 20px 60px rgba(0,0,0,0.28)",
+          overflow: "hidden",
+        }}
+      >
+        <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--border)" }}>
+          <div style={{ color: "var(--text)", fontSize: 14, fontWeight: 650 }}>{request.title}</div>
+          <div style={{ marginTop: 3, color: "var(--text-dim)", fontSize: 11, fontFamily: "var(--font-mono)" }}>extension request</div>
+        </div>
+
+        <div style={{ padding: 14 }}>
+          {request.method === "confirm" && (
+            <div style={{ color: "var(--text-muted)", fontSize: 13, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{request.message}</div>
+          )}
+          {request.method === "select" && (
+            <div style={{ display: "grid", gap: 8 }}>
+              {request.options.map((option) => (
+                <button
+                  key={option}
+                  onClick={() => onRespond(request, { value: option })}
+                  style={{
+                    width: "100%",
+                    padding: "9px 10px",
+                    borderRadius: 7,
+                    border: "1px solid var(--border)",
+                    background: "var(--bg-panel)",
+                    color: "var(--text)",
+                    cursor: "pointer",
+                    textAlign: "left",
+                    fontSize: 13,
+                  }}
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
+          )}
+          {request.method === "input" && (
+            <input
+              autoFocus
+              value={value}
+              placeholder={request.placeholder}
+              onChange={(e) => setValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") submitValue();
+                if (e.key === "Escape") onRespond(request, { cancelled: true });
+              }}
+              style={{
+                width: "100%",
+                padding: "9px 10px",
+                borderRadius: 7,
+                border: "1px solid var(--border)",
+                background: "var(--bg-panel)",
+                color: "var(--text)",
+                outline: "none",
+                fontSize: 13,
+              }}
+            />
+          )}
+          {request.method === "editor" && (
+            <textarea
+              autoFocus
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") onRespond(request, { cancelled: true });
+                if ((e.metaKey || e.ctrlKey) && e.key === "Enter") submitValue();
+              }}
+              style={{
+                width: "100%",
+                minHeight: 220,
+                padding: 10,
+                borderRadius: 7,
+                border: "1px solid var(--border)",
+                background: "var(--bg-panel)",
+                color: "var(--text)",
+                outline: "none",
+                resize: "vertical",
+                fontSize: 13,
+                lineHeight: 1.55,
+                fontFamily: "var(--font-mono)",
+              }}
+            />
+          )}
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "10px 14px", borderTop: "1px solid var(--border)", background: "var(--bg-panel)" }}>
+          <button
+            onClick={() => onRespond(request, { cancelled: true })}
+            style={{
+              padding: "6px 10px",
+              borderRadius: 6,
+              border: "1px solid var(--border)",
+              background: "var(--bg)",
+              color: "var(--text-muted)",
+              cursor: "pointer",
+            }}
+          >
+            Cancel
+          </button>
+          {request.method === "confirm" ? (
+            <button
+              onClick={submitValue}
+              style={{
+                padding: "6px 10px",
+                borderRadius: 6,
+                border: "1px solid var(--accent)",
+                background: "var(--accent)",
+                color: "#fff",
+                cursor: "pointer",
+              }}
+            >
+              Confirm
+            </button>
+          ) : request.method !== "select" ? (
+            <button
+              onClick={submitValue}
+              style={{
+                padding: "6px 10px",
+                borderRadius: 6,
+                border: "1px solid var(--accent)",
+                background: "var(--accent)",
+                color: "#fff",
+                cursor: "pointer",
+              }}
+            >
+              Submit
+            </button>
+          ) : null}
+        </div>
+      </div>
     </div>
   );
 }

@@ -6,6 +6,7 @@ import type {
   AgentMessage,
   UserMessage,
   AssistantMessage,
+  CustomMessage,
   ToolResultMessage,
   AssistantContentBlock,
   TextContent,
@@ -71,6 +72,9 @@ export function MessageView({ message, isStreaming, toolResults, modelNames, ent
   if (message.role === "toolResult") {
     // Rendered inline under its toolCall — skip standalone rendering if paired
     return null;
+  }
+  if (message.role === "custom") {
+    return <CustomMessageView message={message as CustomMessage} />;
   }
   return null;
 }
@@ -688,6 +692,209 @@ function PairedResult({ text, isEmpty, isError }: {
       </pre>
     </div>
   );
+}
+
+function CustomMessageView({ message }: { message: CustomMessage }) {
+  const isHiddenDisplay = message.display === false;
+  const [contentExpanded, setContentExpanded] = useState(!isHiddenDisplay);
+  const [detailsExpanded, setDetailsExpanded] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const text = getMessageText(message.content);
+  const images = getMessageImages(message.content);
+  const hasDetails = message.details !== undefined;
+  const detailsText = hasDetails ? safeJson(message.details) : "";
+  const title = formatCustomType(message.customType);
+  const time = formatTime(message.timestamp);
+
+  const copyContent = () => {
+    copyText(text || detailsText).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div
+        style={{
+          border: "1px solid var(--border)",
+          borderRadius: 8,
+          overflow: "hidden",
+          background: isHiddenDisplay ? "var(--bg-subtle)" : "var(--bg)",
+          opacity: isHiddenDisplay && !contentExpanded ? 0.82 : 1,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "7px 10px",
+            borderBottom: "1px solid var(--border)",
+            background: "var(--bg-panel)",
+            color: "var(--text-muted)",
+            fontSize: 12,
+          }}
+        >
+          <span style={{ color: "var(--text-muted)", fontFamily: "var(--font-mono)", fontSize: 11, fontWeight: 650 }}>
+            {title}
+          </span>
+          {isHiddenDisplay && <span style={{ color: "var(--text-dim)", fontSize: 11 }}>hidden extension message</span>}
+          {time && <span style={{ marginLeft: "auto", color: "var(--text-dim)", fontSize: 10 }}>{time}</span>}
+        </div>
+
+        {contentExpanded ? (
+          <div style={{ padding: "6px 9px" }}>
+            {images.length > 0 && (
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: text ? 8 : 0 }}>
+                {images.map((img, i) => {
+                  const src = imageSource(img);
+                  if (!src) return null;
+                  return (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      key={i}
+                      src={src}
+                      alt=""
+                      style={{ maxWidth: 240, maxHeight: 240, borderRadius: 6, objectFit: "contain", display: "block", border: "1px solid var(--border)" }}
+                    />
+                  );
+                })}
+              </div>
+            )}
+            {text ? <MarkdownBody className="markdown-custom-message">{text}</MarkdownBody> : <span style={{ color: "var(--text-dim)", fontSize: 12 }}>(no message)</span>}
+          </div>
+        ) : (
+          <button
+            onClick={() => setContentExpanded(true)}
+            style={{
+              display: "block",
+              width: "100%",
+              padding: "8px 10px",
+              border: "none",
+              background: "transparent",
+              color: "var(--text-dim)",
+              cursor: "pointer",
+              fontSize: 12,
+              textAlign: "left",
+            }}
+          >
+            {text ? previewText(text) : "Show extension message"}
+          </button>
+        )}
+
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "4px 9px",
+            borderTop: "1px solid var(--border)",
+            background: "var(--bg-subtle)",
+          }}
+        >
+          {text || detailsText ? (
+            <button
+              onClick={copyContent}
+              style={{
+                padding: "3px 7px",
+                border: "none",
+                background: "none",
+                color: copied ? "var(--accent)" : "var(--text-dim)",
+                cursor: "pointer",
+                fontSize: 11,
+              }}
+            >
+              {copied ? "Copied" : "Copy"}
+            </button>
+          ) : null}
+          {(hasDetails || isHiddenDisplay) && (
+            <button
+              onClick={() => {
+                if (isHiddenDisplay) setContentExpanded((v) => !v);
+                else setDetailsExpanded((v) => !v);
+              }}
+              style={{
+                marginLeft: "auto",
+                padding: "3px 7px",
+                border: "none",
+                background: "none",
+                color: "var(--text-dim)",
+                cursor: "pointer",
+                fontSize: 11,
+              }}
+            >
+              {isHiddenDisplay
+                ? (contentExpanded ? "Collapse" : "Expand")
+                : (detailsExpanded ? "Hide details" : "Show details")}
+            </button>
+          )}
+        </div>
+
+        {hasDetails && ((isHiddenDisplay && contentExpanded) || (!isHiddenDisplay && detailsExpanded)) && (
+          <pre
+            style={{
+              margin: 0,
+              padding: "9px 10px",
+              borderTop: "1px solid var(--border)",
+              background: "var(--bg)",
+              color: "var(--text-muted)",
+              fontSize: 12,
+              lineHeight: 1.5,
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+              maxHeight: 360,
+              overflow: "auto",
+              fontFamily: "var(--font-mono)",
+            }}
+          >
+            {detailsText}
+          </pre>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function getMessageText(content: CustomMessage["content"] | UserMessage["content"]): string {
+  if (typeof content === "string") return content;
+  return content
+    .filter((b): b is TextContent => b.type === "text")
+    .map((b) => b.text)
+    .join("\n");
+}
+
+function getMessageImages(content: CustomMessage["content"] | UserMessage["content"]): ImageContent[] {
+  if (typeof content === "string") return [];
+  return content.filter((b): b is ImageContent => b.type === "image");
+}
+
+function imageSource(img: ImageContent): string {
+  const flat = img as unknown as { data?: string; mimeType?: string };
+  if (img.source) {
+    return img.source.type === "base64"
+      ? `data:${img.source.media_type};base64,${img.source.data}`
+      : img.source.url ?? "";
+  }
+  return flat.data ? `data:${flat.mimeType};base64,${flat.data}` : "";
+}
+
+function safeJson(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function formatCustomType(type: string): string {
+  return type || "extension";
+}
+
+function previewText(text: string): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (!normalized) return "Show extension message";
+  return normalized.length > 140 ? `${normalized.slice(0, 140)}...` : normalized;
 }
 
 

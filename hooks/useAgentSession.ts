@@ -1,7 +1,14 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect, useReducer } from "react";
-import type { AgentMessage, SessionInfo, SessionTreeNode } from "@/lib/types";
+import type {
+  AgentMessage,
+  ExtensionStatusItem,
+  ExtensionUiRequest,
+  ExtensionWidgetItem,
+  SessionInfo,
+  SessionTreeNode,
+} from "@/lib/types";
 import { normalizeToolCalls } from "@/lib/normalize";
 import { sendAgentCommand } from "@/lib/agent-client";
 import type { ToolEntry } from "@/components/ToolPanel";
@@ -59,8 +66,27 @@ interface LastAssistantTextResponse {
   text?: string;
 }
 
+type AgentStateResponse = {
+  contextUsage?: { percent: number | null; contextWindow: number; tokens: number | null } | null;
+  systemPrompt?: string;
+  thinkingLevel?: string;
+  isStreaming?: boolean;
+  isPromptRunning?: boolean;
+  isCompacting?: boolean;
+  extensionStatuses?: ExtensionStatusItem[];
+  extensionWidgets?: ExtensionWidgetItem[];
+};
+
+type ExtensionUiDialogRequest = Extract<ExtensionUiRequest, { method: "select" | "confirm" | "input" | "editor" }>;
+type ExtensionUiNotice = {
+  id: string;
+  message: string;
+  type: "info" | "warning" | "error";
+};
+
 export type AgentPhase =
   | { kind: "waiting_model" }
+  | { kind: "running_command" }
   | { kind: "running_tools"; tools: { id: string; name: string }[] }
   | null;
 
@@ -105,7 +131,14 @@ export type ThinkingLevelOption = "auto" | "off" | "minimal" | "low" | "medium" 
 
 const PROGRAMMATIC_SCROLL_IGNORE_MS = 700;
 const USER_SCROLL_INTENT_MS = 1200;
+const PROMPT_SETTLE_INITIAL_DELAY_MS = 800;
+const PROMPT_SETTLE_POLL_MS = 600;
+const PROMPT_SETTLE_MAX_MS = 20_000;
 const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " ", "Space", "Spacebar"]);
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function readCompactResult(result: unknown, reason: string): CompactResultInfo | null {
   if (!result || typeof result !== "object") return null;
@@ -178,6 +211,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [slashCommandsLoading, setSlashCommandsLoading] = useState(false);
   const [slashCommandNotice, setSlashCommandNotice] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [sessionStatsOverride, setSessionStatsOverride] = useState<SessionStatsInfo | null>(null);
+  const [extensionDialog, setExtensionDialog] = useState<ExtensionUiDialogRequest | null>(null);
+  const [extensionNotices, setExtensionNotices] = useState<ExtensionUiNotice[]>([]);
+  const [extensionStatuses, setExtensionStatuses] = useState<ExtensionStatusItem[]>([]);
+  const [extensionWidgets, setExtensionWidgets] = useState<ExtensionWidgetItem[]>([]);
 
   const eventSourceRef = useRef<EventSource | null>(null);
   const sessionIdRef = useRef<string | null>(session?.id ?? null);
@@ -193,6 +230,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const ensuringNewSessionRef = useRef<Promise<string | null> | null>(null);
   const newSessionPromotedRef = useRef(false);
+  const promptRunIdRef = useRef(0);
 
   const setToolPresetState = opts.setToolPreset ?? setToolPreset;
 
@@ -255,13 +293,15 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         return null;
       }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const d = await res.json() as SessionData & { agentState?: { running: boolean; state?: { isStreaming?: boolean; isCompacting?: boolean; contextUsage?: { percent: number | null; contextWindow: number; tokens: number | null } | null; systemPrompt?: string; thinkingLevel?: string } } };
+      const d = await res.json() as SessionData & { agentState?: { running: boolean; state?: AgentStateResponse } };
       setData(d);
       setActiveLeafId(d.leafId);
       setMessages(d.context.messages);
       setEntryIds(d.context.entryIds ?? []);
       setCurrentModelOverride(null);
       setError(null);
+      if (d.agentState?.state?.extensionStatuses) setExtensionStatuses(d.agentState.state.extensionStatuses);
+      if (d.agentState?.state?.extensionWidgets) setExtensionWidgets(d.agentState.state.extensionWidgets);
       // If no live agent state, fall back to thinking level from session file
       if (!d.agentState?.state?.thinkingLevel && d.context.thinkingLevel && d.context.thinkingLevel !== "off") {
         setThinkingLevel(d.context.thinkingLevel as ThinkingLevelOption);
@@ -375,31 +415,145 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, [ensureNewSession]);
 
-  const connectEvents = useCallback((sid: string) => {
+  const connectEvents = useCallback((sid: string): Promise<void> => {
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
       eventSourceRef.current = null;
     }
     const es = new EventSource(`/api/agent/${encodeURIComponent(sid)}/events`);
     eventSourceRef.current = es;
-    es.onmessage = (e) => {
-      try {
-        const event = JSON.parse(e.data) as AgentEvent;
-        handleAgentEventRef.current?.(event);
-      } catch {
-        // ignore
-      }
-    };
-    es.onerror = () => {
-      if (eventSourceRef.current === es && agentRunningRef.current) {
-        es.close();
-        eventSourceRef.current = null;
-        setTimeout(() => {
-          if (agentRunningRef.current) connectEvents(sid);
-        }, 1000);
-      }
-    };
+
+    return new Promise((resolve) => {
+      let settled = false;
+      const settle = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        resolve();
+      };
+      const timeout = setTimeout(settle, 1500);
+
+      es.onmessage = (e) => {
+        try {
+          const event = JSON.parse(e.data) as AgentEvent;
+          if (event.type === "connected") settle();
+          handleAgentEventRef.current?.(event);
+        } catch {
+          // ignore
+        }
+      };
+      es.onerror = () => {
+        settle();
+        if (eventSourceRef.current === es && agentRunningRef.current) {
+          es.close();
+          eventSourceRef.current = null;
+          setTimeout(() => {
+            if (agentRunningRef.current) void connectEvents(sid);
+          }, 1000);
+        }
+      };
+    });
   }, []);
+
+  const respondToExtensionUi = useCallback(async (
+    request: ExtensionUiDialogRequest,
+    response: { value: string } | { confirmed: boolean } | { cancelled: true },
+  ) => {
+    const sid = sessionIdRef.current;
+    setExtensionDialog((current) => current?.id === request.id ? null : current);
+    if (!sid) return;
+    try {
+      await sendAgentCommand(sid, {
+        type: "extension_ui_response",
+        id: request.id,
+        ...response,
+      });
+    } catch (e) {
+      console.error("Failed to send extension UI response:", e);
+    }
+  }, []);
+
+  const handleExtensionUiRequest = useCallback((request: ExtensionUiRequest) => {
+    switch (request.method) {
+      case "select":
+      case "confirm":
+      case "input":
+      case "editor":
+        setExtensionDialog(request);
+        break;
+      case "notify": {
+        const notice: ExtensionUiNotice = {
+          id: request.id,
+          message: request.message,
+          type: request.notifyType ?? "info",
+        };
+        setExtensionNotices((prev) => [...prev.slice(-3), notice]);
+        break;
+      }
+      case "setStatus":
+        setExtensionStatuses((prev) => {
+          const rest = prev.filter((item) => item.key !== request.statusKey);
+          return request.statusText ? [...rest, { key: request.statusKey, text: request.statusText }] : rest;
+        });
+        break;
+      case "setWidget":
+        setExtensionWidgets((prev) => {
+          const rest = prev.filter((item) => item.key !== request.widgetKey);
+          return request.widgetLines
+            ? [...rest, {
+                key: request.widgetKey,
+                lines: request.widgetLines,
+                placement: request.widgetPlacement ?? "aboveEditor",
+              }]
+            : rest;
+        });
+        break;
+      case "setTitle":
+        if (request.title) document.title = request.title;
+        break;
+      case "set_editor_text":
+        opts.chatInputRef?.current?.insertText(request.text);
+        break;
+    }
+  }, [opts.chatInputRef]);
+
+  const finishPromptWithoutStream = useCallback(async (sid: string | null = sessionIdRef.current, runId?: number) => {
+    try {
+      if (sid) await loadSession(sid);
+    } finally {
+      if (runId !== undefined && promptRunIdRef.current !== runId) return;
+      if (!agentRunningRef.current) return;
+      agentRunningRef.current = false;
+      setAgentRunning(false);
+      setAgentPhase(null);
+      setRetryInfo(null);
+      dispatch({ type: "end" });
+      onAgentEnd?.();
+    }
+  }, [loadSession, onAgentEnd]);
+
+  const waitForPromptSettlement = useCallback(async (sid: string, runId?: number) => {
+    await delay(PROMPT_SETTLE_INITIAL_DELAY_MS);
+    const startedAt = Date.now();
+
+    while (agentRunningRef.current && Date.now() - startedAt < PROMPT_SETTLE_MAX_MS) {
+      if (runId !== undefined && promptRunIdRef.current !== runId) return;
+      try {
+        const res = await fetch(`/api/agent/${encodeURIComponent(sid)}`);
+        if (res.ok) {
+          const data = await res.json() as { running?: boolean; state?: AgentStateResponse };
+          const state = data.state;
+          if (!data.running || !state || (!state.isStreaming && !state.isPromptRunning)) {
+            await finishPromptWithoutStream(sid, runId);
+            return;
+          }
+        }
+      } catch {
+        // SSE remains the primary completion path.
+      }
+      await delay(PROMPT_SETTLE_POLL_MS);
+    }
+  }, [finishPromptWithoutStream]);
 
   useEffect(() => {
     agentRunningRef.current = agentRunning;
@@ -423,13 +577,22 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           loadSession(sessionIdRef.current);
           fetch(`/api/agent/${encodeURIComponent(sessionIdRef.current)}`)
             .then((r) => r.json())
-            .then((d: { state?: { contextUsage?: { percent: number | null; contextWindow: number; tokens: number | null } | null; systemPrompt?: string } }) => {
+            .then((d: { state?: AgentStateResponse }) => {
               if (d.state?.contextUsage !== undefined) setContextUsage(d.state.contextUsage ?? null);
               if (d.state?.systemPrompt !== undefined) setSystemPrompt(d.state.systemPrompt ?? null);
+              if (d.state?.extensionStatuses !== undefined) setExtensionStatuses(d.state.extensionStatuses ?? []);
+              if (d.state?.extensionWidgets !== undefined) setExtensionWidgets(d.state.extensionWidgets ?? []);
             })
             .catch(() => {});
         }
         onAgentEnd?.();
+        break;
+      case "prompt_done":
+        if (!agentRunningRef.current) break;
+        void finishPromptWithoutStream(sessionIdRef.current);
+        break;
+      case "prompt_error":
+        setSlashCommandNotice({ type: "error", message: (event.errorMessage as string | undefined) ?? "Command failed" });
         break;
       case "message_start":
       case "message_update": {
@@ -495,13 +658,19 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           if (sessionIdRef.current) loadSession(sessionIdRef.current);
         }
         break;
+      case "extension_ui_request":
+        handleExtensionUiRequest(event as ExtensionUiRequest);
+        break;
     }
-  }, [loadSession, onAgentEnd]);
+  }, [finishPromptWithoutStream, handleExtensionUiRequest, loadSession, onAgentEnd]);
   handleAgentEventRef.current = handleAgentEvent;
 
   const handleSend = useCallback(async (message: string, images?: AttachedImage[]) => {
-    if (!message.trim() && !images?.length) return;
+    const trimmedMessage = message.trim();
+    if (!trimmedMessage && !images?.length) return;
     if (agentRunning) return;
+    const isSlashCommandPrompt = !images?.length && trimmedMessage.startsWith("/");
+    const promptRunId = promptRunIdRef.current + 1;
 
     const imageBlocks = images?.map((img) => ({ type: "image" as const, source: { type: "base64" as const, media_type: img.mimeType, data: img.data } }));
     const userMsg: AgentMessage = {
@@ -512,9 +681,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       timestamp: Date.now(),
     };
     setMessages((prev) => [...prev, userMsg]);
+    promptRunIdRef.current = promptRunId;
     agentRunningRef.current = true;
     setAgentRunning(true);
-    setAgentPhase({ kind: "waiting_model" });
+    setAgentPhase(isSlashCommandPrompt ? { kind: "running_command" } : { kind: "waiting_model" });
     dispatch({ type: "start" });
     pendingScrollToUserRef.current = true;
     completionScrollAllowedRef.current = true;
@@ -522,16 +692,18 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     const piImages = images?.map((img) => ({ type: "image" as const, data: img.data, mimeType: img.mimeType }));
 
     try {
+      let sentSessionId: string | null = null;
       if (isNew && newSessionCwd) {
         const selectedModel = newSessionModel;
         const existingSid = sessionIdRef.current ?? await ensuringNewSessionRef.current;
 
         if (existingSid) {
+          sentSessionId = existingSid;
           if (selectedModel) {
             setPendingModel(selectedModel);
             await sendAgentCommand(existingSid, { type: "set_model", provider: selectedModel.provider, modelId: selectedModel.modelId });
           }
-          connectEvents(existingSid);
+          await connectEvents(existingSid);
           await sendAgentCommand(existingSid, {
             type: "prompt",
             message,
@@ -547,10 +719,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               cwd: newSessionCwd,
-              type: "prompt",
-              message,
+              type: "ensure_session",
               toolNames,
-              ...(piImages?.length ? { images: piImages } : {}),
               ...(selectedModel ? { provider: selectedModel.provider, modelId: selectedModel.modelId } : {}),
               ...(thinkingLevel !== "auto" ? { thinkingLevel } : {}),
             }),
@@ -559,16 +729,26 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           const result = await res.json() as { sessionId: string };
           const realId = result.sessionId;
           sessionIdRef.current = realId;
-          connectEvents(realId);
+          sentSessionId = realId;
+          await connectEvents(realId);
+          await sendAgentCommand(realId, {
+            type: "prompt",
+            message,
+            ...(piImages?.length ? { images: piImages } : {}),
+          });
           promoteNewSession(1, message);
         }
       } else if (session) {
-        connectEvents(session.id);
+        sentSessionId = session.id;
+        await connectEvents(session.id);
         await sendAgentCommand(session.id, {
           type: "prompt",
           message,
           ...(piImages?.length ? { images: piImages } : {}),
         });
+      }
+      if (isSlashCommandPrompt && sentSessionId) {
+        void waitForPromptSettlement(sentSessionId, promptRunId);
       }
     } catch (e) {
       console.error("Failed to send message:", e);
@@ -577,7 +757,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       setAgentPhase(null);
       dispatch({ type: "end" });
     }
-  }, [isNew, newSessionCwd, newSessionModel, toolPreset, thinkingLevel, session, agentRunning, connectEvents, promoteNewSession]);
+  }, [isNew, newSessionCwd, newSessionModel, toolPreset, thinkingLevel, session, agentRunning, connectEvents, promoteNewSession, waitForPromptSettlement]);
 
   const handleAbort = useCallback(async () => {
     const sid = sessionIdRef.current;
@@ -859,10 +1039,15 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       loadSession(session.id, true, true).then((agentState) => {
         if (agentState?.running) {
           loadTools(session.id);
-          if (agentState.state?.isStreaming) {
+          if (agentState.state?.isStreaming || agentState.state?.isPromptRunning) {
+            agentRunningRef.current = true;
             setAgentRunning(true);
-            setAgentPhase({ kind: "waiting_model" });
-            connectEvents(session.id);
+            setAgentPhase(agentState.state.isStreaming ? { kind: "waiting_model" } : { kind: "running_command" });
+            dispatch({ type: "start" });
+            void connectEvents(session.id);
+            if (!agentState.state.isStreaming && agentState.state.isPromptRunning) {
+              void waitForPromptSettlement(session.id);
+            }
           }
         }
         if (agentState?.state) {
@@ -870,6 +1055,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           if (agentState.state.contextUsage !== undefined) setContextUsage(agentState.state.contextUsage ?? null);
           if (agentState.state.systemPrompt !== undefined) setSystemPrompt(agentState.state.systemPrompt ?? null);
           if (agentState.state.thinkingLevel !== undefined) setThinkingLevel((agentState.state.thinkingLevel as ThinkingLevelOption) ?? "auto");
+          if (agentState.state.extensionStatuses !== undefined) setExtensionStatuses(agentState.state.extensionStatuses ?? []);
+          if (agentState.state.extensionWidgets !== undefined) setExtensionWidgets(agentState.state.extensionWidgets ?? []);
         }
       });
     }
@@ -967,6 +1154,15 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   }, [compactResult]);
 
   useEffect(() => {
+    if (extensionNotices.length === 0) return;
+    const oldest = extensionNotices[0];
+    const t = setTimeout(() => {
+      setExtensionNotices((prev) => prev.filter((notice) => notice.id !== oldest.id));
+    }, 5000);
+    return () => clearTimeout(t);
+  }, [extensionNotices]);
+
+  useEffect(() => {
     setSessionStatsOverride(null);
   }, [messages.length, contextUsage?.tokens, contextUsage?.percent, contextUsage?.contextWindow]);
 
@@ -977,6 +1173,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     retryInfo, contextUsage, systemPrompt, forkingEntryId,
     isCompacting, compactError, compactResult, currentModel, displayModel, sessionStats,
     slashCommands, slashCommandsLoading, slashCommandNotice,
+    extensionDialog, extensionNotices, extensionStatuses, extensionWidgets, respondToExtensionUi,
     isAutoModelSelection: isNew && newSessionModel === null,
     agentPhase,
     isNew,

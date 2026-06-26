@@ -69,6 +69,47 @@ interface ExtensionRunnerLike {
     description?: string;
     sourceInfo: SlashCommandInfo["sourceInfo"];
   }>;
+  setUIContext?(uiContext?: unknown, mode?: "tui" | "rpc" | "json" | "print"): void;
+}
+
+type DialogOptionsLike = {
+  signal?: AbortSignal;
+  timeout?: number;
+};
+
+type WidgetOptionsLike = {
+  placement?: "aboveEditor" | "belowEditor";
+};
+
+export interface ExtensionUiContextLike {
+  select(title: string, options: string[], opts?: DialogOptionsLike): Promise<string | undefined>;
+  confirm(title: string, message: string, opts?: DialogOptionsLike): Promise<boolean>;
+  input(title: string, placeholder?: string, opts?: DialogOptionsLike): Promise<string | undefined>;
+  editor(title: string, prefill?: string, opts?: DialogOptionsLike): Promise<string | undefined>;
+  notify(message: string, type?: "info" | "warning" | "error"): void;
+  onTerminalInput(): () => void;
+  setStatus(key: string, text: string | undefined): void;
+  setWorkingMessage(message?: string): void;
+  setWorkingVisible(visible: boolean): void;
+  setWorkingIndicator(options?: { frames?: string[]; intervalMs?: number }): void;
+  setHiddenThinkingLabel(label?: string): void;
+  setWidget(key: string, content: string[] | ((...args: never[]) => unknown) | undefined, options?: WidgetOptionsLike): void;
+  setFooter(factory: unknown): void;
+  setHeader(factory: unknown): void;
+  setTitle(title: string): void;
+  custom<T = unknown>(...args: unknown[]): Promise<T>;
+  pasteToEditor(text: string): void;
+  setEditorText(text: string): void;
+  getEditorText(): string;
+  addAutocompleteProvider(): void;
+  setEditorComponent(): void;
+  getEditorComponent(): undefined;
+  readonly theme: unknown;
+  getAllThemes(): unknown[];
+  getTheme(name: string): undefined;
+  setTheme(theme: unknown): { success: boolean; error?: string };
+  getToolsExpanded(): boolean;
+  setToolsExpanded(expanded: boolean): void;
 }
 
 export interface AgentSessionLike {
