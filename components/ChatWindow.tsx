@@ -59,6 +59,10 @@ const TYPEWRITER_PHRASES = [
   "rubber-duck with me.",
 ];
 
+const CHAT_MINIMAP_WIDTH = 36;
+const CHAT_COLUMN_PADDING = 16;
+const CHAT_INPUT_RIGHT_PADDING = CHAT_COLUMN_PADDING + CHAT_MINIMAP_WIDTH;
+
 function Typewriter({ phrases }: { phrases: string[] }) {
   const [phraseIdx, setPhraseIdx] = useState(() => Math.floor(Math.random() * phrases.length));
   const [text, setText] = useState("");
@@ -421,8 +425,15 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
       </div>
 
       <div className="relative">
-        <div className="mx-auto max-w-[820px] px-4">
-          <ExtensionWidgets widgets={belowEditorWidgets} />
+        <div
+          style={{
+            padding: `0 ${CHAT_COLUMN_PADDING}px`,
+            paddingRight: CHAT_INPUT_RIGHT_PADDING,
+          }}
+        >
+          <div style={{ maxWidth: 820, margin: "0 auto" }}>
+            <ExtensionWidgets widgets={belowEditorWidgets} />
+          </div>
         </div>
         {chatInputElement}
       </div>
