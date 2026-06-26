@@ -1,106 +1,112 @@
 # pi-web
 
-[pi 编程智能体](https://github.com/badlogic/pi-mono) 的本地网页界面。它会读取本机的 pi 会话文件，在浏览器里提供会话管理、实时对话、模型配置、技能管理和项目文件预览。
+[中文文档](./README.zh-CN.md)
 
-## 快速开始
+Local web UI for the [pi coding agent](https://github.com/badlogic/pi-mono). pi-web reads your local pi session files and gives you a browser workspace for session browsing, real-time chat, model configuration, skill management, and project file preview.
 
-**无需安装，直接运行：**
+![Pi Web shows the same pi session with structured Markdown, tool calls, and project navigation beside the CLI](./docs/screenshot2.png)
+
+The same pi session in CLI and pi-web: structured tool calls, readable Markdown, session browsing, and cleaner results.
+
+## Quick Start
+
+**Run without installing:**
 
 ```bash
 npx @agegr/pi-web@latest
 ```
 
-**或全局安装后使用：**
+**Or install globally:**
 
 ```bash
 npm install -g @agegr/pi-web
 pi-web
 ```
 
-启动后打开 [http://localhost:30141](http://localhost:30141)。命令行版本会在服务就绪后尝试自动打开浏览器。
+Then open [http://localhost:30141](http://localhost:30141). The CLI will try to open the browser automatically after the server is ready.
 
-**可选参数：**
+**Options:**
 
 ```bash
-pi-web --port 8080              # 自定义端口
-pi-web --hostname 127.0.0.1     # 仅本机访问
-pi-web -p 8080 -H 127.0.0.1     # 组合使用
+pi-web --port 8080              # custom port
+pi-web --hostname 127.0.0.1     # local access only
+pi-web -p 8080 -H 127.0.0.1     # combine options
 
-PORT=8080 pi-web                # 也支持环境变量
+PORT=8080 pi-web                # environment variable is also supported
 ```
 
-## 功能介绍
+## Features
 
-- **把历史工作接回来**：打开网页就能按项目找到以前的 pi 对话，不必在终端里翻文件或记住会话路径。
-- **放心试不同方向**：可以从某条历史消息重新开始，也可以复制出一条独立的新路线，探索方案时不怕弄乱原来的对话。
-- **边聊边看项目文件**：左侧浏览项目文件，右侧打开源码、文档、图片、音频和 PDF；文件变化会自动刷新，适合边让 agent 改边检查结果。
-- **随时掌握会话状态**：在顶部就能看到上下文占用、花费、压缩结果和系统提示，长会话不再像黑箱。
-- **少离开当前界面**：模型、登录/API key、模型测试和技能开关都能在网页里处理，配置 agent 时不用在多个工具之间来回切换。
+- **Pick work back up**: browse previous pi conversations by project without digging through terminal history or session paths.
+- **Try different directions safely**: continue from an earlier message or fork a session into a separate route.
+- **Chat beside the project**: browse files on the left and preview source, docs, images, audio, and PDFs on the right while the agent works.
+- **See session state clearly**: context usage, cost, compaction state, and system prompt details are visible from the top bar.
+- **Configure less from the terminal**: manage models, login/API keys, model tests, and skill switches from the web UI.
 
-## 注意事项
+## Notes
 
-- **数据目录**：默认读取 `~/.pi/agent/sessions` 下的会话文件。可通过环境变量 `PI_CODING_AGENT_DIR` 指定其他 pi agent 目录。
-- **会话文件**：路径形如 `~/.pi/agent/sessions/<编码后的工作目录>/<时间戳>_<uuid>.jsonl`。
-- **模型配置**：Models 面板读写 pi agent 目录下的 `models.json`，模型列表和默认模型由 pi 的配置解析得到。
-- **文件访问**：文件浏览和预览面向当前选择的项目目录，以及会话中已出现过的工作目录。
-- **Fork 与会话内分支不同**：Fork 会创建新的 `.jsonl` 文件；“Edit from here” 是同一会话文件里的分支。
+- **Data directory**: pi-web reads `~/.pi/agent/sessions` by default. Set `PI_CODING_AGENT_DIR` to point at another pi agent directory.
+- **Session files**: files are stored as `~/.pi/agent/sessions/<encoded-cwd>/<timestamp>_<uuid>.jsonl`.
+- **Model config**: the Models panel reads and writes `models.json` in the pi agent directory. Model lists and defaults come from pi's config.
+- **File access**: file browsing and preview are scoped to the selected project directory and working directories that appear in sessions.
+- **Forks vs in-session branches**: Fork creates a new `.jsonl` file. "Edit from here" creates another branch inside the same session file.
 
-## 开发
+## Development
 
 ```bash
 npm install
 npm run dev
 ```
 
-本地开发端口为 [http://localhost:30141](http://localhost:30141)。
+The local dev server runs at [http://localhost:30141](http://localhost:30141).
 
-常用检查：
+Common checks:
 
 ```bash
 node_modules/.bin/tsc --noEmit
 npm run lint
 ```
 
-开发时不要运行 `next build` / `npm run build`，它会写入 `.next/`，容易影响正在运行的 dev server。发布流程再执行构建。
+Avoid running `next build` / `npm run build` during local development. It writes to `.next/` and can interfere with the dev server; leave builds for release work.
 
-## 项目结构
+## Project Structure
 
-```
+```text
 app/
   api/
-    agent/          # 创建/驱动 AgentSession，提供 SSE 事件流
-    auth/           # OAuth 和 API key 管理
-    cwd/validate/   # 自定义工作目录校验
-    default-cwd/    # 获取 pi 默认工作目录
-    files/          # 文件列表、读取、预览、watch
-    home/           # 当前用户 home 目录
-    models/         # 可用模型、默认模型、thinking levels
-    models-config/  # 读写 models.json、测试模型
-    sessions/       # 会话读取、重命名、删除、上下文、HTML 导出
-    skills/         # skills 列表、搜索、安装、启停
+    agent/          # creates/drives AgentSession and exposes SSE events
+    auth/           # OAuth and API key management
+    cwd/validate/   # custom working directory validation
+    default-cwd/    # pi default working directory lookup
+    files/          # file listing, reading, preview, and watching
+    home/           # current user home directory
+    models/         # available models, default model, thinking levels
+    models-config/  # read/write models.json and test models
+    sessions/       # session reads, rename, delete, context, HTML export
+    skills/         # skill listing, search, install, enable/disable
 components/
-  AppShell.tsx        # 主布局、URL 状态、顶部面板、文件标签
-  SessionSidebar.tsx  # 项目选择、会话树、Explorer
-  ChatWindow.tsx      # 消息区、SSE、拖拽图片、minimap
-  ChatInput.tsx       # 输入栏、模型/工具/thinking/compact/slash controls
-  MessageView.tsx     # 消息、thinking、tool call/result 渲染
-  ModelsConfig.tsx    # 模型和认证配置面板
-  SkillsConfig.tsx    # 技能管理面板
-  FileExplorer.tsx    # 文件树
-  FileViewer.tsx      # 源码、diff、图片、音频、PDF、DOCX 预览
+  AppShell.tsx        # main layout, URL state, top panels, file tabs
+  SessionSidebar.tsx  # project selector, session tree, Explorer
+  ChatWindow.tsx      # messages, SSE, image drag/drop, minimap
+  ChatInput.tsx       # input bar, model/tools/thinking/compact/slash controls
+  MessageView.tsx     # message, thinking, tool call/result rendering
+  ModelsConfig.tsx    # model and auth configuration panel
+  SkillsConfig.tsx    # skill management panel
+  FileExplorer.tsx    # file tree
+  FileViewer.tsx      # source, diff, image, audio, PDF, DOCX preview
 lib/
-  rpc-manager.ts      # AgentSessionWrapper 生命周期和全局 registry
-  session-reader.ts   # 解析 .jsonl 会话文件和分支上下文
-  normalize.ts        # 规范化 toolCall 字段名
-  file-access.ts      # 文件读取安全边界
-  file-paths.ts       # 文件路径编码/相对路径工具
-  markdown.ts         # Markdown/Mermaid/KaTeX 插件配置
-  pi-types.ts         # pi 相关类型
+  rpc-manager.ts      # AgentSessionWrapper lifecycle and global registry
+  session-reader.ts   # parses .jsonl session files and branch contexts
+  normalize.ts        # normalizes toolCall field names
+  file-access.ts      # file read safety boundary
+  file-paths.ts       # path encoding and relative path helpers
+  markdown.ts         # Markdown/Mermaid/KaTeX plugin configuration
+  pi-types.ts         # pi-related types
 hooks/
-  useAgentSession.ts  # 会话加载、发送命令、SSE 状态机
-  useAudio.ts         # 完成提示音
-  useDragDrop.ts      # 图片拖拽
-  useTheme.ts         # 主题切换
+  useAgentSession.ts  # session loading, command sending, SSE state machine
+  useAudio.ts         # completion sound
+  useDragDrop.ts      # image drag/drop
+  useTheme.ts         # theme switching
 bin/
-  pi-web.js           # npm CLI 入口
+  pi-web.js           # npm CLI entrypoint
 ```
