@@ -2,6 +2,7 @@
 
 import React, { useRef, useState, useCallback, useEffect, useImperativeHandle, forwardRef, KeyboardEvent } from "react";
 import type { BuiltinSlashCommandResult, CompactResultInfo, SlashCommandInfo } from "@/hooks/useAgentSession";
+import { useIsMobile } from "@/hooks/useIsMobile";
 
 export interface AttachedImage {
   data: string;   // base64, no prefix
@@ -132,6 +133,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   soundEnabled, onSoundToggle,
   onPromptWithStreamingBehavior,
 }: Props, ref) {
+  const isMobile = useIsMobile();
   const [value, setValue] = useState("");
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const [modelDropdownRect, setModelDropdownRect] = useState<{ top: number; left: number; width: number } | null>(null);
@@ -881,7 +883,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         </div>
 
         {/* Bottom bar: left | center (context) | right */}
-        <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 6 }}>
+        <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 6, flexWrap: isMobile ? "wrap" : undefined }}>
 
           {/* LEFT: attach + model selector (idle) or steer/followup toggle (streaming) */}
           <div style={{ flex: "0 0 auto", display: "flex", alignItems: "center", gap: 2 }}>
@@ -963,13 +965,19 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                     const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
                     const bottom = viewportHeight - modelDropdownRect.top + 6;
                     const maxH = Math.max(120, Math.min(modelDropdownRect.top - 8, viewportHeight * 0.6));
+                    // On mobile, pin to a small left margin and cap width to the
+                    // viewport so long model names never push the panel off-screen.
+                    const panelPos: React.CSSProperties = isMobile
+                      ? { left: 8, right: 8, maxWidth: "calc(100vw - 16px)" }
+                      : { left: modelDropdownRect.left, width: "max-content", minWidth: modelDropdownRect.width };
                     return (
                       <div ref={modelDropdownPanelRef} style={{
                       position: "fixed",
-                      bottom, left: modelDropdownRect.left,
+                      bottom,
+                      ...panelPos,
                       zIndex: 500, background: "var(--bg)", border: "1px solid var(--border)",
                       borderRadius: 8, boxShadow: "0 -4px 16px rgba(0,0,0,0.10)",
-                      overflow: "hidden", width: "max-content", minWidth: modelDropdownRect.width, maxHeight: maxH, overflowY: "auto",
+                      overflow: "hidden", maxHeight: maxH, overflowY: "auto",
                       }}>
                       {modelsByProvider.map((group, gi) => (
                         <div key={group.provider}>
