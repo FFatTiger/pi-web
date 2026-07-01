@@ -128,6 +128,7 @@ export interface AgentSessionLike {
   readonly promptTemplates: readonly PromptTemplateLike[];
   readonly resourceLoader: ResourceLoaderLike;
 
+  reload(options?: { beforeSessionStart?: () => void | Promise<void> }): Promise<void>;
   subscribe(listener: (event: AgentSessionEvent) => void): () => void;
   prompt(text: string, options?: {
     images?: Array<{ type: "image"; data: string; mimeType: string }>;

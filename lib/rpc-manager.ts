@@ -301,6 +301,22 @@ export class AgentSessionWrapper {
         return null;
       }
 
+      case "reload": {
+        this.extensionStatuses.clear();
+        this.extensionWidgets.clear();
+        const uiContext = this.createExtensionUiContext();
+        await this.inner.reload();
+        const bindable = this.inner as AgentSessionLike & {
+          bindExtensions?: (bindings: { uiContext?: unknown; mode?: "tui" | "rpc" | "json" | "print" }) => Promise<void>;
+        };
+        if (bindable.bindExtensions) {
+          await bindable.bindExtensions({ uiContext, mode: "rpc" });
+        } else {
+          this.inner.extensionRunner.setUIContext?.(uiContext, "rpc");
+        }
+        return { success: true };
+      }
+
       case "abort_compaction": {
         this.inner.abortCompaction();
         return null;
