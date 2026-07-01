@@ -2,6 +2,7 @@
 
 import React, { useRef, useState, useCallback, useEffect, useImperativeHandle, forwardRef, KeyboardEvent } from "react";
 import type { BuiltinSlashCommandResult, CompactResultInfo, SlashCommandInfo } from "@/hooks/useAgentSession";
+import { useIsMobile } from "@/hooks/useIsMobile";
 
 export interface AttachedImage {
   data: string;   // base64, no prefix
@@ -132,11 +133,13 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   soundEnabled, onSoundToggle,
   onPromptWithStreamingBehavior,
 }: Props, ref) {
+  const isMobile = useIsMobile();
   const [value, setValue] = useState("");
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const [modelDropdownRect, setModelDropdownRect] = useState<{ top: number; left: number; width: number } | null>(null);
   const [toolDropdownOpen, setToolDropdownOpen] = useState(false);
   const [thinkingDropdownOpen, setThinkingDropdownOpen] = useState(false);
+  const [controlsMenuOpen, setControlsMenuOpen] = useState(false);
   const [attachedImages, setAttachedImages] = useState<AttachedImage[]>([]);
   const [slashMenuOpen, setSlashMenuOpen] = useState(false);
   const [slashActiveIndex, setSlashActiveIndex] = useState(0);
@@ -146,6 +149,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const modelDropdownPanelRef = useRef<HTMLDivElement>(null);
   const toolDropdownRef = useRef<HTMLDivElement>(null);
   const thinkingDropdownRef = useRef<HTMLDivElement>(null);
+  const controlsMenuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isComposingRef = useRef(false);
   const lastCompositionEndAtRef = useRef(0);
@@ -512,6 +516,12 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const compactResultText = compactResult
     ? `${compactVerb} ${formatTokenCount(compactResult.tokensBefore)} -> ${formatTokenCount(compactResult.estimatedTokensAfter)} tokens (${formatTokenCount(compactSavedTokens)} saved)`
     : null;
+  const thinkingDisplayLabel = (() => {
+    const lvl = thinkingLevel ?? "auto";
+    if (lvl === "auto" || !thinkingLevelMap) return lvl;
+    return thinkingLevelMap[lvl] ?? lvl;
+  })();
+  const toolPresetLabel = Object.entries(TOOL_PRESET_MAP).find(([, v]) => v === (toolPreset ?? "default"))?.[0] ?? "default";
 
   // Close dropdowns on outside click
   useEffect(() => {
@@ -528,10 +538,17 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       if (thinkingDropdownRef.current && !thinkingDropdownRef.current.contains(e.target as Node)) {
         setThinkingDropdownOpen(false);
       }
+      if (controlsMenuRef.current && !controlsMenuRef.current.contains(e.target as Node)) {
+        setControlsMenuOpen(false);
+      }
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, []);
+
+  useEffect(() => {
+    if (!isMobile) setControlsMenuOpen(false);
+  }, [isMobile]);
 
 
 
@@ -541,7 +558,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         flexShrink: 0,
         background: "transparent",
         padding: "0 16px 8px",
-        paddingRight: 52, // 16px base + 36px for ChatMinimap alignment
+        paddingRight: isMobile ? 16 : 52, // desktop: 16px base + 36px for ChatMinimap alignment
       }}
     >
       {/* Hidden file input */}
@@ -881,10 +898,16 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         </div>
 
         {/* Bottom bar: left | center (context) | right */}
-        <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 6 }}>
+        <div style={{
+          marginTop: 8,
+          display: isMobile ? "grid" : "flex",
+          gridTemplateColumns: isMobile ? "minmax(0, 1fr) auto" : undefined,
+          alignItems: "center",
+          gap: 6,
+        }}>
 
           {/* LEFT: attach + model selector (idle) or steer/followup toggle (streaming) */}
-          <div style={{ flex: "0 0 auto", display: "flex", alignItems: "center", gap: 2 }}>
+          <div style={{ flex: isMobile ? "1 1 auto" : "0 0 auto", minWidth: 0, display: "flex", alignItems: "center", gap: 2 }}>
             <button
               onClick={() => fileInputRef.current?.click()}
               disabled={isStreaming}
@@ -917,7 +940,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             </button>
             {/* Model selector — visible always, disabled during streaming */}
             {modelOptions.length > 0 && currentName && onModelChange && (
-                <div ref={dropdownRef} style={{ position: "relative" }}>
+                <div ref={dropdownRef} style={{ position: "relative", flex: isMobile ? "1 1 auto" : undefined, minWidth: 0 }}>
                   <button
                     onClick={(e) => {
                       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -927,9 +950,12 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                     disabled={isStreaming}
                     style={{
                       display: "flex", alignItems: "center", gap: 6,
-                      padding: "8px 12px",
+                      justifyContent: isMobile ? "flex-start" : undefined,
+                      padding: isMobile ? "8px 10px" : "8px 12px",
                       height: 32,
-                      maxWidth: 220, overflow: "hidden",
+                      width: isMobile ? "100%" : undefined,
+                      maxWidth: isMobile ? "100%" : 220,
+                      overflow: "hidden",
                       background: modelDropdownOpen ? "var(--bg-hover)" : "none",
                       border: "none",
                       borderRadius: 9,
@@ -963,13 +989,19 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                     const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
                     const bottom = viewportHeight - modelDropdownRect.top + 6;
                     const maxH = Math.max(120, Math.min(modelDropdownRect.top - 8, viewportHeight * 0.6));
+                    // On mobile, pin to a small left margin and cap width to the
+                    // viewport so long model names never push the panel off-screen.
+                    const panelPos: React.CSSProperties = isMobile
+                      ? { left: 8, right: 8, maxWidth: "calc(100vw - 16px)" }
+                      : { left: modelDropdownRect.left, width: "max-content", minWidth: modelDropdownRect.width };
                     return (
                       <div ref={modelDropdownPanelRef} style={{
                       position: "fixed",
-                      bottom, left: modelDropdownRect.left,
+                      bottom,
+                      ...panelPos,
                       zIndex: 500, background: "var(--bg)", border: "1px solid var(--border)",
                       borderRadius: 8, boxShadow: "0 -4px 16px rgba(0,0,0,0.10)",
-                      overflow: "hidden", width: "max-content", minWidth: modelDropdownRect.width, maxHeight: maxH, overflowY: "auto",
+                      overflow: "hidden", maxHeight: maxH, overflowY: "auto",
                       }}>
                       {modelsByProvider.map((group, gi) => (
                         <div key={group.provider}>
@@ -1019,19 +1051,93 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           </div>
 
           {/* spacer */}
-          <div style={{ flex: 1 }} />
+          {!isMobile && <div style={{ flex: 1 }} />}
 
           {/* RIGHT: thinking + tools preset + compact + sound (idle) | Stop + sound (streaming) */}
-          <div style={{ flex: "0 0 auto", display: "flex", alignItems: "center", gap: 2, marginLeft: "auto" }}>
+          <div ref={controlsMenuRef} style={{
+            flex: "0 0 auto",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "flex-end",
+            position: "relative",
+            marginLeft: isMobile ? 0 : "auto",
+          }}>
+            {isMobile && (
+              <button
+                type="button"
+                title={controlsMenuOpen ? undefined : "更多控制"}
+                aria-label="更多控制"
+                aria-expanded={controlsMenuOpen}
+                aria-hidden={controlsMenuOpen || undefined}
+                tabIndex={controlsMenuOpen ? -1 : undefined}
+                onClick={() => {
+                  setModelDropdownOpen(false);
+                  setControlsMenuOpen(true);
+                }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  width: "100%",
+                  height: 32,
+                  padding: "8px 10px",
+                  background: "none",
+                  border: "none",
+                  borderRadius: 9,
+                  color: "var(--text-muted)",
+                  cursor: controlsMenuOpen ? "default" : "pointer",
+                  fontSize: 12,
+                  fontWeight: 500,
+                  visibility: controlsMenuOpen ? "hidden" : "visible",
+                  pointerEvents: controlsMenuOpen ? "none" : "auto",
+                  transition: "background 0.12s, color 0.12s",
+                }}
+                onMouseEnter={(e) => {
+                  if (controlsMenuOpen) return;
+                  e.currentTarget.style.background = "var(--bg-hover)";
+                  e.currentTarget.style.color = "var(--text)";
+                }}
+                onMouseLeave={(e) => {
+                  if (controlsMenuOpen) return;
+                  e.currentTarget.style.background = "none";
+                  e.currentTarget.style.color = "var(--text-muted)";
+                }}
+              >
+                More
+              </button>
+            )}
+            <div style={{
+              display: isMobile ? (controlsMenuOpen ? "flex" : "none") : "flex",
+              alignItems: "center",
+              gap: isMobile ? 1 : 2,
+              ...(isMobile ? {
+                position: "absolute",
+                right: 0,
+                bottom: 0,
+                zIndex: 60,
+                padding: 1,
+                width: "max-content",
+                maxWidth: "calc(100vw - 32px)",
+                flexWrap: "nowrap",
+                justifyContent: "flex-end",
+                border: "1px solid color-mix(in srgb, var(--border) 72%, transparent)",
+                borderRadius: 10,
+                background: "color-mix(in srgb, var(--bg-panel) 92%, var(--bg))",
+                boxShadow: "0 8px 24px rgba(0,0,0,0.14)",
+                backdropFilter: "blur(10px)",
+              } : null),
+            }}>
             {!isStreaming && onThinkingLevelChange && (
               <div ref={thinkingDropdownRef} style={{ position: "relative" }}>
                 <button
                   onClick={() => !isStreaming && setThinkingDropdownOpen((v) => !v)}
                   disabled={isStreaming}
-                  title="切换推理强度"
+                  title={`切换推理强度：${thinkingDisplayLabel}`}
+                  aria-label="切换推理强度"
                   style={{
-                    display: "flex", alignItems: "center", gap: 5,
-                    padding: "8px 12px",
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
+                    padding: isMobile ? "0 6px" : "8px 12px",
+                    width: isMobile ? "auto" : undefined,
                     height: 32,
                     background: thinkingDropdownOpen ? "var(--bg-hover)" : "none",
                     border: "none",
@@ -1057,12 +1163,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                     <line x1="7" y1="18" x2="12" y2="18" />
                     <line x1="8" y1="21" x2="11" y2="21" />
                   </svg>
-                  <span>{(() => {
-                    const lvl = thinkingLevel ?? "auto";
-                    if (lvl === "auto" || !thinkingLevelMap) return lvl;
-                    const mapped = thinkingLevelMap[lvl];
-                    return mapped != null ? mapped : lvl;
-                  })()}</span>
+                  {(!isMobile || controlsMenuOpen) && <span style={{ whiteSpace: "nowrap" }}>{thinkingDisplayLabel}</span>}
                 </button>
                 {thinkingDropdownOpen && (
                   <div style={{
@@ -1118,10 +1219,12 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 <button
                   onClick={() => !isStreaming && setToolDropdownOpen((v) => !v)}
                   disabled={isStreaming}
-                  title="切换工具预设"
+                  title={`切换工具预设：${toolPresetLabel}`}
+                  aria-label="切换工具预设"
                   style={{
-                    display: "flex", alignItems: "center", gap: 5,
-                    padding: "8px 12px",
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
+                    padding: isMobile ? "0 6px" : "8px 12px",
+                    width: isMobile ? "auto" : undefined,
                     height: 32,
                     background: toolDropdownOpen ? "var(--bg-hover)" : "none",
                     border: "none",
@@ -1145,7 +1248,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
                   </svg>
-                  <span>{Object.entries(TOOL_PRESET_MAP).find(([, v]) => v === (toolPreset ?? "default"))?.[0] ?? "default"}</span>
+                  {(!isMobile || controlsMenuOpen) && <span style={{ whiteSpace: "nowrap" }}>{toolPresetLabel}</span>}
                 </button>
                 {toolDropdownOpen && (
                   <div style={{
@@ -1205,8 +1308,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                   onClick={isCompacting ? onAbortCompaction : onCompact}
                   disabled={isStreaming && !isCompacting}
                   style={{
-                    display: "flex", alignItems: "center", gap: 5,
-                    padding: "8px 12px",
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
+                    padding: isMobile ? "0 6px" : "8px 12px",
+                    width: isMobile ? "auto" : undefined,
                     height: 32,
                     background: isCompacting ? "rgba(239,68,68,0.08)" : "none",
                     border: "none",
@@ -1226,14 +1330,15 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                     e.currentTarget.style.color = isCompacting ? "#ef4444" : "var(--text-muted)";
                   }}
                   title={isCompacting ? "停止压缩" : "压缩上下文"}
+                  aria-label={isCompacting ? "停止压缩" : "压缩上下文"}
                 >
                   {isCompacting ? (
-                    <><svg width="10" height="10" viewBox="0 0 10 10" fill="none"><rect x="2" y="2" width="6" height="6" rx="1" fill="currentColor" /></svg>Compacting…</>
+                    <><svg width="10" height="10" viewBox="0 0 10 10" fill="none"><rect x="2" y="2" width="6" height="6" rx="1" fill="currentColor" /></svg>{(!isMobile || controlsMenuOpen) && <span style={{ whiteSpace: "nowrap" }}>Compacting…</span>}</>
                   ) : (
                     <><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <polyline points="4 14 10 14 10 20" /><polyline points="20 10 14 10 14 4" />
                       <line x1="10" y1="14" x2="3" y2="21" /><line x1="21" y1="3" x2="14" y2="10" />
-                    </svg>Compact</>
+                    </svg>{(!isMobile || controlsMenuOpen) && <span style={{ whiteSpace: "nowrap" }}>Compact</span>}</>
                   )}
                 </button>
               </div>
@@ -1270,9 +1375,12 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               <button
                 onClick={onSoundToggle}
                 title={soundEnabled ? "关闭完成提示音" : "开启完成提示音"}
+                aria-label={soundEnabled ? "关闭完成提示音" : "开启完成提示音"}
                 style={{
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  width: 32, height: 32, padding: 0,
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
+                  width: isMobile ? 32 : 32,
+                  height: 32,
+                  padding: 0,
                   background: "none",
                   border: "none",
                   borderRadius: 9,
@@ -1307,6 +1415,47 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 )}
               </button>
             )}
+            {isMobile && controlsMenuOpen && (
+              <button
+                type="button"
+                title="收起控制"
+                aria-label="收起控制"
+                aria-expanded={true}
+                onClick={() => {
+                  setToolDropdownOpen(false);
+                  setThinkingDropdownOpen(false);
+                  setControlsMenuOpen(false);
+                }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  width: 36,
+                  height: 32,
+                  padding: 0,
+                  marginLeft: 0,
+                  background: "var(--bg-hover)",
+                  border: "none",
+                  borderLeft: "1px solid color-mix(in srgb, var(--border) 72%, transparent)",
+                  borderRadius: "0 9px 9px 0",
+                  color: "var(--text)",
+                  cursor: "pointer",
+                  transition: "background 0.12s, color 0.12s",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = "var(--bg-selected)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "var(--bg-hover)";
+                }}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            )}
+            </div>
           </div>
 
         </div>

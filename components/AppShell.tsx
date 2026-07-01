@@ -10,6 +10,7 @@ import { ModelsConfig } from "./ModelsConfig";
 import { SkillsConfig } from "./SkillsConfig";
 import { BranchNavigator } from "./BranchNavigator";
 import { useTheme } from "@/hooks/useTheme";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import type { SessionInfo, SessionTreeNode } from "@/lib/types";
 import type { ChatInputHandle } from "./ChatInput";
 import type { SessionStatsInfo } from "@/lib/pi-types";
@@ -39,6 +40,7 @@ export function AppShell() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { isDark, toggleTheme } = useTheme();
+  const isMobile = useIsMobile();
   const [selectedSession, setSelectedSession] = useState<SessionInfo | null>(null);
   // When user clicks +, we only store the cwd — no fake session id
   const [newSessionCwd, setNewSessionCwd] = useState<string | null>(null);
@@ -49,6 +51,15 @@ export function AppShell() {
   const [modelsRefreshKey, setModelsRefreshKey] = useState(0);
   const [skillsConfigOpen, setSkillsConfigOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [mobileSidebarReady, setMobileSidebarReady] = useState(false);
+  // On mobile the sidebar is an overlay drawer; hide it by default so the chat
+  // is visible on load. Runs once the breakpoint resolves after hydration.
+  useEffect(() => {
+    if (isMobile) setSidebarOpen(false);
+  }, [isMobile]);
+  useEffect(() => {
+    setMobileSidebarReady(true);
+  }, []);
   const chatInputRef = useRef<ChatInputHandle | null>(null);
   const topBarRef = useRef<HTMLDivElement>(null);
 
@@ -106,12 +117,19 @@ export function AppShell() {
   const [topPanelPos, setTopPanelPos] = useState<{ top: number; left: number; width: number } | null>(null);
 
   const toggleTopPanel = useCallback((panel: "branches" | "system" | "session") => {
+    if (isMobile) setSidebarOpen(false);
     setActiveTopPanel((cur) => cur === panel ? null : panel);
-  }, []);
+  }, [isMobile]);
 
   const openSessionStatsPanel = useCallback(() => {
+    if (isMobile) setSidebarOpen(false);
     setActiveTopPanel("session");
-  }, []);
+  }, [isMobile]);
+
+  const handleSidebarToggle = useCallback(() => {
+    if (isMobile) setActiveTopPanel(null);
+    setSidebarOpen((open) => !open);
+  }, [isMobile]);
 
   useEffect(() => {
     if (!activeTopPanel || !topBarRef.current) return;
@@ -173,6 +191,8 @@ export function AppShell() {
     setSessionKey((k) => k + 1);
     setSystemPrompt(null);
     setInitialSessionRestored(true);
+    // On mobile, collapse the overlay drawer so the chat is revealed after pick.
+    if (isMobile && !isRestore) setSidebarOpen(false);
     if (isRestore) {
       // Suppress the redundant sessionKey bump that would come from the
       // onCwdChange effect firing after setSelectedCwd in the sidebar
@@ -183,7 +203,7 @@ export function AppShell() {
     if (!isRestore) {
       router.replace(`?session=${encodeURIComponent(session.id)}`, { scroll: false });
     }
-  }, [router]);
+  }, [router, isMobile]);
 
   const handleNewSession = useCallback((_sessionId: string, cwd: string) => {
     setSelectedSession(null);
@@ -193,8 +213,9 @@ export function AppShell() {
     setBranchActiveLeafId(null);
     setSystemPrompt(null);
     setActiveTopPanel(null);
+    if (isMobile) setSidebarOpen(false);
     router.replace("/", { scroll: false });
-  }, [router]);
+  }, [router, isMobile]);
 
   // Called by ChatWindow when a new session gets its real id from pi
   const handleSessionCreated = useCallback((session: SessionInfo) => {
@@ -247,7 +268,9 @@ export function AppShell() {
     });
     setActiveFileTabId(tabId);
     setRightPanelOpen(true);
-  }, []);
+    // On mobile the file panel is full-screen; close the drawer so it shows.
+    if (isMobile) setSidebarOpen(false);
+  }, [isMobile]);
 
   const handleCloseFileTab = useCallback((tabId: string) => {
     setFileTabs((prev) => {
@@ -405,11 +428,21 @@ export function AppShell() {
           animation: none;
         }
       }
+      @media (max-width: 640px) {
+        .sidebar-overlay-backdrop.sidebar-mobile-pending {
+          opacity: 0 !important;
+          pointer-events: none !important;
+        }
+        .sidebar-container.sidebar-mobile-pending.sidebar-open {
+          transform: translateX(-100%);
+          box-shadow: none;
+        }
+      }
     `}</style>
     <div style={{ display: "flex", height: "100dvh", overflow: "hidden", background: "var(--bg)" }}>
       {/* Mobile overlay backdrop */}
       <div
-        className="sidebar-overlay-backdrop"
+        className={`sidebar-overlay-backdrop${mobileSidebarReady ? "" : " sidebar-mobile-pending"}`}
         onClick={() => setSidebarOpen(false)}
         style={{
           position: "fixed",
@@ -424,7 +457,7 @@ export function AppShell() {
 
       {/* Left sidebar */}
       <div
-        className={`sidebar-container${sidebarOpen ? " sidebar-open" : " sidebar-closed"}`}
+        className={`sidebar-container${sidebarOpen ? " sidebar-open" : " sidebar-closed"}${mobileSidebarReady ? "" : " sidebar-mobile-pending"}`}
         style={{
           background: "var(--bg-panel)",
           borderRight: "1px solid var(--border)",
@@ -442,8 +475,9 @@ export function AppShell() {
         {/* Top bar with sidebar toggle */}
         <div ref={topBarRef} style={{ display: "flex", alignItems: "center", flexShrink: 0, borderBottom: "1px solid var(--border)", height: 36, background: "var(--bg-panel)" }}>
           <button
-            onClick={() => setSidebarOpen((v) => !v)}
+            onClick={handleSidebarToggle}
             title={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
+            aria-label={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
             style={{
               display: "flex", alignItems: "center", justifyContent: "center",
               width: 36, height: 36, padding: 0,
@@ -546,13 +580,14 @@ export function AppShell() {
                     <line x1="12" y1="15" x2="12" y2="3" />
                   </svg>
                 </span>
-                <span>Export</span>
+                {!isMobile && <span>Export</span>}
               </button>
               <BranchNavigator
                 tree={branchTree}
                 activeLeafId={branchActiveLeafId}
                 onLeafChange={handleBranchLeafChange}
                 inline
+                compact={isMobile}
                 containerRef={topBarRef}
                 open={activeTopPanel === "branches"}
                 onToggle={() => toggleTopPanel("branches")}
@@ -561,6 +596,9 @@ export function AppShell() {
               <button
                 ref={systemBtnRef}
                 onClick={() => toggleTopPanel("system")}
+                title="System prompt"
+                aria-label="System prompt"
+                aria-pressed={activeTopPanel === "system"}
                 style={{
                   display: "flex", alignItems: "center", gap: 6,
                   height: "100%", padding: "0 12px",
@@ -581,7 +619,7 @@ export function AppShell() {
                   <line x1="8" y1="13" x2="16" y2="13" />
                   <line x1="8" y1="17" x2="13" y2="17" />
                 </svg>
-                <span>System</span>
+                {!isMobile && <span>System</span>}
               </button>
             </div>
           )}
@@ -620,6 +658,8 @@ export function AppShell() {
                 type="button"
                 onClick={() => toggleTopPanel("session")}
                 title={tooltip || "Session info"}
+                aria-label="Session info"
+                aria-pressed={activeTopPanel === "session"}
                 style={{
                   marginLeft: "auto",
                   display: "flex", alignItems: "center", gap: 10,
@@ -637,7 +677,12 @@ export function AppShell() {
                 onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
                 onMouseLeave={(e) => { e.currentTarget.style.color = activeTopPanel === "session" ? "var(--text)" : "var(--text-muted)"; }}
               >
-                {t && t.input > 0 && (
+                {isMobile && (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" />
+                  </svg>
+                )}
+                {!isMobile && t && t.input > 0 && (
                   <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
                     <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
                       <line x1="5" y1="8.5" x2="5" y2="1.5" /><polyline points="2 4 5 1.5 8 4" />
@@ -645,7 +690,7 @@ export function AppShell() {
                     {fmt(t.input)}
                   </span>
                 )}
-                {t && t.output > 0 && (
+                {!isMobile && t && t.output > 0 && (
                   <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
                     <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
                       <line x1="5" y1="1.5" x2="5" y2="8.5" /><polyline points="2 6 5 8.5 8 6" />
@@ -653,7 +698,7 @@ export function AppShell() {
                     {fmt(t.output)}
                   </span>
                 )}
-                {t && t.cacheRead > 0 && (
+                {!isMobile && t && t.cacheRead > 0 && (
                   <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
                     <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M8.5 5a3.5 3.5 0 1 1-1-2.45" /><polyline points="6.5 1.5 8.5 2.5 7.5 4.5" />
@@ -661,7 +706,7 @@ export function AppShell() {
                     {fmt(t.cacheRead)}
                   </span>
                 )}
-                {costStr && (
+                {!isMobile && costStr && (
                   <span style={{ display: "flex", alignItems: "center", color: "var(--text)", fontWeight: 500 }}>
                     {costStr}
                   </span>
@@ -684,6 +729,8 @@ export function AppShell() {
               top: topPanelPos.top,
               left: topPanelPos.left,
               width: topPanelPos.width,
+              maxHeight: `calc(100dvh - ${topPanelPos.top}px)`,
+              overflowY: "auto",
               zIndex: 500,
             }}>
               {activeTopPanel === "system" && (
@@ -849,8 +896,10 @@ export function AppShell() {
                     return (
                       <div style={{
                         display: "grid",
-                        gridTemplateColumns: "minmax(360px, 1.7fr) minmax(140px, 0.55fr) minmax(190px, 0.75fr)",
-                        gap: 24,
+                        gridTemplateColumns: isMobile
+                          ? "1fr"
+                          : "minmax(360px, 1.7fr) minmax(140px, 0.55fr) minmax(190px, 0.75fr)",
+                        gap: isMobile ? 16 : 24,
                         fontSize: 12,
                         lineHeight: 1.5,
                         fontFamily: "var(--font-mono)",
@@ -952,6 +1001,7 @@ export function AppShell() {
     <button
       onClick={() => setRightPanelOpen((v) => !v)}
       title={rightPanelOpen ? "Hide file panel" : "Show file panel"}
+      aria-label={rightPanelOpen ? "Hide file panel" : "Show file panel"}
       style={{
         position: "fixed", top: 0, right: 0, zIndex: 300,
         display: "flex", alignItems: "center", justifyContent: "center",

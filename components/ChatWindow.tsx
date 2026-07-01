@@ -8,6 +8,7 @@ import { ChatMinimap, useMessageRefs } from "./ChatMinimap";
 import { useAgentSession, type AgentPhase, type NoticeItem } from "@/hooks/useAgentSession";
 import { useAudio } from "@/hooks/useAudio";
 import { useDragDrop } from "@/hooks/useDragDrop";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 
 interface Props {
@@ -120,6 +121,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
   });
 
   const { soundEnabled, onSoundToggle, playDoneSound } = useAudio();
+  const isMobile = useIsMobile();
   const playDoneSoundRef = useRef(playDoneSound);
   playDoneSoundRef.current = playDoneSound;
   const soundEnabledRef = useRef(soundEnabled);
@@ -337,7 +339,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
             position: "absolute",
             top: 12,
             left: 0,
-            right: CHAT_MINIMAP_WIDTH,
+            right: isMobile ? 0 : CHAT_MINIMAP_WIDTH,
             zIndex: 40,
             padding: `0 ${CHAT_COLUMN_PADDING}px`,
             pointerEvents: "none",
@@ -431,19 +433,21 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
             </div>
           </div>
         </div>
-        <ChatMinimap
-          messages={messages}
-          streamingMessage={streamState.streamingMessage}
-          scrollContainer={scrollContainerRef}
-          messageRefs={messageRefs}
-        />
+        {isMobile ? null : (
+          <ChatMinimap
+            messages={messages}
+            streamingMessage={streamState.streamingMessage}
+            scrollContainer={scrollContainerRef}
+            messageRefs={messageRefs}
+          />
+        )}
       </div>
 
       <div className="relative">
         <div
           style={{
             padding: `0 ${CHAT_COLUMN_PADDING}px`,
-            paddingRight: CHAT_INPUT_RIGHT_PADDING,
+            paddingRight: isMobile ? CHAT_COLUMN_PADDING : CHAT_INPUT_RIGHT_PADDING,
           }}
         >
           <div style={{ maxWidth: 820, margin: "0 auto" }}>
