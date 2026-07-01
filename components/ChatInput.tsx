@@ -1065,70 +1065,60 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             {isMobile && (
               <button
                 type="button"
-                title={controlsMenuOpen ? "收起控制" : "更多控制"}
-                aria-label={controlsMenuOpen ? "收起控制" : "更多控制"}
+                title={controlsMenuOpen ? undefined : "更多控制"}
+                aria-label="更多控制"
                 aria-expanded={controlsMenuOpen}
+                aria-hidden={controlsMenuOpen || undefined}
+                tabIndex={controlsMenuOpen ? -1 : undefined}
                 onClick={() => {
-                  setControlsMenuOpen((open) => {
-                    if (open) {
-                      setToolDropdownOpen(false);
-                      setThinkingDropdownOpen(false);
-                    } else {
-                      setModelDropdownOpen(false);
-                    }
-                    return !open;
-                  });
+                  setModelDropdownOpen(false);
+                  setControlsMenuOpen(true);
                 }}
                 style={{
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  width: 40,
-                  height: 40,
-                  padding: 0,
-                  background: controlsMenuOpen ? "var(--bg-hover)" : "none",
-                  border: "1px solid color-mix(in srgb, var(--border) 72%, transparent)",
-                  borderRadius: 10,
-                  color: controlsMenuOpen ? "var(--text)" : "var(--text-muted)",
-                  cursor: "pointer",
-                  transition: "background 0.12s, color 0.12s, border-color 0.12s",
+                  width: "100%",
+                  height: 32,
+                  padding: "8px 10px",
+                  background: "none",
+                  border: "none",
+                  borderRadius: 9,
+                  color: "var(--text-muted)",
+                  cursor: controlsMenuOpen ? "default" : "pointer",
+                  fontSize: 12,
+                  fontWeight: 500,
+                  visibility: controlsMenuOpen ? "hidden" : "visible",
+                  pointerEvents: controlsMenuOpen ? "none" : "auto",
+                  transition: "background 0.12s, color 0.12s",
                 }}
                 onMouseEnter={(e) => {
+                  if (controlsMenuOpen) return;
                   e.currentTarget.style.background = "var(--bg-hover)";
                   e.currentTarget.style.color = "var(--text)";
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.background = controlsMenuOpen ? "var(--bg-hover)" : "none";
-                  e.currentTarget.style.color = controlsMenuOpen ? "var(--text)" : "var(--text-muted)";
+                  if (controlsMenuOpen) return;
+                  e.currentTarget.style.background = "none";
+                  e.currentTarget.style.color = "var(--text-muted)";
                 }}
               >
-                {controlsMenuOpen ? (
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                    <line x1="18" y1="6" x2="6" y2="18" />
-                    <line x1="6" y1="6" x2="18" y2="18" />
-                  </svg>
-                ) : (
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="5" cy="12" r="1" />
-                    <circle cx="12" cy="12" r="1" />
-                    <circle cx="19" cy="12" r="1" />
-                  </svg>
-                )}
+                More
               </button>
             )}
             <div style={{
               display: isMobile ? (controlsMenuOpen ? "flex" : "none") : "flex",
               alignItems: "center",
-              gap: isMobile ? 2 : 2,
+              gap: isMobile ? 1 : 2,
               ...(isMobile ? {
                 position: "absolute",
-                right: 34,
+                right: -16,
                 bottom: 0,
                 zIndex: 60,
                 padding: 1,
                 width: "max-content",
-                maxWidth: "calc(100vw - 32px)",
-                flexWrap: "wrap",
+                maxWidth: "100vw",
+                flexWrap: "nowrap",
                 justifyContent: "flex-end",
                 border: "1px solid color-mix(in srgb, var(--border) 72%, transparent)",
                 borderRadius: 10,
@@ -1146,7 +1136,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                   aria-label="切换推理强度"
                   style={{
                     display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
-                    padding: isMobile ? "0 10px" : "8px 12px",
+                    padding: isMobile ? "0 6px" : "8px 12px",
                     width: isMobile ? "auto" : undefined,
                     height: 32,
                     background: thinkingDropdownOpen ? "var(--bg-hover)" : "none",
@@ -1233,7 +1223,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                   aria-label="切换工具预设"
                   style={{
                     display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
-                    padding: isMobile ? "0 10px" : "8px 12px",
+                    padding: isMobile ? "0 6px" : "8px 12px",
                     width: isMobile ? "auto" : undefined,
                     height: 32,
                     background: toolDropdownOpen ? "var(--bg-hover)" : "none",
@@ -1319,7 +1309,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                   disabled={isStreaming && !isCompacting}
                   style={{
                     display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
-                    padding: isMobile ? "0 10px" : "8px 12px",
+                    padding: isMobile ? "0 6px" : "8px 12px",
                     width: isMobile ? "auto" : undefined,
                     height: 32,
                     background: isCompacting ? "rgba(239,68,68,0.08)" : "none",
@@ -1423,6 +1413,46 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                     <line x1="17" y1="9" x2="23" y2="15" />
                   </svg>
                 )}
+              </button>
+            )}
+            {isMobile && controlsMenuOpen && (
+              <button
+                type="button"
+                title="收起控制"
+                aria-label="收起控制"
+                aria-expanded={true}
+                onClick={() => {
+                  setToolDropdownOpen(false);
+                  setThinkingDropdownOpen(false);
+                  setControlsMenuOpen(false);
+                }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  width: 36,
+                  height: 32,
+                  padding: 0,
+                  marginLeft: 0,
+                  background: "var(--bg-hover)",
+                  border: "none",
+                  borderLeft: "1px solid color-mix(in srgb, var(--border) 72%, transparent)",
+                  borderRadius: "0 9px 9px 0",
+                  color: "var(--text)",
+                  cursor: "pointer",
+                  transition: "background 0.12s, color 0.12s",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = "var(--bg-selected)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "var(--bg-hover)";
+                }}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
               </button>
             )}
             </div>
