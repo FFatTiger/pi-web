@@ -883,10 +883,16 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         </div>
 
         {/* Bottom bar: left | center (context) | right */}
-        <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 6, flexWrap: isMobile ? "wrap" : undefined }}>
+        <div style={{
+          marginTop: 8,
+          display: isMobile ? "grid" : "flex",
+          gridTemplateColumns: isMobile ? "minmax(0, 1fr) auto" : undefined,
+          alignItems: "center",
+          gap: 6,
+        }}>
 
           {/* LEFT: attach + model selector (idle) or steer/followup toggle (streaming) */}
-          <div style={{ flex: "0 0 auto", display: "flex", alignItems: "center", gap: 2 }}>
+          <div style={{ flex: isMobile ? "1 1 auto" : "0 0 auto", minWidth: 0, display: "flex", alignItems: "center", gap: 2 }}>
             <button
               onClick={() => fileInputRef.current?.click()}
               disabled={isStreaming}
@@ -919,7 +925,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             </button>
             {/* Model selector — visible always, disabled during streaming */}
             {modelOptions.length > 0 && currentName && onModelChange && (
-                <div ref={dropdownRef} style={{ position: "relative" }}>
+                <div ref={dropdownRef} style={{ position: "relative", flex: isMobile ? "1 1 auto" : undefined, minWidth: 0 }}>
                   <button
                     onClick={(e) => {
                       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -929,9 +935,12 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                     disabled={isStreaming}
                     style={{
                       display: "flex", alignItems: "center", gap: 6,
-                      padding: "8px 12px",
+                      justifyContent: isMobile ? "flex-start" : undefined,
+                      padding: isMobile ? "8px 10px" : "8px 12px",
                       height: 32,
-                      maxWidth: 220, overflow: "hidden",
+                      width: isMobile ? "100%" : undefined,
+                      maxWidth: isMobile ? "100%" : 220,
+                      overflow: "hidden",
                       background: modelDropdownOpen ? "var(--bg-hover)" : "none",
                       border: "none",
                       borderRadius: 9,
@@ -1027,19 +1036,37 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           </div>
 
           {/* spacer */}
-          <div style={{ flex: 1 }} />
+          {!isMobile && <div style={{ flex: 1 }} />}
 
           {/* RIGHT: thinking + tools preset + compact + sound (idle) | Stop + sound (streaming) */}
-          <div style={{ flex: "0 0 auto", display: "flex", alignItems: "center", gap: 2, marginLeft: "auto" }}>
+          <div style={{
+            flex: "0 0 auto",
+            display: "flex",
+            alignItems: "center",
+            gap: isMobile ? 0 : 2,
+            marginLeft: isMobile ? 0 : "auto",
+            ...(isMobile ? {
+              padding: 1,
+              border: "1px solid color-mix(in srgb, var(--border) 72%, transparent)",
+              borderRadius: 10,
+              background: "color-mix(in srgb, var(--bg-panel) 82%, transparent)",
+            } : null),
+          }}>
             {!isStreaming && onThinkingLevelChange && (
               <div ref={thinkingDropdownRef} style={{ position: "relative" }}>
                 <button
                   onClick={() => !isStreaming && setThinkingDropdownOpen((v) => !v)}
                   disabled={isStreaming}
-                  title="切换推理强度"
+                  title={`切换推理强度：${(() => {
+                    const lvl = thinkingLevel ?? "auto";
+                    if (lvl === "auto" || !thinkingLevelMap) return lvl;
+                    return thinkingLevelMap[lvl] ?? lvl;
+                  })()}`}
+                  aria-label="切换推理强度"
                   style={{
-                    display: "flex", alignItems: "center", gap: 5,
-                    padding: "8px 12px",
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
+                    padding: isMobile ? 0 : "8px 12px",
+                    width: isMobile ? 32 : undefined,
                     height: 32,
                     background: thinkingDropdownOpen ? "var(--bg-hover)" : "none",
                     border: "none",
@@ -1065,12 +1092,12 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                     <line x1="7" y1="18" x2="12" y2="18" />
                     <line x1="8" y1="21" x2="11" y2="21" />
                   </svg>
-                  <span>{(() => {
+                  {!isMobile && <span>{(() => {
                     const lvl = thinkingLevel ?? "auto";
                     if (lvl === "auto" || !thinkingLevelMap) return lvl;
                     const mapped = thinkingLevelMap[lvl];
                     return mapped != null ? mapped : lvl;
-                  })()}</span>
+                  })()}</span>}
                 </button>
                 {thinkingDropdownOpen && (
                   <div style={{
@@ -1126,10 +1153,12 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 <button
                   onClick={() => !isStreaming && setToolDropdownOpen((v) => !v)}
                   disabled={isStreaming}
-                  title="切换工具预设"
+                  title={`切换工具预设：${Object.entries(TOOL_PRESET_MAP).find(([, v]) => v === (toolPreset ?? "default"))?.[0] ?? "default"}`}
+                  aria-label="切换工具预设"
                   style={{
-                    display: "flex", alignItems: "center", gap: 5,
-                    padding: "8px 12px",
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
+                    padding: isMobile ? 0 : "8px 12px",
+                    width: isMobile ? 32 : undefined,
                     height: 32,
                     background: toolDropdownOpen ? "var(--bg-hover)" : "none",
                     border: "none",
@@ -1153,7 +1182,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
                   </svg>
-                  <span>{Object.entries(TOOL_PRESET_MAP).find(([, v]) => v === (toolPreset ?? "default"))?.[0] ?? "default"}</span>
+                  {!isMobile && <span>{Object.entries(TOOL_PRESET_MAP).find(([, v]) => v === (toolPreset ?? "default"))?.[0] ?? "default"}</span>}
                 </button>
                 {toolDropdownOpen && (
                   <div style={{
@@ -1213,8 +1242,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                   onClick={isCompacting ? onAbortCompaction : onCompact}
                   disabled={isStreaming && !isCompacting}
                   style={{
-                    display: "flex", alignItems: "center", gap: 5,
-                    padding: "8px 12px",
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
+                    padding: isMobile ? 0 : "8px 12px",
+                    width: isMobile ? 32 : undefined,
                     height: 32,
                     background: isCompacting ? "rgba(239,68,68,0.08)" : "none",
                     border: "none",
@@ -1234,14 +1264,15 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                     e.currentTarget.style.color = isCompacting ? "#ef4444" : "var(--text-muted)";
                   }}
                   title={isCompacting ? "停止压缩" : "压缩上下文"}
+                  aria-label={isCompacting ? "停止压缩" : "压缩上下文"}
                 >
                   {isCompacting ? (
-                    <><svg width="10" height="10" viewBox="0 0 10 10" fill="none"><rect x="2" y="2" width="6" height="6" rx="1" fill="currentColor" /></svg>Compacting…</>
+                    <><svg width="10" height="10" viewBox="0 0 10 10" fill="none"><rect x="2" y="2" width="6" height="6" rx="1" fill="currentColor" /></svg>{!isMobile && "Compacting…"}</>
                   ) : (
                     <><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <polyline points="4 14 10 14 10 20" /><polyline points="20 10 14 10 14 4" />
                       <line x1="10" y1="14" x2="3" y2="21" /><line x1="21" y1="3" x2="14" y2="10" />
-                    </svg>Compact</>
+                    </svg>{!isMobile && "Compact"}</>
                   )}
                 </button>
               </div>
@@ -1278,6 +1309,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               <button
                 onClick={onSoundToggle}
                 title={soundEnabled ? "关闭完成提示音" : "开启完成提示音"}
+                aria-label={soundEnabled ? "关闭完成提示音" : "开启完成提示音"}
                 style={{
                   display: "flex", alignItems: "center", justifyContent: "center",
                   width: 32, height: 32, padding: 0,
