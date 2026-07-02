@@ -2,6 +2,7 @@
 
 import React, { useRef, useState, useCallback, useEffect, useImperativeHandle, forwardRef, KeyboardEvent } from "react";
 import type { BuiltinSlashCommandResult, CompactResultInfo, SlashCommandInfo } from "@/hooks/useAgentSession";
+import { clearDraft, getDraft, setDraft, type ChatDraftImage } from "@/lib/draft-store";
 import { useIsMobile } from "@/hooks/useIsMobile";
 
 export interface AttachedImage {
@@ -46,6 +47,7 @@ interface Props {
   onBuiltinCommand?: (message: string) => Promise<BuiltinSlashCommandResult>;
   soundEnabled?: boolean;
   onSoundToggle?: () => void;
+  draftKey?: string;
 }
 
 export interface ChatInputHandle {
@@ -123,6 +125,23 @@ function slashMatchRank(command: SlashCommandPaletteItem, query: string): number
   return 4;
 }
 
+function imageToDraftImage(image: AttachedImage): ChatDraftImage {
+  return { data: image.data, mimeType: image.mimeType };
+}
+
+function draftImageToAttachedImage(image: ChatDraftImage): AttachedImage {
+  return {
+    ...image,
+    previewUrl: `data:${image.mimeType};base64,${image.data}`,
+  };
+}
+
+function revokeImagePreview(image: AttachedImage): void {
+  if (image.previewUrl.startsWith("blob:")) {
+    URL.revokeObjectURL(image.previewUrl);
+  }
+}
+
 export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   onSend, onAbort, onSteer, onFollowUp, isStreaming, model, isAutoModelSelection, modelNames, modelList, onModelChange,
   onCompact, onAbortCompaction, isCompacting, compactError, compactResult, toolPreset, onToolPresetChange,
@@ -132,15 +151,18 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   onBuiltinCommand,
   soundEnabled, onSoundToggle,
   onPromptWithStreamingBehavior,
+  draftKey,
 }: Props, ref) {
   const isMobile = useIsMobile();
-  const [value, setValue] = useState("");
+  const [value, setValue] = useState(() => (draftKey ? getDraft(draftKey)?.value ?? "" : ""));
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const [modelDropdownRect, setModelDropdownRect] = useState<{ top: number; left: number; width: number } | null>(null);
   const [toolDropdownOpen, setToolDropdownOpen] = useState(false);
   const [thinkingDropdownOpen, setThinkingDropdownOpen] = useState(false);
   const [controlsMenuOpen, setControlsMenuOpen] = useState(false);
-  const [attachedImages, setAttachedImages] = useState<AttachedImage[]>([]);
+  const [attachedImages, setAttachedImages] = useState<AttachedImage[]>(() => (
+    draftKey ? getDraft(draftKey)?.images.map(draftImageToAttachedImage) ?? [] : []
+  ));
   const [slashMenuOpen, setSlashMenuOpen] = useState(false);
   const [slashActiveIndex, setSlashActiveIndex] = useState(0);
 
@@ -155,6 +177,11 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const lastCompositionEndAtRef = useRef(0);
   const slashCommandsRequestedRef = useRef(false);
   const slashItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const draftKeyRef = useRef(draftKey);
+  const valueRef = useRef(value);
+  const attachedImagesRef = useRef(attachedImages);
+  valueRef.current = value;
+  attachedImagesRef.current = attachedImages;
 
   useImperativeHandle(ref, () => ({
     insertIfEmpty(text: string) {
@@ -221,26 +248,69 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const removeImage = useCallback((index: number) => {
     setAttachedImages((prev) => {
       const next = [...prev];
-      URL.revokeObjectURL(next[index].previewUrl);
-      next.splice(index, 1);
+      const [removed] = next.splice(index, 1);
+      if (removed) revokeImagePreview(removed);
       return next;
     });
   }, []);
 
   const clearImages = useCallback(() => {
     setAttachedImages((prev) => {
-      prev.forEach((img) => URL.revokeObjectURL(img.previewUrl));
+      prev.forEach(revokeImagePreview);
       return [];
     });
   }, []);
 
   const clearInput = useCallback(() => {
     setValue("");
+    if (draftKey) clearDraft(draftKey);
+    if (draftKeyRef.current && draftKeyRef.current !== draftKey) clearDraft(draftKeyRef.current);
     clearImages();
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
-  }, [clearImages]);
+  }, [clearImages, draftKey]);
+
+  useEffect(() => {
+    if (!draftKey || draftKeyRef.current !== draftKey) return;
+    setDraft(draftKey, {
+      value,
+      images: attachedImages.map(imageToDraftImage),
+    });
+  }, [attachedImages, draftKey, value]);
+
+  useEffect(() => {
+    const previousDraftKey = draftKeyRef.current;
+    if (previousDraftKey === draftKey) return;
+
+    if (previousDraftKey) {
+      setDraft(previousDraftKey, {
+        value: valueRef.current,
+        images: attachedImagesRef.current.map(imageToDraftImage),
+      });
+    }
+
+    const draft = draftKey ? getDraft(draftKey) : null;
+    draftKeyRef.current = draftKey;
+    setValue(draft?.value ?? "");
+    setAttachedImages((prev) => {
+      prev.forEach(revokeImagePreview);
+      return draft?.images.map(draftImageToAttachedImage) ?? [];
+    });
+  }, [draftKey]);
+
+  useEffect(() => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    ta.style.height = "auto";
+    if (value) ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
+  }, [value]);
+
+  useEffect(() => {
+    return () => {
+      attachedImagesRef.current.forEach(revokeImagePreview);
+    };
+  }, []);
 
   const handleSend = useCallback(async () => {
     const msg = value.trim();
@@ -316,9 +386,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     const streamingBehavior = mode === "steer" ? "steer" : "followUp";
     if (msg.startsWith("/") && onPromptWithStreamingBehavior) {
       onPromptWithStreamingBehavior(msg, streamingBehavior, attachedImages.length ? attachedImages : undefined);
-      setValue("");
-      clearImages();
-      if (textareaRef.current) textareaRef.current.style.height = "auto";
+      clearInput();
       return;
     }
     if (mode === "steer" && onSteer) {
@@ -326,10 +394,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     } else if (mode === "followup" && onFollowUp) {
       onFollowUp(msg, attachedImages.length ? attachedImages : undefined);
     }
-    setValue("");
-    clearImages();
-    if (textareaRef.current) textareaRef.current.style.height = "auto";
-  }, [value, attachedImages, onPromptWithStreamingBehavior, onSteer, onFollowUp, clearImages]);
+    clearInput();
+  }, [value, attachedImages, onPromptWithStreamingBehavior, onSteer, onFollowUp, clearInput]);
 
   const getNextSlashIndex = useCallback((direction: "up" | "down" | "left" | "right") => {
     const lastIndex = filteredSlashCommands.length - 1;
