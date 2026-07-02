@@ -80,6 +80,7 @@ export interface ToolResultMessage {
   toolName?: string;
   content: (TextContent | ImageContent)[];
   isError?: boolean;
+  details?: unknown;
   timestamp?: number;
 }
 
