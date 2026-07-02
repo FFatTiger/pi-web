@@ -991,14 +991,23 @@ function RunningSessionIndicator() {
         color: "var(--accent)",
       }}
     >
-      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true" style={{ display: "block" }}>
-        <circle cx="7" cy="7" r="3" fill="currentColor" opacity="0.25">
-          <animate attributeName="r" values="3;6;3" dur="1.3s" repeatCount="indefinite" />
-          <animate attributeName="opacity" values="0.35;0;0.35" dur="1.3s" repeatCount="indefinite" />
-        </circle>
-        <circle cx="7" cy="7" r="3" fill="currentColor">
-          <animate attributeName="opacity" values="1;0.55;1" dur="1.3s" repeatCount="indefinite" />
-        </circle>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true" style={{ display: "block" }}>
+        <g>
+          <path
+            d="M21 12a9 9 0 1 1-3.8-7.4"
+            stroke="currentColor"
+            strokeWidth="2.8"
+            strokeLinecap="round"
+          />
+          <animateTransform
+            attributeName="transform"
+            type="rotate"
+            from="0 12 12"
+            to="360 12 12"
+            dur="0.9s"
+            repeatCount="indefinite"
+          />
+        </g>
       </svg>
     </span>
   );
@@ -1007,8 +1016,8 @@ function RunningSessionIndicator() {
 function UnreadSessionIndicator() {
   return (
     <span
-      title="Completed while you were away"
-      aria-label="Unread completed session"
+      title="New activity"
+      aria-label="New session activity"
       style={{
         width: 14,
         height: 14,
@@ -1016,18 +1025,16 @@ function UnreadSessionIndicator() {
         alignItems: "center",
         justifyContent: "center",
         flexShrink: 0,
-        color: "#eab308",
+        color: "#0891b2",
       }}
     >
-      <span
-        style={{
-          width: 8,
-          height: 8,
-          borderRadius: "50%",
-          background: "currentColor",
-          boxShadow: "0 0 0 2px rgba(234,179,8,0.14)",
-        }}
-      />
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true" style={{ display: "block" }}>
+        <circle cx="7" cy="7" r="2.5" fill="currentColor" />
+        <circle cx="7" cy="7" r="3" stroke="currentColor" strokeWidth="1.4" opacity="0.32">
+          <animate attributeName="r" values="3;6;3" dur="1.6s" repeatCount="indefinite" />
+          <animate attributeName="opacity" values="0.32;0;0.32" dur="1.6s" repeatCount="indefinite" />
+        </circle>
+      </svg>
     </span>
   );
 }
@@ -1227,7 +1234,7 @@ function SessionItem({
                 lineHeight: 1.4,
                 color: "var(--text)",
               }}
-              title={isRunning ? `${title} · Agent running…` : isUnread ? `${title} · Completed while you were away` : title}
+              title={isRunning ? `${title} · Agent running…` : isUnread ? `${title} · New activity` : title}
             >
               {isRunning ? <RunningSessionIndicator /> : isUnread ? <UnreadSessionIndicator /> : null}
               <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
