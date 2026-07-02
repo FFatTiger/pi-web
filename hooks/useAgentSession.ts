@@ -78,6 +78,7 @@ type AgentStateResponse = {
 };
 
 type ExtensionUiDialogRequest = Extract<ExtensionUiRequest, { method: "select" | "confirm" | "input" | "editor" }>;
+type ExtensionUiCustomRequest = Extract<ExtensionUiRequest, { method: "custom" }>;
 export type NoticeType = "info" | "success" | "warning" | "error";
 
 export type NoticeItem = {
@@ -281,6 +282,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [noticeState, dispatchNotice] = useReducer(noticeReducer, { visible: [], pending: [] });
   const [sessionStatsOverride, setSessionStatsOverride] = useState<SessionStatsInfo | null>(null);
   const [extensionDialog, setExtensionDialog] = useState<ExtensionUiDialogRequest | null>(null);
+  const [extensionCustomUi, setExtensionCustomUi] = useState<ExtensionUiCustomRequest | null>(null);
   const [extensionStatuses, setExtensionStatuses] = useState<ExtensionStatusItem[]>([]);
   const [extensionWidgets, setExtensionWidgets] = useState<ExtensionWidgetItem[]>([]);
 
@@ -541,6 +543,20 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, []);
 
+  const sendExtensionCustomInput = useCallback(async (request: ExtensionUiCustomRequest, data: string) => {
+    const sid = sessionIdRef.current;
+    if (!sid) return;
+    try {
+      await sendAgentCommand(sid, {
+        type: "extension_ui_input",
+        id: request.id,
+        data,
+      });
+    } catch (e) {
+      console.error("Failed to send extension custom UI input:", e);
+    }
+  }, []);
+
   const addNotice = useCallback((notice: { id?: string; message: string; type?: NoticeType }) => {
     const message = notice.message.trim();
     if (!message) return;
@@ -593,6 +609,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         break;
       case "set_editor_text":
         opts.chatInputRef?.current?.insertText(request.text);
+        break;
+      case "custom":
+        setExtensionCustomUi((current) => {
+          if (request.closed) return current?.id === request.id ? null : current;
+          return request;
+        });
         break;
     }
   }, [addNotice, opts.chatInputRef]);
@@ -673,6 +695,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         break;
       case "prompt_error":
         addNotice({ type: "error", message: (event.errorMessage as string | undefined) ?? "Command failed" });
+        break;
+      case "extension_error":
+        addNotice({
+          type: "error",
+          message: (event.error as string | undefined) ?? "Extension command failed",
+        });
         break;
       case "message_start":
       case "message_update": {
@@ -1269,7 +1297,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     retryInfo, contextUsage, systemPrompt, forkingEntryId,
     isCompacting, compactError, compactResult, currentModel, displayModel, sessionStats,
     slashCommands, slashCommandsLoading,
-    notices: noticeState.visible, extensionDialog, extensionStatuses, extensionWidgets, respondToExtensionUi,
+    notices: noticeState.visible, extensionDialog, extensionCustomUi, extensionStatuses, extensionWidgets, respondToExtensionUi, sendExtensionCustomInput,
     isAutoModelSelection: isNew && newSessionModel === null,
     agentPhase,
     isNew,
