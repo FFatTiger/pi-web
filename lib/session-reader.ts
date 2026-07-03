@@ -2,6 +2,7 @@ import { SessionManager, buildSessionContext as piBuildSessionContext, getAgentD
 import type { AgentMessage, SessionEntry, SessionInfo, SessionContext, AssistantMessage } from "./types";
 import type { SessionEntry as PiSessionEntry, SessionInfo as PiSessionInfo } from "@earendil-works/pi-coding-agent";
 import { normalizeToolCalls } from "./normalize";
+import { resolveProject, type ProjectInfo } from "./worktree";
 
 export { getAgentDir };
 
@@ -14,10 +15,19 @@ export async function listAllSessions(): Promise<SessionInfo[]> {
   const pathToId = new Map<string, string>();
   for (const s of piSessions) pathToId.set(s.path, s.id);
 
+  // Resolve each unique cwd to its project root (main repo shared by all
+  // worktrees). resolveProject caches per-cwd, so this is cheap after warmup.
+  const uniqueCwds = [...new Set(piSessions.map((s) => s.cwd).filter(Boolean))];
+  const projectByCwd = new Map<string, ProjectInfo>();
+  await Promise.all(uniqueCwds.map(async (cwd) => {
+    projectByCwd.set(cwd, await resolveProject(cwd));
+  }));
+
   const cache = getPathCache();
   return piSessions.map((s) => {
     // Populate path cache so resolveSessionPath works without a full scan
     cache.set(s.id, s.path);
+    const project = s.cwd ? projectByCwd.get(s.cwd) : undefined;
     return {
       path: s.path,
       id: s.id,
@@ -28,6 +38,8 @@ export async function listAllSessions(): Promise<SessionInfo[]> {
       messageCount: s.messageCount,
       firstMessage: s.firstMessage || "(no messages)",
       parentSessionId: s.parentSessionPath ? pathToId.get(s.parentSessionPath) : undefined,
+      projectRoot: project?.projectRoot ?? s.cwd,
+      ...(project?.isWorktree && project.branch ? { worktreeBranch: project.branch } : {}),
     };
   });
 }

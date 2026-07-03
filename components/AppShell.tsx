@@ -161,7 +161,7 @@ export function AppShell() {
   // Suppresses sessionKey bump in handleCwdChange during the initial URL restore
   const suppressCwdBumpRef = useRef(false);
 
-  const handleCwdChange = useCallback((cwd: string | null) => {
+  const handleCwdChange = useCallback((cwd: string | null, projectRoot?: string | null) => {
     setActiveCwd(cwd);
     // Skip if cwd is null (initial mount) or during the initial URL restore.
     if (!cwd) return;
@@ -169,12 +169,16 @@ export function AppShell() {
       suppressCwdBumpRef.current = false;
       return;
     }
-    // Close any session that belongs to a different cwd — it no longer
+    // Worktrees of one repo share a project root. Moving the effective cwd
+    // within the same project (e.g. switching worktree, or clicking a session
+    // that lives in another worktree) must not close the open session.
+    const newProject = projectRoot ?? cwd;
+    if (selectedSession && (selectedSession.projectRoot ?? selectedSession.cwd) === newProject) {
+      return;
+    }
+    // Close any session that belongs to a different project — it no longer
     // matches the selected project directory.
-    setSelectedSession((prev) => {
-      if (prev && prev.cwd !== cwd) return null;
-      return prev;
-    });
+    setSelectedSession(null);
     setNewSessionCwd((prev) => {
       if (prev && prev !== cwd) return null;
       return prev;
@@ -185,7 +189,7 @@ export function AppShell() {
     setSystemPrompt(null);
     setActiveTopPanel(null);
     router.replace("/", { scroll: false });
-  }, [router]);
+  }, [router, selectedSession]);
 
   const handleSelectSession = useCallback((session: SessionInfo, isRestore = false) => {
     setNewSessionCwd(null);
@@ -219,13 +223,29 @@ export function AppShell() {
     router.replace("/", { scroll: false });
   }, [router, isMobile]);
 
+  // Client-built transient SessionInfo (new session / fork) lacks the
+  // server-computed projectRoot, which the same-project check in
+  // handleCwdChange relies on. Hydrate it from the session list so switching
+  // worktrees right after creating a session doesn't close the chat.
+  const hydrateSelectedSession = useCallback((sessionId: string) => {
+    void fetch("/api/sessions")
+      .then((r) => (r.ok ? (r.json() as Promise<{ sessions: SessionInfo[] }>) : null))
+      .then((d) => {
+        const full = d?.sessions.find((s) => s.id === sessionId);
+        if (!full) return;
+        setSelectedSession((prev) => (prev && prev.id === sessionId && !prev.projectRoot ? full : prev));
+      })
+      .catch(() => {});
+  }, []);
+
   // Called by ChatWindow when a new session gets its real id from pi
   const handleSessionCreated = useCallback((session: SessionInfo) => {
     setNewSessionCwd(null);
     setSelectedSession(session);
     setRefreshKey((k) => k + 1);
+    hydrateSelectedSession(session.id);
     router.replace(`?session=${encodeURIComponent(session.id)}`, { scroll: false });
-  }, [router]);
+  }, [router, hydrateSelectedSession]);
 
   const handleAgentEnd = useCallback(() => {
     setRefreshKey((k) => k + 1);
@@ -240,8 +260,9 @@ export function AppShell() {
       ...(prev ?? { path: "", cwd: "", created: "", modified: "", messageCount: 0, firstMessage: "" }),
       id: newSessionId,
     }));
+    hydrateSelectedSession(newSessionId);
     router.replace(`?session=${encodeURIComponent(newSessionId)}`, { scroll: false });
-  }, [router]);
+  }, [router, hydrateSelectedSession]);
 
   const handleInitialRestoreDone = useCallback(() => {
     setInitialSessionRestored(true);
