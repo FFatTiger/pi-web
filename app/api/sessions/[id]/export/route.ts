@@ -82,15 +82,18 @@ async function getPiCliPath(): Promise<string | null> {
  * the call stack on deep linear session trees (e.g., 5000+ entries).
  *
  * ## Root Cause
- * pi-coding-agent's template.js uses two recursive functions to render
- * the session tree in the exported HTML:
+ * pi-coding-agent's template.js uses recursive helpers to render and
+ * navigate the session tree in the exported HTML:
  *
  *   1. sortChildren(node) — recursively sorts children of every node.
  *      Calls itself via node.children.forEach(sortChildren).
  *      On a 5527-entry linear chain (no branches), this recurses 5527
  *      levels deep → stack overflow.
  *
- *   2. markActive(node) — recursively marks nodes on the active path.
+ *   2. mapNodes(node) — recursively indexes tree nodes the first time
+ *      a tree item is clicked. Same depth -> same overflow.
+ *
+ *   3. markActive(node) — recursively marks nodes on the active path.
  *      Calls itself via markActive(child) for each child.
  *      Same depth → same overflow.
  *
@@ -104,6 +107,7 @@ async function getPiCliPath(): Promise<string | null> {
  *
  *   sortChildren  → explicit stack (DFS pre-order, push children in
  *                   reverse to maintain order)
+ *   mapNodes      → explicit stack (DFS pre-order)
  *   markActive    → two-stack post-order (stack1 for traversal,
  *                   stack2 for processing children before parent)
  *
@@ -122,15 +126,26 @@ function patchExportHtml(html: string): string {
   const n = (s: string) => s.replace(/\r\n/g, "\n");
   html = n(html);
 
-  // Fix 1: sortChildren — recursive → iterative (explicit stack)
-  html = html.replace(
-    n(`        function sortChildren(node) {
+  const replaceRequired = (source: string, name: string, search: string, replacement: string) => {
+    const normalizedSearch = n(search);
+    const normalizedReplacement = n(replacement);
+    const matches = source.split(normalizedSearch).length - 1;
+    if (matches !== 1) {
+      throw new Error(`Failed to patch exported HTML: ${name} expected 1 match, found ${matches}`);
+    }
+    return source.replace(normalizedSearch, normalizedReplacement);
+  };
+
+  html = replaceRequired(
+    html,
+    "sortChildren",
+    `        function sortChildren(node) {
           node.children.sort((a, b) =>
             new Date(a.entry.timestamp).getTime() - new Date(b.entry.timestamp).getTime()
           );
           node.children.forEach(sortChildren);
-        }`),
-    n(`        function sortChildren(root) {
+        }`,
+    `        function sortChildren(root) {
           const stack = [root];
           while (stack.length) {
             const node = stack.pop();
@@ -141,20 +156,39 @@ function patchExportHtml(html: string): string {
               stack.push(node.children[i]);
             }
           }
-        }`)
+        }`
   );
 
-  // Fix 2: markActive — recursive → iterative (two-stack post-order)
-  html = html.replace(
-    n(`        function markActive(node) {
+  html = replaceRequired(
+    html,
+    "mapNodes",
+    `          function mapNodes(node) {
+            treeNodeMap.set(node.entry.id, node);
+            node.children.forEach(mapNodes);
+          }
+          tree.forEach(mapNodes);`,
+    `          const stack = [...tree].reverse();
+          while (stack.length) {
+            const node = stack.pop();
+            treeNodeMap.set(node.entry.id, node);
+            for (let i = node.children.length - 1; i >= 0; i--) {
+              stack.push(node.children[i]);
+            }
+          }`
+  );
+
+  html = replaceRequired(
+    html,
+    "markActive",
+    `        function markActive(node) {
           let has = activePathIds.has(node.entry.id);
           for (const child of node.children) {
             if (markActive(child)) has = true;
           }
           containsActive.set(node, has);
           return has;
-        }`),
-    n(`        function markActive(root) {
+        }`,
+    `        function markActive(root) {
           // Post-order traversal using two stacks
           const stack1 = [root];
           const stack2 = [];
@@ -173,7 +207,7 @@ function patchExportHtml(html: string): string {
             }
             containsActive.set(node, has);
           }
-        }`)
+        }`
   );
 
   return html;
