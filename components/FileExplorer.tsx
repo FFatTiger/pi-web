@@ -174,7 +174,7 @@ function TreeNode({
             title="Insert path into chat"
             style={{
               position: "absolute",
-              right: !node.isDir ? 36 : 4,
+              right: !node.isDir ? 28 : 4,
               top: "50%",
               transform: "translateY(-50%)",
               display: "flex",
@@ -215,7 +215,7 @@ function TreeNode({
               alignItems: "center",
               justifyContent: "center",
               gap: 4,
-              padding: "0 6px",
+              padding: "0 5px",
               height: 20,
               background: "var(--bg-panel)",
               border: "1px solid var(--border)",

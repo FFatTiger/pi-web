@@ -45,25 +45,33 @@ function isDocumentPreviewPath(filePath: string): boolean {
   return DOCUMENT_PREVIEW_EXTS.has(getFileExt(filePath));
 }
 
-function DownloadLink({ filePath, label = "Download" }: { filePath: string; label?: string }) {
+function DownloadLink({ filePath }: { filePath: string }) {
   const encoded = encodeFilePathForApi(filePath);
   return (
     <a
       href={`/api/files/${encoded}?type=download`}
       download={getFileName(filePath)}
+      title="Download file"
       style={{
-        color: "var(--text-muted)",
-        textDecoration: "none",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        height: 20,
+        padding: "0 5px",
+        background: "var(--bg-panel)",
         border: "1px solid var(--border)",
-        borderRadius: 5,
-        padding: "2px 8px",
-        fontSize: 11,
-        lineHeight: 1.4,
-        background: "var(--bg-hover)",
+        borderRadius: 4,
+        color: "var(--text-muted)",
+        cursor: "pointer",
         flexShrink: 0,
+        textDecoration: "none",
       }}
     >
-      {label}
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+        <polyline points="7 10 12 15 17 10" />
+        <line x1="12" y1="15" x2="12" y2="3" />
+      </svg>
     </a>
   );
 }
@@ -372,7 +380,6 @@ function ImageViewer({ filePath, cwd }: { filePath: string; cwd?: string }) {
         <span style={{ marginLeft: "auto" }}>{ext || "image"}</span>
         {naturalSize && <span>{naturalSize.w} × {naturalSize.h}</span>}
         {formatSizeStr && <span>{formatSizeStr}</span>}
-        <DownloadLink filePath={filePath} />
         <span
           title={watching ? "Live sync active" : "Not watching"}
           style={{ display: "flex", alignItems: "center", gap: 4, color: watching ? "#4ade80" : "var(--text-dim)" }}
@@ -389,6 +396,7 @@ function ImageViewer({ filePath, cwd }: { filePath: string; cwd?: string }) {
           />
           {watching ? "live" : "static"}
         </span>
+        <DownloadLink filePath={filePath} />
       </div>
       <div
         style={{
@@ -507,7 +515,6 @@ function AudioViewer({ filePath, cwd }: { filePath: string; cwd?: string }) {
         <span style={{ marginLeft: "auto" }}>{ext || "audio"}</span>
         {duration != null && <span>{formatDuration(duration)}</span>}
         {size != null && <span>{formatSize(size)}</span>}
-        <DownloadLink filePath={filePath} />
         <span
           title={watching ? "Live sync active" : "Not watching"}
           style={{ display: "flex", alignItems: "center", gap: 4, color: watching ? "#4ade80" : "var(--text-dim)" }}
@@ -524,6 +531,7 @@ function AudioViewer({ filePath, cwd }: { filePath: string; cwd?: string }) {
           />
           {watching ? "live" : "static"}
         </span>
+        <DownloadLink filePath={filePath} />
       </div>
       <div
         style={{
@@ -641,7 +649,6 @@ function DocumentViewer({ filePath, cwd }: { filePath: string; cwd?: string }) {
         </span>
         <span style={{ marginLeft: "auto" }}>{ext === "docx" ? "docx preview" : "pdf"}</span>
         {size != null && <span>{formatSize(size)}</span>}
-        <DownloadLink filePath={filePath} />
         <span
           title={watching ? "Live sync active" : "Not watching"}
           style={{ display: "flex", alignItems: "center", gap: 4, color: watching ? "#4ade80" : "var(--text-dim)", flexShrink: 0 }}
@@ -658,6 +665,7 @@ function DocumentViewer({ filePath, cwd }: { filePath: string; cwd?: string }) {
           />
           {watching ? "live" : "static"}
         </span>
+        <DownloadLink filePath={filePath} />
       </div>
       <div style={{ flex: 1, minHeight: 0, background: "var(--bg-panel)" }}>
         {error ? (
@@ -823,7 +831,6 @@ function TextFileViewer({ filePath, cwd }: Props) {
         <span style={{ marginLeft: "auto" }}>{data.language}</span>
         {viewMode === "source" && <span>{lines.length} lines</span>}
         <span>{formatSize(data.size)}</span>
-        <DownloadLink filePath={filePath} />
 
         {/* Live watch indicator */}
         <span
@@ -943,6 +950,7 @@ function TextFileViewer({ filePath, cwd }: Props) {
             </button>
           </div>
         )}
+        <DownloadLink filePath={filePath} />
       </div>
 
       {/* Content area */}
