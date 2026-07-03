@@ -12,6 +12,20 @@ export function useAudio() {
   const enabledRef = useRef(enabled);
   useEffect(() => { enabledRef.current = enabled; }, [enabled]);
 
+  // Reuse a single AudioContext so it can be resumed if the browser
+  // autoplay policy suspends it (contexts created outside user gestures
+  // start in "suspended" state and produce no sound).
+  const ctxRef = useRef<AudioContext | null>(null);
+  const getCtx = useCallback((): AudioContext | null => {
+    if (ctxRef.current) return ctxRef.current;
+    try {
+      ctxRef.current = new AudioContext();
+    } catch {
+      return null;
+    }
+    return ctxRef.current;
+  }, []);
+
   const toggle = useCallback(() => {
     setEnabled((prev) => {
       const next = !prev;
@@ -22,8 +36,13 @@ export function useAudio() {
 
   const playDone = useCallback(() => {
     if (!enabledRef.current) return;
+    const ctx = getCtx();
+    if (!ctx) return;
+    // Resume if suspended (browser autoplay policy)
+    if (ctx.state === "suspended") {
+      ctx.resume().catch(() => {});
+    }
     try {
-      const ctx = new AudioContext();
       const now = ctx.currentTime;
       const freqs = [523.25, 659.25];
       freqs.forEach((freq, i) => {
@@ -40,11 +59,10 @@ export function useAudio() {
         osc.start(t);
         osc.stop(t + 0.45);
       });
-      setTimeout(() => ctx.close(), 1200);
     } catch {
       // AudioContext not available
     }
-  }, []);
+  }, [getCtx]);
 
   return { soundEnabled: enabled, onSoundToggle: toggle, playDoneSound: playDone, soundEnabledRef: enabledRef };
 }
