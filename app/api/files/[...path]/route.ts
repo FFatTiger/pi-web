@@ -146,18 +146,19 @@ function encodeHeaderValue(value: string): string {
   );
 }
 
-function getContentDisposition(filePath: string): string {
+function getContentDisposition(filePath: string, asDownload = false): string {
+  const disposition = asDownload ? "attachment" : "inline";
   const fileName = path.basename(filePath);
   const fallback = fileName.replace(/[^\x20-\x7E]|["\\;\r\n]/g, "_") || "download";
-  return `inline; filename="${fallback}"; filename*=UTF-8''${encodeHeaderValue(fileName)}`;
+  return `${disposition}; filename="${fallback}"; filename*=UTF-8''${encodeHeaderValue(fileName)}`;
 }
 
-function streamFile(filePath: string, stat: fs.Stats, contentType: string, rangeHeader: string | null): Response {
+function streamFile(filePath: string, stat: fs.Stats, contentType: string, rangeHeader: string | null, asDownload = false): Response {
   const headers = {
     "Content-Type": contentType,
     "Cache-Control": "no-cache",
     "Accept-Ranges": "bytes",
-    "Content-Disposition": getContentDisposition(filePath),
+    "Content-Disposition": getContentDisposition(filePath, asDownload),
   };
 
   if (!rangeHeader) {
@@ -321,6 +322,14 @@ export async function GET(
       const content = fs.readFileSync(filePath, "utf-8");
       const language = getLanguage(filePath);
       return NextResponse.json({ content, language, size: stat.size });
+    }
+
+    if (type === "download") {
+      if (!stat.isFile()) {
+        return NextResponse.json({ error: "Not a file" }, { status: 400 });
+      }
+      const mime = getImageMime(filePath) || getAudioMime(filePath) || getDocumentMime(filePath) || "application/octet-stream";
+      return streamFile(filePath, stat, mime, request.headers.get("range"), true);
     }
 
     if (type === "meta") {
