@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useRef, useState, useCallback, useEffect, useImperativeHandle, forwardRef, KeyboardEvent } from "react";
-import type { BuiltinSlashCommandResult, CompactResultInfo, SlashCommandInfo } from "@/hooks/useAgentSession";
+import type { BuiltinSlashCommandResult, CompactResultInfo, QueuedMessages, SlashCommandInfo } from "@/hooks/useAgentSession";
 import { clearDraft, getDraft, setDraft, type ChatDraftImage } from "@/lib/draft-store";
 import { useIsMobile } from "@/hooks/useIsMobile";
 
@@ -41,6 +41,8 @@ interface Props {
   availableThinkingLevels?: string[] | null;
   thinkingLevelMap?: Record<string, string | null> | null;
   retryInfo?: { attempt: number; maxAttempts: number; errorMessage?: string } | null;
+  queuedMessages?: QueuedMessages | null;
+  onRecallQueue?: () => void;
   slashCommands?: SlashCommandInfo[];
   slashCommandsLoading?: boolean;
   onLoadSlashCommands?: () => Promise<SlashCommandInfo[]> | SlashCommandInfo[];
@@ -54,6 +56,7 @@ interface Props {
 export interface ChatInputHandle {
   insertText: (text: string) => void;
   insertIfEmpty: (text: string) => void;
+  prependText: (text: string) => void;
   addImages: (files: File[]) => void;
 }
 
@@ -143,11 +146,43 @@ function revokeImagePreview(image: AttachedImage): void {
   }
 }
 
+function QueuedMessageRow({ kind, text }: { kind: "steer" | "follow-up"; text: string }) {
+  return (
+    <div
+      title={text}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "3px 10px",
+        fontSize: 12,
+        color: "var(--text-muted)",
+        minWidth: 0,
+      }}
+    >
+      <span
+        style={{
+          flexShrink: 0,
+          fontSize: 10,
+          fontFamily: "var(--font-mono)",
+          padding: "1px 7px",
+          borderRadius: 999,
+          border: `1px solid ${kind === "steer" ? "color-mix(in srgb, var(--accent) 45%, transparent)" : "var(--border)"}`,
+          color: kind === "steer" ? "var(--accent)" : "var(--text-dim)",
+        }}
+      >
+        {kind}
+      </span>
+      <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{text}</span>
+    </div>
+  );
+}
+
 export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   onSend, onAbort, onSteer, onFollowUp, isStreaming, model, isAutoModelSelection, modelNames, modelList, onModelChange,
   onCompact, onAbortCompaction, isCompacting, compactError, compactResult, toolPreset, onToolPresetChange,
   thinkingLevel, onThinkingLevelChange, availableThinkingLevels, thinkingLevelMap,
-  retryInfo,
+  retryInfo, queuedMessages, onRecallQueue,
   slashCommands, slashCommandsLoading, onLoadSlashCommands,
   onBuiltinCommand,
   soundEnabled, onSoundToggle, onAudioUnlock,
@@ -197,6 +232,22 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
       });
     },
+    prependText(text: string) {
+      if (!text.trim()) return;
+      const ta = textareaRef.current;
+      const current = ta ? ta.value : value;
+      // Mirrors the TUI's queue restore: queued text first, then whatever
+      // the user already typed, separated by a blank line.
+      const combined = [text, current].filter((t) => t.trim()).join("\n\n");
+      setValue(combined);
+      requestAnimationFrame(() => {
+        if (!ta) return;
+        ta.focus();
+        ta.setSelectionRange(combined.length, combined.length);
+        ta.style.height = "auto";
+        ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
+      });
+    },
     insertText(text: string) {
       const ta = textareaRef.current;
       if (!ta) {
@@ -225,6 +276,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   }));
 
   const processImageFiles = useCallback(async (files: File[]) => {
+    if (isStreaming) return;
     const imageFiles = files.filter((f) => f.type.startsWith("image/"));
     if (!imageFiles.length) return;
     const newImages = await Promise.all(
@@ -244,7 +296,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       )
     );
     setAttachedImages((prev) => [...prev, ...newImages]);
-  }, []);
+  }, [isStreaming]);
 
   const removeImage = useCallback((index: number) => {
     setAttachedImages((prev) => {
@@ -366,6 +418,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const slashCommandCountLabel = filteredSlashCommands.length === 1
     ? (slashQuery ? "1 match" : "1 command")
     : `${filteredSlashCommands.length} ${slashQuery ? "matches" : "commands"}`;
+  const hasInputText = Boolean(value.trim());
+  const canQueueStreamingMessage = hasInputText && attachedImages.length === 0;
 
   const applySlashCommand = useCallback((command: SlashCommandPaletteItem) => {
     const nextValue = `/${command.name} `;
@@ -385,6 +439,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const sendQueued = useCallback((mode: "steer" | "followup") => {
     const msg = value.trim();
     if (!msg && !attachedImages.length) return;
+    if (attachedImages.length) return;
     onAudioUnlock?.();
     const streamingBehavior = mode === "steer" ? "steer" : "followUp";
     if (msg.startsWith("/") && onPromptWithStreamingBehavior) {
@@ -636,6 +691,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         type="file"
         accept="image/*"
         multiple
+        disabled={isStreaming}
         style={{ display: "none" }}
         onChange={(e) => {
           const files = Array.from(e.target.files ?? []);
@@ -644,6 +700,74 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         }}
       />
       <div style={{ maxWidth: 820, margin: "0 auto" }}>
+        {/* Queued steering / follow-up messages (delivered by pi on upcoming turns) */}
+        {((queuedMessages?.steering.length ?? 0) + (queuedMessages?.followUp.length ?? 0)) > 0 && (
+          <div style={{
+            marginBottom: 8,
+            border: "1px solid var(--border)",
+            borderRadius: 6,
+            background: "var(--bg-panel)",
+            padding: "5px 0",
+          }}>
+            <div style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 8,
+              padding: "2px 8px 4px 10px",
+            }}>
+              <span style={{
+                fontSize: 10,
+                fontFamily: "var(--font-mono)",
+                color: "var(--text-dim)",
+                textTransform: "uppercase",
+                letterSpacing: 0.4,
+              }}>
+                Queued · {(queuedMessages?.steering.length ?? 0) + (queuedMessages?.followUp.length ?? 0)}
+              </span>
+              {onRecallQueue && (
+                <button
+                  onClick={onRecallQueue}
+                  title="Remove all queued messages and put them back into the input box for editing"
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    padding: "4px 12px",
+                    fontSize: 12,
+                    color: "var(--text)",
+                    background: "transparent",
+                    border: "1px solid var(--border)",
+                    borderRadius: 7,
+                    cursor: "pointer",
+                    transition: "background 0.12s, border-color 0.12s",
+                    whiteSpace: "nowrap",
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "var(--bg-hover)";
+                    e.currentTarget.style.borderColor = "color-mix(in srgb, var(--accent) 45%, var(--border))";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "transparent";
+                    e.currentTarget.style.borderColor = "var(--border)";
+                  }}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="9 14 4 9 9 4" />
+                    <path d="M20 20v-7a4 4 0 0 0-4-4H4" />
+                  </svg>
+                  Recall to input
+                </button>
+              )}
+            </div>
+            {queuedMessages?.steering.map((text, i) => (
+              <QueuedMessageRow key={`steer-${i}`} kind="steer" text={text} />
+            ))}
+            {queuedMessages?.followUp.map((text, i) => (
+              <QueuedMessageRow key={`followup-${i}`} kind="follow-up" text={text} />
+            ))}
+          </div>
+        )}
         {/* Retry banner */}
         {retryInfo && (
           <div style={{
@@ -890,16 +1014,16 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               {onSteer && (
                 <button
                   onClick={() => sendQueued("steer")}
-                  disabled={!value.trim() && !attachedImages.length}
-                  title="Interrupt the current run and inject this message now"
+                  disabled={!canQueueStreamingMessage}
+                  title={attachedImages.length ? "Image attachments cannot be queued while the agent is running" : "Interrupt the current run and inject this message now"}
                   style={{
                     display: "flex", alignItems: "center", gap: 5,
                     padding: "7px 12px",
-                    background: (value.trim() || attachedImages.length) ? "rgba(234,179,8,0.12)" : "none",
+                    background: canQueueStreamingMessage ? "rgba(234,179,8,0.12)" : "none",
                     border: "1px solid rgba(234,179,8,0.35)",
                     borderRadius: 8,
-                    color: (value.trim() || attachedImages.length) ? "rgba(180,130,0,1)" : "var(--text-dim)",
-                    cursor: (value.trim() || attachedImages.length) ? "pointer" : "not-allowed",
+                    color: canQueueStreamingMessage ? "rgba(180,130,0,1)" : "var(--text-dim)",
+                    cursor: canQueueStreamingMessage ? "pointer" : "not-allowed",
                     fontSize: 13, fontWeight: 600, letterSpacing: "-0.01em",
                     transition: "background 0.12s",
                   }}
@@ -913,16 +1037,16 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               {onFollowUp && (
                 <button
                   onClick={() => sendQueued("followup")}
-                  disabled={!value.trim() && !attachedImages.length}
-                  title="Queue this message after the agent finishes"
+                  disabled={!canQueueStreamingMessage}
+                  title={attachedImages.length ? "Image attachments cannot be queued while the agent is running" : "Queue this message after the agent finishes"}
                   style={{
                     display: "flex", alignItems: "center", gap: 5,
                     padding: "7px 12px",
-                    background: (value.trim() || attachedImages.length) ? "rgba(129,140,248,0.12)" : "none",
+                    background: canQueueStreamingMessage ? "rgba(129,140,248,0.12)" : "none",
                     border: "1px solid rgba(129,140,248,0.35)",
                     borderRadius: 8,
-                    color: (value.trim() || attachedImages.length) ? "rgba(99,102,241,1)" : "var(--text-dim)",
-                    cursor: (value.trim() || attachedImages.length) ? "pointer" : "not-allowed",
+                    color: canQueueStreamingMessage ? "rgba(99,102,241,1)" : "var(--text-dim)",
+                    cursor: canQueueStreamingMessage ? "pointer" : "not-allowed",
                     fontSize: 13, fontWeight: 600, letterSpacing: "-0.01em",
                     transition: "background 0.12s",
                   }}

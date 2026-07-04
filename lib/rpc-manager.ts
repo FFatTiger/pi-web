@@ -285,7 +285,11 @@ export class AgentSessionWrapper {
           autoRetryEnabled: this.inner.autoRetryEnabled,
           model: model ? { id: model.id, provider: model.provider } : undefined,
           messageCount: 0,
-          pendingMessageCount: 0,
+          pendingMessageCount: this.inner.pendingMessageCount,
+          queuedMessages: {
+            steering: [...this.inner.getSteeringMessages()],
+            followUp: [...this.inner.getFollowUpMessages()],
+          },
           contextUsage: contextUsage
             ? { percent: contextUsage.percent, contextWindow: contextUsage.contextWindow, tokens: contextUsage.tokens }
             : null,
@@ -383,6 +387,12 @@ export class AgentSessionWrapper {
       case "set_auto_compaction": {
         this.inner.setAutoCompactionEnabled(command.enabled as boolean);
         return null;
+      }
+
+      case "clear_queue": {
+        // Full clear only: pi has no single-item dequeue, and clear+requeue
+        // races against the agent loop pulling messages mid-flight.
+        return this.inner.clearQueue();
       }
 
       case "steer": {
