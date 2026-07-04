@@ -44,7 +44,7 @@ const CHAT_COLUMN_PADDING = 16;
 const CHAT_INPUT_RIGHT_PADDING = CHAT_COLUMN_PADDING + CHAT_MINIMAP_WIDTH;
 
 export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsChange, onSessionStatsPanelOpen, onContextUsageChange }: Props) {
-  const { soundEnabled, onSoundToggle, playDoneSound } = useAudio();
+  const { soundEnabled, onSoundToggle, playDoneSound, unlockAudio } = useAudio();
   const isMobile = useIsMobile();
 
   // Wrap onAgentEnd to play the completion sound. This is more reliable than
@@ -77,7 +77,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     handleSend, handleAbort, handleFork, handleNavigate, handleModelChange,
     handleCompact, handleSteer, handleFollowUp, handlePromptWithStreamingBehavior, handleAbortCompaction,
     handleBuiltinSlashCommand,
-    handleToolPresetChange, handleThinkingLevelChange, loadSlashCommands, handleAgentEventRef,
+    handleToolPresetChange, handleThinkingLevelChange, loadSlashCommands,
   } = useAgentSession({
     session, newSessionCwd, onAgentEnd: wrappedOnAgentEnd, onSessionCreated, onSessionForked,
     modelsRefreshKey, onBranchDataChange, onSystemPromptChange, onSessionStatsPanelOpen,
@@ -172,6 +172,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
       onBuiltinCommand={handleBuiltinSlashCommand}
       soundEnabled={soundEnabled}
       onSoundToggle={onSoundToggle}
+      onAudioUnlock={unlockAudio}
       draftKey={session?.id ?? (newSessionCwd ? `new:${newSessionCwd}` : undefined)}
     />
   );
