@@ -148,6 +148,7 @@ const USER_SCROLL_INTENT_MS = 1200;
 const PROMPT_SETTLE_INITIAL_DELAY_MS = 800;
 const PROMPT_SETTLE_POLL_MS = 600;
 const PROMPT_SETTLE_MAX_MS = 20_000;
+const AGENT_STATE_RECONCILE_MS = 15_000;
 const MAX_NOTICES = 5;
 const NOTICE_VISIBLE_MS = 5000;
 const NOTICE_EXIT_ANIMATION_MS = 180;
@@ -620,6 +621,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   }, [addNotice, opts.chatInputRef]);
 
   const finishPromptWithoutStream = useCallback(async (sid: string | null = sessionIdRef.current, runId?: number) => {
+    // Bail out before loadSession too: a stale finish for a previous run
+    // must not overwrite the messages of the run currently streaming.
+    if (runId !== undefined && promptRunIdRef.current !== runId) return;
     try {
       if (sid) await loadSession(sid);
     } finally {
@@ -657,6 +661,66 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, [finishPromptWithoutStream]);
 
+  // Reconcile client streaming state with the server. When SSE events are
+  // missed (network drop, mobile tab backgrounded, half-open connection),
+  // agent_end never arrives and the UI stays in streaming state forever.
+  // If the server reports idle while we still think it's running, finish
+  // through the same path as prompt_done.
+  const reconcileAgentState = useCallback(async (sid: string) => {
+    if (!agentRunningRef.current) return;
+    const runId = promptRunIdRef.current;
+    try {
+      const res = await fetch(`/api/agent/${encodeURIComponent(sid)}`);
+      if (!res.ok) return;
+      const data = await res.json() as { running?: boolean; state?: AgentStateResponse };
+      // A slow response can straddle a run boundary (previous run finished
+      // and the user already started the next one while this request was in
+      // flight) — everything in it is stale, drop it.
+      if (promptRunIdRef.current !== runId) return;
+      const state = data.state;
+      // Mirror compaction state unconditionally: a missed compaction_end
+      // would otherwise leave the "Stop compaction" UI stuck. No state
+      // (wrapper destroyed) means nothing is compacting.
+      setIsCompacting(state?.isCompacting ?? false);
+      const busy = data.running && state
+        && (state.isStreaming || state.isPromptRunning || state.isCompacting);
+      if (busy || !agentRunningRef.current) return;
+      if (state) {
+        if (state.contextUsage !== undefined) setContextUsage(state.contextUsage ?? null);
+        if (state.systemPrompt !== undefined) setSystemPrompt(state.systemPrompt ?? null);
+        if (state.extensionStatuses !== undefined) setExtensionStatuses(state.extensionStatuses ?? []);
+        if (state.extensionWidgets !== undefined) setExtensionWidgets(state.extensionWidgets ?? []);
+      }
+      await finishPromptWithoutStream(sid, runId);
+    } catch {
+      // Network still down — the next poll / visibility / online tick retries.
+    }
+  }, [finishPromptWithoutStream]);
+
+  // Recovery net for missed SSE events: while the agent is running, verify
+  // against the server periodically and whenever the tab returns to the
+  // foreground or the network comes back.
+  useEffect(() => {
+    if (!agentRunning) return;
+    const reconcile = () => {
+      // Read the ref on every tick: for brand-new sessions the id is
+      // assigned only after ensure_session returns.
+      const sid = sessionIdRef.current;
+      if (sid) void reconcileAgentState(sid);
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") reconcile();
+    };
+    const interval = setInterval(reconcile, AGENT_STATE_RECONCILE_MS);
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("online", reconcile);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("online", reconcile);
+    };
+  }, [agentRunning, reconcileAgentState]);
+
   useEffect(() => {
     agentRunningRef.current = agentRunning;
   }, [agentRunning]);
@@ -670,6 +734,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         dispatch({ type: "start" });
         break;
       case "agent_end":
+        // A late agent_end can arrive over SSE after reconcileAgentState
+        // already finished this run — don't re-trigger completion.
+        if (!agentRunningRef.current) break;
         agentRunningRef.current = false;
         setAgentRunning(false);
         setAgentPhase(null);
@@ -704,6 +771,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         break;
       case "message_start":
       case "message_update": {
+        // Ignore streaming events arriving after this run already finished
+        // (e.g. SSE data buffered while the tab was frozen, flushed after
+        // reconcile) — they would resurrect a ghost streaming bubble.
+        if (!agentRunningRef.current) break;
         const msg = event.message as Partial<AgentMessage> | undefined;
         if (msg?.role === "user") {
           break;
@@ -715,6 +786,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         break;
       }
       case "message_end": {
+        // Same late-event guard: after reconcile finished this run,
+        // loadSession already loaded this message from the session file —
+        // appending it again would duplicate it.
+        if (!agentRunningRef.current) break;
         const completed = event.message as AgentMessage | undefined;
         if (completed && completed.role !== "user") {
           setMessages((prev) => [...prev, normalizeToolCalls(completed)]);
