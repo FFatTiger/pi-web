@@ -1157,6 +1157,17 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           return complete({ handled: true, message: "Compacted context" });
         }
 
+        case "reload": {
+          if (!sid) return complete({ handled: true, error: "No active session to reload" });
+          await sendAgentCommand(sid, { type: "reload" });
+          await Promise.all([
+            loadSession(sid),
+            loadTools(sid),
+            loadSlashCommands(),
+          ]);
+          return complete({ handled: true, message: "Reloaded session resources" });
+        }
+
         case "name": {
           if (!sid) return complete({ handled: true, error: "No active session to name" });
           if (!args) return complete({ handled: true, error: "Usage: /name <name>" });
@@ -1192,7 +1203,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } finally {
       if (commandName === "compact") setIsCompacting(false);
     }
-  }, [addNotice, ensureNewSession, isCompacting, loadSession, promoteNewSession, onSessionStatsPanelOpen]);
+  }, [addNotice, ensureNewSession, isCompacting, loadSession, loadSlashCommands, loadTools, promoteNewSession, onSessionStatsPanelOpen]);
 
   // Queued (undelivered) messages live in the queue panel only; the chat gets
   // the real user message when pi delivers it (user message_end event). An
