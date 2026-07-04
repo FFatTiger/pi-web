@@ -292,15 +292,3 @@ export interface SessionContext {
   thinkingLevel: string;
   model: { provider: string; modelId: string } | null;
 }
-
-// RPC types
-export interface RpcSessionState {
-  model?: { provider: string; id: string; contextWindow?: number };
-  thinkingLevel: string;
-  isStreaming: boolean;
-  isCompacting: boolean;
-  sessionFile?: string;
-  sessionId: string;
-  sessionName?: string;
-  messageCount: number;
-}

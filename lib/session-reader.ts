@@ -6,10 +6,6 @@ import { resolveProject, type ProjectInfo } from "./worktree";
 
 export { getAgentDir };
 
-export function getSessionsDir(): string {
-  return `${getAgentDir()}/sessions`;
-}
-
 export async function listAllSessions(): Promise<SessionInfo[]> {
   const piSessions: PiSessionInfo[] = await SessionManager.listAll();
   const pathToId = new Map<string, string>();
@@ -161,11 +157,6 @@ export function buildSessionContext(entries: SessionEntry[], leafId?: string | n
     thinkingLevel: piCtx.thinkingLevel,
     model: piCtx.model,
   };
-}
-
-export function getLeafId(entries: SessionEntry[]): string | null {
-  if (entries.length === 0) return null;
-  return entries[entries.length - 1].id;
 }
 
 function isContextMessageEntry(entry: SessionEntry): boolean {
