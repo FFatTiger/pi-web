@@ -7,6 +7,7 @@ import {
   isWindowsAbsolutePath,
   normalizeSlashes,
 } from "@/lib/file-access";
+import { isFilePathReferencedBySession } from "@/lib/session-file-references";
 
 const IGNORED_NAMES = new Set([
   "node_modules", ".git", ".next", "dist", "build", "__pycache__",
@@ -284,9 +285,15 @@ export async function GET(
     const { path: segments } = await params;
     const filePath = filePathFromSegments(segments);
     const type = request.nextUrl.searchParams.get("type") ?? "list";
+    const sessionId = request.nextUrl.searchParams.get("sessionId");
 
     const allowedRoots = await getAllowedFileRoots();
-    if (!isFilePathAllowed(filePath, allowedRoots)) {
+    const allowedByRoot = isFilePathAllowed(filePath, allowedRoots);
+    const allowedBySessionReference =
+      !allowedByRoot &&
+      type !== "list" &&
+      await isFilePathReferencedBySession(filePath, sessionId);
+    if (!allowedByRoot && !allowedBySessionReference) {
       return NextResponse.json({ error: "Access denied" }, { status: 403 });
     }
 
