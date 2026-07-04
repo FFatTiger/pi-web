@@ -16,7 +16,7 @@ interface Props {
   onCwdChange?: (cwd: string | null, projectRoot?: string | null) => void;
   onOpenFile?: (filePath: string, fileName: string) => void;
   explorerRefreshKey?: number;
-  onAtMention?: (relativePath: string) => void;
+  onAtMention?: (relativePath: string, isDir: boolean) => void;
 }
 
 interface WorktreeEntry {

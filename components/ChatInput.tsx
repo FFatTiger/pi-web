@@ -3,6 +3,11 @@
 import React, { useRef, useState, useCallback, useEffect, useImperativeHandle, forwardRef, KeyboardEvent } from "react";
 import type { BuiltinSlashCommandResult, CompactResultInfo, QueuedMessages, SlashCommandInfo } from "@/hooks/useAgentSession";
 import { clearDraft, getDraft, setDraft, type ChatDraftImage } from "@/lib/draft-store";
+import {
+  buildEntriesFromFiles, buildAtInsertText, extractAtQuery, filterFileEntries,
+  type AtQueryMatch, type FileIndexEntry,
+} from "@/lib/file-fuzzy";
+import { FolderIcon, getFileIcon } from "./FileIcons";
 import { useIsMobile } from "@/hooks/useIsMobile";
 
 export interface AttachedImage {
@@ -51,6 +56,8 @@ interface Props {
   onSoundToggle?: () => void;
   onAudioUnlock?: () => void;
   draftKey?: string;
+  /** Session working directory — enables the @ file autocomplete menu */
+  cwd?: string | null;
 }
 
 export interface ChatInputHandle {
@@ -188,6 +195,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   soundEnabled, onSoundToggle, onAudioUnlock,
   onPromptWithStreamingBehavior,
   draftKey,
+  cwd,
 }: Props, ref) {
   const isMobile = useIsMobile();
   const [value, setValue] = useState(() => (draftKey ? getDraft(draftKey)?.value ?? "" : ""));
@@ -201,6 +209,12 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   ));
   const [slashMenuOpen, setSlashMenuOpen] = useState(false);
   const [slashActiveIndex, setSlashActiveIndex] = useState(0);
+  const [atQuery, setAtQuery] = useState<AtQueryMatch | null>(null);
+  const [atMenuOpen, setAtMenuOpen] = useState(false);
+  const [atActiveIndex, setAtActiveIndex] = useState(0);
+  const [fileIndex, setFileIndex] = useState<{ cwd: string; entries: FileIndexEntry[]; truncated: boolean } | null>(null);
+  const [fileIndexLoading, setFileIndexLoading] = useState(false);
+  const [atServerResult, setAtServerResult] = useState<{ cwd: string; query: string; matches: FileIndexEntry[] } | null>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -213,6 +227,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const lastCompositionEndAtRef = useRef(0);
   const slashCommandsRequestedRef = useRef(false);
   const slashItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const atItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const fileIndexMetaRef = useRef<{ cwd: string; fetchedAt: number } | null>(null);
+  const fileIndexFetchingRef = useRef<string | null>(null);
   const draftKeyRef = useRef(draftKey);
   const valueRef = useRef(value);
   const attachedImagesRef = useRef(attachedImages);
@@ -225,6 +242,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       const current = ta ? ta.value : value;
       if (current.trim()) return;
       setValue(text);
+      setAtQuery(null);
       requestAnimationFrame(() => {
         if (!ta) return;
         ta.focus();
@@ -240,6 +258,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       // the user already typed, separated by a blank line.
       const combined = [text, current].filter((t) => t.trim()).join("\n\n");
       setValue(combined);
+      setAtQuery(null);
       requestAnimationFrame(() => {
         if (!ta) return;
         ta.focus();
@@ -261,6 +280,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       const sep = before.length > 0 && !before.endsWith(" ") ? " " : "";
       const newVal = before + sep + text + after;
       setValue(newVal);
+      setAtQuery(null);
       requestAnimationFrame(() => {
         if (!ta) return;
         const pos = start + sep.length + text.length;
@@ -316,6 +336,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
 
   const clearInput = useCallback(() => {
     setValue("");
+    setAtQuery(null);
     if (draftKey) clearDraft(draftKey);
     if (draftKeyRef.current && draftKeyRef.current !== draftKey) clearDraft(draftKeyRef.current);
     clearImages();
@@ -346,6 +367,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     const draft = draftKey ? getDraft(draftKey) : null;
     draftKeyRef.current = draftKey;
     setValue(draft?.value ?? "");
+    setAtQuery(null);
     setAttachedImages((prev) => {
       prev.forEach(revokeImagePreview);
       return draft?.images.map(draftImageToAttachedImage) ?? [];
@@ -420,6 +442,143 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     : `${filteredSlashCommands.length} ${slashQuery ? "matches" : "commands"}`;
   const hasInputText = Boolean(value.trim());
   const canQueueStreamingMessage = hasInputText && attachedImages.length === 0;
+
+  // ── @ file autocomplete ──────────────────────────────────────────────────
+  // Recomputed from the text before the caret on every change/caret move.
+  // Disabled entirely when there is no cwd (new session without a directory).
+  const updateAtQuery = useCallback((text: string, cursor: number | null) => {
+    if (!cwd) {
+      setAtQuery(null);
+      return;
+    }
+    const pos = cursor ?? text.length;
+    setAtQuery(extractAtQuery(text.slice(0, pos)));
+  }, [cwd]);
+
+  const atQueryText = atQuery?.query ?? null;
+  const atLocalMatches: FileIndexEntry[] = React.useMemo(() => (
+    atQueryText !== null && fileIndex && fileIndex.cwd === cwd
+      ? filterFileEntries(fileIndex.entries, atQueryText)
+      : []
+  ), [atQueryText, fileIndex, cwd]);
+
+  // When the client index is truncated (repo larger than the index cap),
+  // local filtering cannot see deep files, so queries are also ranked
+  // server-side against the full listing. Local matches render immediately
+  // and are replaced when the (debounced) server result for the current
+  // query arrives; stale responses are ignored via the query/cwd tag.
+  const needsServerSearch = Boolean(atQueryText && fileIndex?.truncated && fileIndex.cwd === cwd);
+  useEffect(() => {
+    if (!needsServerSearch || !cwd || !atQueryText) return;
+    const fetchCwd = cwd;
+    const query = atQueryText;
+    const timer = setTimeout(() => {
+      fetch(`/api/file-index?cwd=${encodeURIComponent(fetchCwd)}&q=${encodeURIComponent(query)}`)
+        .then((res) => {
+          if (!res.ok) throw new Error(`file search failed: ${res.status}`);
+          return res.json() as Promise<{ matches?: FileIndexEntry[] }>;
+        })
+        .then((data) => setAtServerResult({ cwd: fetchCwd, query, matches: data.matches ?? [] }))
+        .catch(() => {
+          // Keep showing local matches; the next keystroke retries.
+        });
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [needsServerSearch, atQueryText, cwd]);
+
+  const serverResultInUse = needsServerSearch
+    && atServerResult !== null
+    && atServerResult.cwd === cwd
+    && atServerResult.query === atQueryText;
+  const atMatches: FileIndexEntry[] = serverResultInUse ? atServerResult.matches : atLocalMatches;
+
+  // Open/reset the menu whenever the @token appears or changes (mirrors the
+  // slash menu: Escape closes it, the next keystroke re-opens it).
+  const atTokenKey = atQuery === null ? null : `${atQuery.start}:${atQuery.quoted ? 1 : 0}:${atQuery.query}`;
+  useEffect(() => {
+    if (atTokenKey === null) {
+      setAtMenuOpen(false);
+      setAtActiveIndex(0);
+      return;
+    }
+    setAtMenuOpen(true);
+    setAtActiveIndex(0);
+  }, [atTokenKey]);
+
+  // Fetch the file index when the menu opens. The server caches per cwd for
+  // ~10s, so re-opening refreshes cheaply; while typing nothing refetches.
+  const atTokenActive = atQuery !== null;
+  useEffect(() => {
+    if (!atTokenActive || !cwd) return;
+    const meta = fileIndexMetaRef.current;
+    if (meta && meta.cwd === cwd && Date.now() - meta.fetchedAt < 10_000) return;
+    if (fileIndexFetchingRef.current === cwd) return;
+    fileIndexFetchingRef.current = cwd;
+    const fetchCwd = cwd;
+    setFileIndexLoading(true);
+    fetch(`/api/file-index?cwd=${encodeURIComponent(fetchCwd)}`)
+      .then((res) => {
+        if (!res.ok) throw new Error(`file index failed: ${res.status}`);
+        return res.json() as Promise<{ files?: string[]; truncated?: boolean }>;
+      })
+      .then((data) => {
+        setFileIndex({ cwd: fetchCwd, entries: buildEntriesFromFiles(data.files ?? []), truncated: !!data.truncated });
+        fileIndexMetaRef.current = { cwd: fetchCwd, fetchedAt: Date.now() };
+      })
+      .catch(() => {
+        // Leave any previous index in place; next open retries.
+        fileIndexMetaRef.current = null;
+      })
+      .finally(() => {
+        fileIndexFetchingRef.current = null;
+        setFileIndexLoading(false);
+      });
+  }, [atTokenActive, cwd]);
+
+  const applyAtCompletion = useCallback((entry: FileIndexEntry) => {
+    if (!atQuery) return;
+    const ta = textareaRef.current;
+    const cursor = ta?.selectionStart ?? value.length;
+    const before = value.slice(0, atQuery.start);
+    let after = value.slice(cursor);
+    // Completing inside a quoted token (@"my dir/… with the caret before the
+    // closing quote): the replacement carries its own closing quote, so drop
+    // the old one right after the caret (mirrors the TUI's applyCompletion).
+    if (atQuery.quoted && after.startsWith('"')) {
+      after = after.slice(1);
+    }
+    const insert = buildAtInsertText(entry.path, entry.isDir, atQuery.quoted);
+    const newValue = before + insert.text + after;
+    const newPos = before.length + insert.cursorOffset;
+    setValue(newValue);
+    // setValue alone does not fire onChange — re-derive the token here. Files
+    // end with a space (token closes, menu hides); directories end with "/"
+    // before the caret (token stays open for drill-down into the directory).
+    setAtQuery(extractAtQuery(newValue.slice(0, newPos)));
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(newPos, newPos);
+      el.style.height = "auto";
+      el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+    });
+  }, [atQuery, value]);
+
+  useEffect(() => {
+    if (atActiveIndex >= atMatches.length) {
+      setAtActiveIndex(Math.max(0, atMatches.length - 1));
+    }
+  }, [atMatches.length, atActiveIndex]);
+
+  useEffect(() => {
+    atItemRefs.current.length = atMatches.length;
+  }, [atMatches.length]);
+
+  useEffect(() => {
+    if (!atMenuOpen) return;
+    atItemRefs.current[atActiveIndex]?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [atActiveIndex, atMenuOpen]);
 
   const applySlashCommand = useCallback((command: SlashCommandPaletteItem) => {
     const nextValue = `/${command.name} `;
@@ -545,6 +704,31 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         }
       }
 
+      // @ file menu — skip while composing so IME candidate navigation
+      // (arrows/Enter/Tab) is never intercepted.
+      if (atMenuOpen && atQuery !== null && !isComposing) {
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          setAtActiveIndex((i) => Math.min(Math.max(0, atMatches.length - 1), i + 1));
+          return;
+        }
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          setAtActiveIndex((i) => Math.max(0, i - 1));
+          return;
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          setAtMenuOpen(false);
+          return;
+        }
+        if ((e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) && atMatches[atActiveIndex]) {
+          e.preventDefault();
+          applyAtCompletion(atMatches[atActiveIndex]);
+          return;
+        }
+      }
+
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         if (isStreaming && (onSteer || onFollowUp)) {
@@ -555,7 +739,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         }
       }
     },
-    [isStreaming, onSteer, onFollowUp, slashMenuOpen, slashQuery, filteredSlashCommands, slashActiveIndex, applySlashCommand, sendQueued, handleSend, getNextSlashIndex]
+    [isStreaming, onSteer, onFollowUp, slashMenuOpen, slashQuery, filteredSlashCommands, slashActiveIndex, applySlashCommand, sendQueued, handleSend, getNextSlashIndex, atMenuOpen, atQuery, atMatches, atActiveIndex, applyAtCompletion]
   );
 
   const handleInput = useCallback(() => {
@@ -957,6 +1141,103 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               </div>
             </div>
           )}
+          {atMenuOpen && atQuery !== null && (() => {
+            const indexLoading = fileIndexLoading && (!fileIndex || fileIndex.cwd !== cwd);
+            const matchCountLabel = atMatches.length === 1 ? "1 match" : `${atMatches.length} matches`;
+            // With a truncated index, local results are provisional — the
+            // debounced server search over the full listing replaces them.
+            const truncatedHint = fileIndex?.truncated && !serverResultInUse
+              ? (atQuery.query ? " · searching all files…" : " · index truncated")
+              : "";
+            return (
+              <div
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  right: 0,
+                  bottom: "calc(100% + 8px)",
+                  zIndex: 120,
+                  background: "var(--bg)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 8,
+                  boxShadow: "0 -6px 20px rgba(0,0,0,0.12)",
+                  overflow: "hidden",
+                  maxHeight: "min(48vh, 400px)",
+                }}
+              >
+                <div
+                  style={{
+                    padding: "8px 10px",
+                    borderBottom: "1px solid var(--border)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 8,
+                    fontSize: 11,
+                    color: "var(--text-dim)",
+                  }}
+                >
+                  <span>
+                    {indexLoading
+                      ? "Loading files..."
+                      : `Files · ${matchCountLabel}${truncatedHint}`}
+                  </span>
+                  <span style={{ fontFamily: "var(--font-mono)" }}>Tab / Enter</span>
+                </div>
+                <div style={{ maxHeight: "calc(min(48vh, 400px) - 34px)", overflowY: "auto", padding: 4 }}>
+                  {!indexLoading && atMatches.length === 0 ? (
+                    <div style={{ padding: "6px 8px", fontSize: 12, color: "var(--text-dim)" }}>
+                      {needsServerSearch && !serverResultInUse ? "Searching…" : "No matching files"}
+                    </div>
+                  ) : (
+                    atMatches.map((entry, index) => {
+                      const active = index === atActiveIndex;
+                      const name = entry.path.split("/").pop() ?? entry.path;
+                      const dirPrefix = entry.path.slice(0, entry.path.length - name.length);
+                      return (
+                        <button
+                          key={`${entry.isDir ? "d" : "f"}:${entry.path}`}
+                          ref={(node) => {
+                            atItemRefs.current[index] = node;
+                          }}
+                          type="button"
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            applyAtCompletion(entry);
+                          }}
+                          onMouseEnter={() => setAtActiveIndex(index)}
+                          style={{
+                            width: "100%",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                            padding: "6px 8px",
+                            border: "none",
+                            borderRadius: 6,
+                            background: active ? "var(--bg-selected)" : "none",
+                            color: "var(--text)",
+                            cursor: "pointer",
+                            textAlign: "left",
+                            fontSize: 12.5,
+                            fontFamily: "var(--font-mono)",
+                          }}
+                        >
+                          <span style={{ flexShrink: 0, display: "flex", alignItems: "center" }}>
+                            {entry.isDir ? <FolderIcon size={14} /> : getFileIcon(name, 14)}
+                          </span>
+                          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {dirPrefix && <span style={{ color: "var(--text-dim)" }}>{dirPrefix}</span>}
+                            {name}
+                            {entry.isDir && <span style={{ color: "var(--text-dim)" }}>/</span>}
+                          </span>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            );
+          })()}
           <div
             style={{
               display: "flex",
@@ -975,14 +1256,23 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           <textarea
             ref={textareaRef}
             value={value}
-            onChange={(e) => setValue(e.target.value)}
+            onChange={(e) => {
+              setValue(e.target.value);
+              updateAtQuery(e.target.value, e.target.selectionStart);
+            }}
+            onSelect={(e) => {
+              const el = e.currentTarget;
+              updateAtQuery(el.value, el.selectionStart);
+            }}
             onKeyDown={handleKeyDown}
             onCompositionStart={() => {
               isComposingRef.current = true;
             }}
-            onCompositionEnd={() => {
+            onCompositionEnd={(e) => {
               isComposingRef.current = false;
               lastCompositionEndAtRef.current = Date.now();
+              const el = e.currentTarget;
+              updateAtQuery(el.value, el.selectionStart);
             }}
             onInput={handleInput}
             onPaste={handlePaste}
@@ -990,7 +1280,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               isStreaming && (onSteer || onFollowUp)
                 ? "Steer now / queue follow-up..."
                 : isStreaming ? "Agent is running…"
-                : "Message… Type / for commands"
+                : "Message… Type / for commands, @ for files"
             }
             rows={1}
             style={{

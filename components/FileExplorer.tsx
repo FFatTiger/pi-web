@@ -24,7 +24,7 @@ interface Props {
   cwd: string;
   onOpenFile: (filePath: string, fileName: string) => void;
   refreshKey?: number;
-  onAtMention?: (relativePath: string) => void;
+  onAtMention?: (relativePath: string, isDir: boolean) => void;
 }
 
 async function fetchEntries(dirPath: string): Promise<FileNode[]> {
@@ -65,7 +65,7 @@ function TreeNode({
   depth: number;
   cwd: string;
   onOpenFile: (filePath: string, fileName: string) => void;
-  onAtMention?: (relativePath: string) => void;
+  onAtMention?: (relativePath: string, isDir: boolean) => void;
   expandedPaths: Set<string>;
   onToggleExpanded: (fullPath: string, open: boolean) => void;
   refreshKey?: number;
@@ -169,7 +169,7 @@ function TreeNode({
           <button
             onClick={(e) => {
               e.stopPropagation();
-              onAtMention(getRelativeFilePath(node.fullPath, cwd));
+              onAtMention(getRelativeFilePath(node.fullPath, cwd), node.isDir);
             }}
             title="Insert path into chat"
             style={{
