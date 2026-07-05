@@ -575,14 +575,22 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         }
       };
       es.onerror = () => {
-        settle();
-        if (eventSourceRef.current === es && agentRunningRef.current) {
-          es.close();
-          eventSourceRef.current = null;
-          setTimeout(() => {
-            if (agentRunningRef.current) void connectEvents(sid);
-          }, 1000);
+        if (es.readyState === EventSource.CLOSED) {
+          // Fatal error (404/500/content-type mismatch): browser won't
+          // auto-reconnect. Settle the Promise so handleSend can proceed,
+          // then manually reconnect for live streaming.
+          settle();
+          if (eventSourceRef.current === es && agentRunningRef.current) {
+            eventSourceRef.current = null;
+            setTimeout(() => {
+              if (agentRunningRef.current) void connectEvents(sid);
+            }, 1000);
+          }
         }
+        // Recoverable errors (CONNECTING): let EventSource auto-reconnect.
+        // Don't settle() — that would let handleSend proceed with a broken
+        // connection and miss events emitted during the reconnect gap.
+        // The 1.5s timeout above will settle if the connection never recovers.
       };
     });
   }, []);
