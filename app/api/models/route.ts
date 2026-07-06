@@ -15,9 +15,25 @@ function compareModelEntries(
     || modelNameCollator.compare(a.id, b.id);
 }
 
-function matchesEnabledModels(model: { id: string; provider: string }, enabledModels: string[] | undefined): boolean {
-  if (!enabledModels || enabledModels.length === 0) return true;
-  return enabledModels.includes(`${model.provider}/${model.id}`) || enabledModels.includes(model.id);
+const THINKING_SUFFIXES = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
+
+function stripThinkingSuffix(modelRef: string): string {
+  const trimmed = modelRef.trim();
+  const colonIndex = trimmed.lastIndexOf(":");
+  if (colonIndex === -1) return trimmed;
+  const suffix = trimmed.substring(colonIndex + 1);
+  return THINKING_SUFFIXES.has(suffix) ? trimmed.substring(0, colonIndex) : trimmed;
+}
+
+function filterByExactEnabledModels<T extends { id: string; provider: string }>(
+  available: T[],
+  enabledModels: string[] | undefined,
+): T[] {
+  if (!enabledModels || enabledModels.length === 0) return available;
+
+  const refs = new Set(enabledModels.map(stripThinkingSuffix).filter(Boolean));
+  const visible = available.filter((m) => refs.has(`${m.provider}/${m.id}`) || refs.has(m.id));
+  return visible.length > 0 ? visible : available;
 }
 
 export async function GET(req: Request) {
@@ -45,13 +61,12 @@ export async function GET(req: Request) {
     const available = registry.getAvailable();
     const settings: SettingsManager = services.settingsManager;
     const enabledModels = settings.getEnabledModels();
-    const visible = available.filter((m: { id: string; provider: string }) => matchesEnabledModels(m, enabledModels));
+    const visible = filterByExactEnabledModels(available, enabledModels);
     modelList = visible.map((m: { id: string; name: string; provider: string }) => ({
       id: m.id,
       name: m.name,
       provider: m.provider,
     })).sort(compareModelEntries);
-    nameMap.clear();
     for (const m of visible) {
       const key = `${m.provider}:${m.id}`;
       nameMap.set(key, m.name);
