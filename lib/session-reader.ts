@@ -70,6 +70,11 @@ export function invalidateSessionPathCache(sessionId: string): void {
   getPathCache().delete(sessionId);
 }
 
+export function getSessionEntries(filePath: string): SessionEntry[] {
+  const entries = SessionManager.open(filePath).getEntries();
+  return entries as unknown as SessionEntry[];
+}
+
 export function buildSessionContext(entries: SessionEntry[], leafId?: string | null): SessionContext {
   const byId = new Map<string, SessionEntry>();
   for (const e of entries) byId.set(e.id, e);
