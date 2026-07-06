@@ -26,3 +26,9 @@ export function getPresetFromTools(tools: ToolEntry[]): ToolPreset {
   if (active === [...PRESET_FULL].sort().join(",")) return "full";
   return "default";
 }
+
+export function getToolNamesForPreset(preset: ToolPreset): string[] {
+  if (preset === "none") return [...PRESET_NONE];
+  if (preset === "full") return [...PRESET_FULL];
+  return [...PRESET_DEFAULT];
+}
