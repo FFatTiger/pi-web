@@ -7,6 +7,16 @@ import {
   isWindowsAbsolutePath,
   normalizeSlashes,
 } from "@/lib/file-access";
+import {
+  DOCX_PREVIEW_MAX_BYTES,
+  IMAGE_PREVIEW_MAX_BYTES,
+  TEXT_PREVIEW_MAX_BYTES,
+  documentPreviewKind,
+  getAudioMime,
+  getDocumentMime,
+  getFileExt,
+  getImageMime,
+} from "@/lib/file-types";
 import { isFilePathReferencedBySession } from "@/lib/session-file-references";
 
 const IGNORED_NAMES = new Set([
@@ -17,60 +27,9 @@ const IGNORED_NAMES = new Set([
 
 const IGNORED_SUFFIXES = [".pyc"];
 
-const TEXT_PREVIEW_MAX_BYTES = 256 * 1024;
-const IMAGE_PREVIEW_MAX_BYTES = 10 * 1024 * 1024;
-const DOCX_PREVIEW_MAX_BYTES = 10 * 1024 * 1024;
-
 const FILE_REQUEST_TYPES = ["list", "read", "download", "meta", "preview", "watch"] as const;
 type FileRequestType = typeof FILE_REQUEST_TYPES[number];
 const FILE_REQUEST_TYPE_SET = new Set<string>(FILE_REQUEST_TYPES);
-
-const IMAGE_EXT_TO_MIME: Record<string, string> = {
-  png: "image/png",
-  jpg: "image/jpeg",
-  jpeg: "image/jpeg",
-  gif: "image/gif",
-  webp: "image/webp",
-  svg: "image/svg+xml",
-  bmp: "image/bmp",
-  ico: "image/x-icon",
-  avif: "image/avif",
-};
-
-const AUDIO_EXT_TO_MIME: Record<string, string> = {
-  mp3: "audio/mpeg",
-  wav: "audio/wav",
-  ogg: "audio/ogg",
-  oga: "audio/ogg",
-  opus: "audio/ogg",
-  m4a: "audio/mp4",
-  aac: "audio/aac",
-  flac: "audio/flac",
-  weba: "audio/webm",
-  webm: "audio/webm",
-};
-
-const DOCUMENT_EXT_TO_MIME: Record<string, string> = {
-  pdf: "application/pdf",
-  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-};
-
-function getExt(filePath: string): string {
-  const ext = path.basename(filePath).toLowerCase().split(".").pop() ?? "";
-  return ext;
-}
-
-function getImageMime(filePath: string): string | null {
-  return IMAGE_EXT_TO_MIME[getExt(filePath)] ?? null;
-}
-
-function getAudioMime(filePath: string): string | null {
-  return AUDIO_EXT_TO_MIME[getExt(filePath)] ?? null;
-}
-
-function getDocumentMime(filePath: string): string | null {
-  return DOCUMENT_EXT_TO_MIME[getExt(filePath)] ?? null;
-}
 
 const EXT_TO_LANGUAGE: Record<string, string> = {
   ts: "typescript", tsx: "typescript", js: "javascript", jsx: "javascript",
@@ -220,13 +179,6 @@ function streamFile(filePath: string, stat: fs.Stats, contentType: string, range
   });
 }
 
-function documentPreviewKind(filePath: string): "pdf" | "docx" | null {
-  const ext = getExt(filePath);
-  if (ext === "pdf") return "pdf";
-  if (ext === "docx") return "docx";
-  return null;
-}
-
 function escapeHtml(text: string): string {
   return text
     .replace(/&/g, "&amp;")
@@ -370,7 +322,7 @@ export async function GET(
       if (!stat.isFile()) {
         return NextResponse.json({ error: "Not a file" }, { status: 400 });
       }
-      if (getExt(filePath) !== "docx") {
+      if (getFileExt(filePath) !== "docx") {
         return NextResponse.json({ error: "Preview not available for this file type" }, { status: 400 });
       }
       if (stat.size > DOCX_PREVIEW_MAX_BYTES) {

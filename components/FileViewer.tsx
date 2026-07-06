@@ -6,6 +6,13 @@ import { vs } from "react-syntax-highlighter/dist/cjs/styles/prism";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/cjs/styles/prism";
 import ReactMarkdown from "react-markdown";
 import { useTheme } from "@/hooks/useTheme";
+import {
+  DOCX_PREVIEW_MAX_BYTES,
+  getFileExt,
+  isAudioPath,
+  isDocumentPreviewPath,
+  isImagePath,
+} from "@/lib/file-types";
 import { encodeFilePathForApi, getFileName, getRelativeFilePath } from "@/lib/file-paths";
 import { markdownPreviewRehypePlugins, markdownPreviewRemarkPlugins } from "@/lib/markdown";
 
@@ -19,31 +26,6 @@ interface FileData {
   content: string;
   language: string;
   size: number;
-}
-
-const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico", "avif"]);
-const AUDIO_EXTS = new Set(["mp3", "wav", "ogg", "oga", "opus", "m4a", "aac", "flac", "weba", "webm"]);
-const DOCUMENT_PREVIEW_EXTS = new Set(["pdf", "docx"]);
-const DOCX_PREVIEW_MAX_BYTES = 10 * 1024 * 1024;
-
-function isImagePath(filePath: string): boolean {
-  const base = getFileName(filePath);
-  const ext = base.toLowerCase().split(".").pop() ?? "";
-  return IMAGE_EXTS.has(ext);
-}
-
-function isAudioPath(filePath: string): boolean {
-  const base = getFileName(filePath);
-  const ext = base.toLowerCase().split(".").pop() ?? "";
-  return AUDIO_EXTS.has(ext);
-}
-
-function getFileExt(filePath: string): string {
-  return getFileName(filePath).toLowerCase().split(".").pop() ?? "";
-}
-
-function isDocumentPreviewPath(filePath: string): boolean {
-  return DOCUMENT_PREVIEW_EXTS.has(getFileExt(filePath));
 }
 
 function getFileApiUrl(
