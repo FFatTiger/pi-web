@@ -97,7 +97,7 @@ export function buildSessionContext(entries: SessionEntry[], leafId?: string | n
     cur = cur.parentId ? byId.get(cur.parentId) : undefined;
   }
 
-  // Build UI history from the FULL branch path (leaf to root), without trimming.
+  // Build UI history from the FULL branch path (root to leaf), without trimming.
   // pi's buildSessionContext targets LLM context: it drops everything before the last
   // compaction's firstKeptEntryId. Correct for the model, but it would hide compacted
   // history from the UI. We keep piCtx only for thinkingLevel/model, and render every
@@ -121,8 +121,13 @@ export function buildSessionContext(entries: SessionEntry[], leafId?: string | n
   };
 }
 
+function parseEntryTimestamp(timestamp: string): number | undefined {
+  const parsed = Date.parse(timestamp);
+  return Number.isNaN(parsed) ? undefined : parsed;
+}
+
 // Convert a session entry on the active branch into a UI message.
-// Returns null for non-displayable entries (metadata, non-message types).
+// Returns null for entries that do not map to chat history (metadata, non-message types).
 function entryToUiMessage(entry: SessionEntry): AgentMessage | null {
   switch (entry.type) {
     case "message":
@@ -137,24 +142,23 @@ function entryToUiMessage(entry: SessionEntry): AgentMessage | null {
           tokensBefore: entry.tokensBefore,
           firstKeptEntryId: entry.firstKeptEntryId,
         },
-        timestamp: Date.parse(entry.timestamp) || undefined,
+        timestamp: parseEntryTimestamp(entry.timestamp),
       };
     case "branch_summary":
       if (!entry.summary) return null;
       return {
         role: "user",
         content: `*The conversation briefly explored another branch and returned with this summary:*\n\n${entry.summary}`,
-        timestamp: Date.parse(entry.timestamp) || undefined,
+        timestamp: parseEntryTimestamp(entry.timestamp),
       };
     case "custom_message":
-      if (!entry.display) return null;
       return {
         role: "custom",
         customType: entry.customType,
         content: entry.content,
         display: entry.display,
         details: entry.details,
-        timestamp: Date.parse(entry.timestamp) || undefined,
+        timestamp: parseEntryTimestamp(entry.timestamp),
       };
     default:
       return null;
