@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useIsMobile } from "@/hooks/useIsMobile";
-import type { SkillSearchResult } from "@/app/api/skills/search/route";
+import type { SkillSearchResult } from "@/lib/api-types";
 
 interface Skill {
   name: string;

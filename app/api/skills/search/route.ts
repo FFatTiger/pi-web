@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { runNpx } from "@/lib/npx";
+import type { SkillSearchResult } from "@/lib/api-types";
 
 export const dynamic = "force-dynamic";
 
@@ -8,12 +9,6 @@ const DEFAULT_LIMIT = 50;
 const MIN_LIMIT = 1;
 const MAX_LIMIT = 50;
 const SEARCH_API_BASE = process.env.SKILLS_API_URL || "https://skills.sh";
-
-export interface SkillSearchResult {
-  package: string;
-  installs: string;
-  url: string;
-}
 
 interface SkillsApiSkill {
   id?: string;

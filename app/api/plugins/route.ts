@@ -9,53 +9,19 @@ import {
   type ResolvedPaths,
   type ResolvedResource,
 } from "@earendil-works/pi-coding-agent";
+import type {
+  PluginDiagnostic,
+  PluginPackageInfo,
+  PluginResourceCounts,
+  PluginResourceInfo,
+  PluginResourceKind,
+  PluginScope,
+  PluginsResponse,
+} from "@/lib/api-types";
 
 export const dynamic = "force-dynamic";
 
-type PluginScope = "global" | "project";
 type PluginAction = "install" | "remove" | "update" | "disable" | "enable";
-type PluginResourceKind = "extension" | "skill" | "prompt" | "theme";
-
-export interface PluginResourceCounts {
-  extensions: number;
-  skills: number;
-  prompts: number;
-  themes: number;
-}
-
-export interface PluginDiagnostic {
-  type: "warning" | "error";
-  message: string;
-  source?: string;
-  path?: string;
-}
-
-export interface PluginResourceInfo {
-  kind: PluginResourceKind;
-  name: string;
-  path: string;
-  relativePath: string;
-}
-
-export interface PluginPackageInfo {
-  source: string;
-  scope: PluginScope;
-  filtered: boolean;
-  disabled: boolean;
-  installedPath?: string;
-  packageName?: string;
-  version?: string;
-  configuredVersion?: string;
-  counts: PluginResourceCounts;
-  resources: PluginResourceInfo[];
-  status: "loaded" | "installed" | "missing" | "disabled";
-}
-
-export interface PluginsResponse {
-  packages: PluginPackageInfo[];
-  totals: PluginResourceCounts;
-  diagnostics: PluginDiagnostic[];
-}
 
 function emptyCounts(): PluginResourceCounts {
   return { extensions: 0, skills: 0, prompts: 0, themes: 0 };
