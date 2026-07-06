@@ -80,6 +80,9 @@ export function MarkdownBody({ children, className, isStreaming, cwd, onOpenFile
 
             const handleClick = (event: MouseEvent<HTMLAnchorElement>) => {
               if (event.defaultPrevented || event.button !== 0) return;
+              if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+              const target = event.currentTarget.getAttribute("target");
+              if (target && target !== "_self") return;
               event.preventDefault();
               openFile(filePath);
             };

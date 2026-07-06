@@ -20,7 +20,8 @@ function stripLineSuffix(filePath: string): string {
 function normalizeLocalPath(filePath: string): string {
   const normalized = normalizeFilePathSlashes(filePath);
   const isWindowsDrive = /^[a-zA-Z]:\//.test(normalized);
-  const leadingSlash = normalized.startsWith("/") && !isWindowsDrive;
+  const isUnc = normalized.startsWith("//");
+  const leadingSlash = normalized.startsWith("/") && !isWindowsDrive && !isUnc;
   const parts: string[] = [];
 
   for (const part of normalized.split("/")) {
@@ -28,7 +29,7 @@ function normalizeLocalPath(filePath: string): string {
     if (part === "..") {
       if (parts.length > 0 && parts[parts.length - 1] !== "..") {
         parts.pop();
-      } else if (!leadingSlash && !isWindowsDrive) {
+      } else if (!leadingSlash && !isWindowsDrive && !isUnc) {
         parts.push(part);
       }
       continue;
@@ -38,6 +39,7 @@ function normalizeLocalPath(filePath: string): string {
 
   const joined = parts.join("/");
   if (isWindowsDrive) return joined;
+  if (isUnc) return `//${joined}`;
   return leadingSlash ? `/${joined}` : joined;
 }
 
@@ -61,7 +63,12 @@ function fileUrlToPath(href: string): string | null {
   try {
     const url = new URL(href);
     if (url.protocol !== "file:") return null;
-    return safeDecode(url.pathname);
+    const pathname = safeDecode(url.pathname);
+    if (url.hostname) {
+      return `//${url.hostname}${pathname.startsWith("/") ? pathname : `/${pathname}`}`;
+    }
+    if (/^\/[a-zA-Z]:\//.test(pathname)) return pathname.slice(1);
+    return pathname;
   } catch {
     return null;
   }
@@ -76,11 +83,15 @@ export function resolveLocalFileHref(href: string | undefined, cwd?: string): st
   let candidate: string | null = null;
   let candidateKind: "absolute" | "relative" | null = null;
   const decodedHref = safeDecode(cleanHref);
+  const isBackslashUncPath = decodedHref.startsWith("\\\\");
   const normalizedHref = normalizeFilePathSlashes(decodedHref);
   const lowerHref = normalizedHref.toLowerCase();
 
   if (lowerHref.startsWith("/api/") || lowerHref.startsWith("/_next/")) return null;
-  if (/^(https?|mailto|tel|data|blob|about):/i.test(normalizedHref)) return null;
+  if (!isBackslashUncPath && normalizedHref.startsWith("//")) return null;
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/i.test(normalizedHref) && !lowerHref.startsWith("file:") && !/^[a-zA-Z]:\//.test(normalizedHref)) {
+    return null;
+  }
 
   if (lowerHref.startsWith("file:")) {
     candidate = fileUrlToPath(normalizedHref);

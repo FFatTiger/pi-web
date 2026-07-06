@@ -21,6 +21,10 @@ const TEXT_PREVIEW_MAX_BYTES = 256 * 1024;
 const IMAGE_PREVIEW_MAX_BYTES = 10 * 1024 * 1024;
 const DOCX_PREVIEW_MAX_BYTES = 10 * 1024 * 1024;
 
+const FILE_REQUEST_TYPES = ["list", "read", "download", "meta", "preview", "watch"] as const;
+type FileRequestType = typeof FILE_REQUEST_TYPES[number];
+const FILE_REQUEST_TYPE_SET = new Set<string>(FILE_REQUEST_TYPES);
+
 const IMAGE_EXT_TO_MIME: Record<string, string> = {
   png: "image/png",
   jpg: "image/jpeg",
@@ -98,6 +102,10 @@ function filePathFromSegments(segments: string[]): string {
   const slashJoined = normalizeSlashes(joined);
   if (isWindowsAbsolutePath(slashJoined)) return slashJoined;
   return "/" + joined.replace(/^\/+/, "");
+}
+
+function parseFileRequestType(value: string): FileRequestType | null {
+  return FILE_REQUEST_TYPE_SET.has(value) ? (value as FileRequestType) : null;
 }
 
 function createFileBodyStream(filePath: string, range?: { start: number; end: number }): ReadableStream<Uint8Array> {
@@ -284,7 +292,11 @@ export async function GET(
   try {
     const { path: segments } = await params;
     const filePath = filePathFromSegments(segments);
-    const type = request.nextUrl.searchParams.get("type") ?? "list";
+    const rawType = request.nextUrl.searchParams.get("type") ?? "list";
+    const type = parseFileRequestType(rawType);
+    if (!type) {
+      return NextResponse.json({ error: "Invalid file request type" }, { status: 400 });
+    }
     const sessionId = request.nextUrl.searchParams.get("sessionId");
 
     const allowedRoots = await getAllowedFileRoots();
