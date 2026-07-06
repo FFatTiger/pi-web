@@ -1,7 +1,9 @@
 import { readdirSync } from "fs";
 import { homedir } from "os";
 import path from "path";
+import { getAdditionalAllowedRoots, normalizeSlashes } from "./allowed-roots";
 import { listAllSessions } from "./session-reader";
+export { allowFileRoot, normalizeSlashes } from "./allowed-roots";
 
 // Short-TTL cache for the allowed-roots set. Without this, every file list/read
 // request re-scans every pi session on disk just to check access. 5s is short
@@ -9,32 +11,13 @@ import { listAllSessions } from "./session-reader";
 // survives Next.js hot-reload.
 declare global {
   var __piAllowedRootsCache: { roots: Set<string>; expiresAt: number } | undefined;
-  var __piAdditionalAllowedRoots: Set<string> | undefined;
 }
 
 const ALLOWED_ROOTS_TTL_MS = 5_000;
 const WINDOWS_ABSOLUTE_RE = /^[a-zA-Z]:[\\/]/;
 
-export function normalizeSlashes(filePath: string): string {
-  return filePath.replace(/\\/g, "/");
-}
-
 export function isWindowsAbsolutePath(filePath: string): boolean {
   return WINDOWS_ABSOLUTE_RE.test(filePath) || filePath.startsWith("\\\\") || filePath.startsWith("//");
-}
-
-function getAdditionalAllowedRoots(): Set<string> {
-  if (!globalThis.__piAdditionalAllowedRoots) {
-    globalThis.__piAdditionalAllowedRoots = new Set();
-  }
-  return globalThis.__piAdditionalAllowedRoots;
-}
-
-export function allowFileRoot(root: string): void {
-  if (!root) return;
-  const normalizedRoot = normalizeSlashes(root);
-  getAdditionalAllowedRoots().add(normalizedRoot);
-  globalThis.__piAllowedRootsCache?.roots.add(normalizedRoot);
 }
 
 export async function getAllowedFileRoots(): Promise<Set<string>> {
