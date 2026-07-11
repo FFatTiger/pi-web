@@ -174,7 +174,8 @@ pre, code {
   padding-left: 25px;
 }
 .markdown-body .task-list-item::marker { content: ""; }
-.markdown-body .task-list-item input[type="checkbox"] {
+.markdown-body .task-list-item > input[type="checkbox"],
+.markdown-body .task-list-item > p:first-child > input[type="checkbox"]:first-child {
   appearance: none;
   position: absolute;
   left: 0;
@@ -188,11 +189,13 @@ pre, code {
   display: inline-grid;
   place-content: center;
 }
-.markdown-body .task-list-item input[type="checkbox"]:checked {
+.markdown-body .task-list-item > input[type="checkbox"]:checked,
+.markdown-body .task-list-item > p:first-child > input[type="checkbox"]:first-child:checked {
   border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
   background: color-mix(in srgb, var(--accent) 10%, var(--bg));
 }
-.markdown-body .task-list-item input[type="checkbox"]:checked::before {
+.markdown-body .task-list-item > input[type="checkbox"]:checked::before,
+.markdown-body .task-list-item > p:first-child > input[type="checkbox"]:first-child:checked::before {
   content: "";
   width: 4px;
   height: 8px;
