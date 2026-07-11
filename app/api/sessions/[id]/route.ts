@@ -4,9 +4,10 @@ import { join } from "path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import {
   resolveSessionPath,
+  resolveSessionIdByPath,
   invalidateSessionPathCache,
   buildSessionContext,
-  listAllSessions,
+  readSessionHeader,
 } from "@/lib/session-reader";
 import { getRpcSession } from "@/lib/rpc-manager";
 
@@ -131,8 +132,9 @@ export async function GET(
     const header = sm.getHeader();
     let modified = header?.timestamp ?? new Date().toISOString();
     try { modified = statSync(filePath).mtime.toISOString(); } catch { /* use header timestamp */ }
-    const allSessions = await listAllSessions();
-    const parentSessionId = allSessions.find((s) => s.id === id)?.parentSessionId;
+    const parentSessionId = header?.parentSession
+      ? await resolveSessionIdByPath(header.parentSession)
+      : undefined;
     const info = header ? {
       path: filePath,
       id: header.id,
@@ -199,13 +201,8 @@ export async function DELETE(
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
 
-    // Read header before deleting to get parentSession path
-    const firstLine = readFileSync(filePath, "utf8").split("\n")[0];
-    let parentSessionPath: string | undefined;
-    try {
-      const header = JSON.parse(firstLine) as { type?: string; parentSession?: string };
-      if (header.type === "session") parentSessionPath = header.parentSession;
-    } catch { /* ignore */ }
+    // Read only the bounded header before deleting.
+    const parentSessionPath = readSessionHeader(filePath)?.parentSession;
 
     // Re-attach all direct children to this session's parent (cascade re-parent)
     // Scan sibling files in the same directory

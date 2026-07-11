@@ -1,15 +1,17 @@
 import { SessionManager, buildSessionContext as piBuildSessionContext, getAgentDir } from "@earendil-works/pi-coding-agent";
-import type { AgentMessage, SessionEntry, SessionInfo, SessionContext } from "./types";
+import { closeSync, openSync, readSync } from "fs";
+import { normalize as normalizePath } from "path";
+import type { AgentMessage, SessionEntry, SessionHeader, SessionInfo, SessionContext } from "./types";
 import type { SessionEntry as PiSessionEntry, SessionInfo as PiSessionInfo } from "@earendil-works/pi-coding-agent";
 import { normalizeToolCalls } from "./normalize";
 import { resolveProject, type ProjectInfo } from "./worktree";
 
 export { getAgentDir };
 
-export async function listAllSessions(): Promise<SessionInfo[]> {
+async function loadAllSessions(): Promise<SessionInfo[]> {
   const piSessions: PiSessionInfo[] = await SessionManager.listAll();
   const pathToId = new Map<string, string>();
-  for (const s of piSessions) pathToId.set(s.path, s.id);
+  for (const s of piSessions) pathToId.set(normalizePath(s.path), s.id);
 
   // Resolve each unique cwd to its project root (main repo shared by all
   // worktrees). resolveProject caches per-cwd, so this is cheap after warmup.
@@ -19,10 +21,8 @@ export async function listAllSessions(): Promise<SessionInfo[]> {
     projectByCwd.set(cwd, await resolveProject(cwd));
   }));
 
-  const cache = getPathCache();
   return piSessions.map((s) => {
-    // Populate path cache so resolveSessionPath works without a full scan
-    cache.set(s.id, s.path);
+    cacheSessionPath(s.id, s.path);
     const project = s.cwd ? projectByCwd.get(s.cwd) : undefined;
     return {
       path: s.path,
@@ -33,24 +33,37 @@ export async function listAllSessions(): Promise<SessionInfo[]> {
       modified: s.modified instanceof Date ? s.modified.toISOString() : String(s.modified),
       messageCount: s.messageCount,
       firstMessage: s.firstMessage || "(no messages)",
-      parentSessionId: s.parentSessionPath ? pathToId.get(s.parentSessionPath) : undefined,
+      parentSessionId: s.parentSessionPath ? pathToId.get(normalizePath(s.parentSessionPath)) : undefined,
       projectRoot: project?.projectRoot ?? s.cwd,
       ...(project?.isWorktree && project.branch ? { worktreeBranch: project.branch } : {}),
     };
   });
 }
 
+export async function listAllSessions(): Promise<SessionInfo[]> {
+  globalThis.__piSessionListPromise ??= loadAllSessions().finally(() => {
+    globalThis.__piSessionListPromise = undefined;
+  });
+  return globalThis.__piSessionListPromise;
+}
+
 // ============================================================================
-// Session path cache: sessionId → absolute file path
-// Stored in globalThis for hot-reload safety
+// Session path caches, stored in globalThis for hot-reload safety.
 // ============================================================================
 declare global {
   var __piSessionPathCache: Map<string, string> | undefined;
+  var __piPathToSessionIdCache: Map<string, string> | undefined;
+  var __piSessionListPromise: Promise<SessionInfo[]> | undefined;
 }
 
 function getPathCache(): Map<string, string> {
   if (!globalThis.__piSessionPathCache) globalThis.__piSessionPathCache = new Map();
   return globalThis.__piSessionPathCache;
+}
+
+function getPathToIdCache(): Map<string, string> {
+  if (!globalThis.__piPathToSessionIdCache) globalThis.__piPathToSessionIdCache = new Map();
+  return globalThis.__piPathToSessionIdCache;
 }
 
 export async function resolveSessionPath(sessionId: string): Promise<string | null> {
@@ -62,12 +75,72 @@ export async function resolveSessionPath(sessionId: string): Promise<string | nu
   return getPathCache().get(sessionId) ?? null;
 }
 
+export async function resolveSessionIdByPath(filePath: string): Promise<string | undefined> {
+  const pathKey = normalizePath(filePath);
+  const cached = getPathToIdCache().get(pathKey);
+  if (cached) return cached;
+
+  await listAllSessions();
+  return getPathToIdCache().get(pathKey);
+}
+
 export function cacheSessionPath(sessionId: string, filePath: string): void {
-  getPathCache().set(sessionId, filePath);
+  const pathKey = normalizePath(filePath);
+  const pathCache = getPathCache();
+  const reverseCache = getPathToIdCache();
+  const previousPath = pathCache.get(sessionId);
+  const previousSessionId = reverseCache.get(pathKey);
+  if (previousPath && previousPath !== pathKey && reverseCache.get(previousPath) === sessionId) {
+    reverseCache.delete(previousPath);
+  }
+  if (previousSessionId && previousSessionId !== sessionId && pathCache.get(previousSessionId) === pathKey) {
+    pathCache.delete(previousSessionId);
+  }
+  pathCache.set(sessionId, pathKey);
+  reverseCache.set(pathKey, sessionId);
 }
 
 export function invalidateSessionPathCache(sessionId: string): void {
-  getPathCache().delete(sessionId);
+  const pathCache = getPathCache();
+  const reverseCache = getPathToIdCache();
+  const filePath = pathCache.get(sessionId);
+  pathCache.delete(sessionId);
+  if (filePath && reverseCache.get(filePath) === sessionId) {
+    reverseCache.delete(filePath);
+  }
+}
+
+export function readSessionHeader(filePath: string): SessionHeader | null {
+  const fd = openSync(filePath, "r");
+  try {
+    const chunks: Buffer[] = [];
+    const maxHeaderBytes = 64 * 1024;
+    let position = 0;
+    let foundNewline = false;
+
+    while (position < maxHeaderBytes && !foundNewline) {
+      const buffer = Buffer.allocUnsafe(Math.min(4096, maxHeaderBytes - position));
+      const bytesRead = readSync(fd, buffer, 0, buffer.length, position);
+      if (bytesRead === 0) break;
+      const data = buffer.subarray(0, bytesRead);
+      const newlineIndex = data.indexOf(0x0a);
+      chunks.push(newlineIndex === -1 ? data : data.subarray(0, newlineIndex));
+      position += bytesRead;
+      foundNewline = newlineIndex !== -1;
+    }
+
+    if (!foundNewline && position >= maxHeaderBytes) return null;
+    const firstLine = Buffer.concat(chunks).toString("utf8").trimEnd();
+    if (!firstLine) return null;
+    try {
+      const header = JSON.parse(firstLine) as SessionHeader;
+      return header.type === "session" ? header : null;
+    } catch {
+      return null;
+    }
+  } finally {
+    closeSync(fd);
+  }
 }
 
 export function getSessionEntries(filePath: string): SessionEntry[] {
