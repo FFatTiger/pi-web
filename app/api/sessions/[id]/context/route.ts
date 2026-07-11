@@ -10,6 +10,7 @@ export async function GET(
   const url = new URL(req.url);
   const leafId = url.searchParams.get("leafId") ?? undefined;
   const deferThinking = url.searchParams.has("deferThinking");
+  const deferToolResultImages = url.searchParams.has("deferMedia");
 
   try {
     const filePath = await resolveSessionPath(id);
@@ -18,7 +19,10 @@ export async function GET(
     }
 
     const sm = SessionManager.open(filePath);
-    const context = buildSessionContext(sm.getEntries() as never, leafId, { deferThinking });
+    const context = buildSessionContext(sm.getEntries() as never, leafId, {
+      deferThinking,
+      deferToolResultImages,
+    });
 
     return NextResponse.json({ context });
   } catch (error) {

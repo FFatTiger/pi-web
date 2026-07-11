@@ -126,8 +126,10 @@ export async function GET(
     const entries = sm.getEntries() as never;
     const leafId = sm.getLeafId();
     const tree = projectTreeForResponse(sm.getTree());
-    const deferThinking = new URL(req.url).searchParams.has("deferThinking");
-    const context = buildSessionContext(entries, leafId, { deferThinking });
+    const searchParams = new URL(req.url).searchParams;
+    const deferThinking = searchParams.has("deferThinking");
+    const deferToolResultImages = searchParams.has("deferMedia");
+    const context = buildSessionContext(entries, leafId, { deferThinking, deferToolResultImages });
 
     const header = sm.getHeader();
     let modified = header?.timestamp ?? new Date().toISOString();

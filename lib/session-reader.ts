@@ -151,7 +151,7 @@ export function getSessionEntries(filePath: string): SessionEntry[] {
 export function buildSessionContext(
   entries: SessionEntry[],
   leafId?: string | null,
-  options: { deferThinking?: boolean } = {},
+  options: { deferThinking?: boolean; deferToolResultImages?: boolean } = {},
 ): SessionContext {
   const byId = new Map<string, SessionEntry>();
   for (const e of entries) byId.set(e.id, e);
@@ -188,7 +188,7 @@ export function buildSessionContext(
   const messages: AgentMessage[] = [];
   const entryIds: string[] = [];
   for (const e of path) {
-    const m = entryToUiMessage(e, options.deferThinking ?? false);
+    const m = entryToUiMessage(e, options);
     if (m) {
       messages.push(m);
       entryIds.push(e.id);
@@ -208,13 +208,64 @@ function parseEntryTimestamp(timestamp: string): number | undefined {
   return Number.isNaN(parsed) ? undefined : parsed;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function base64ImageInfo(block: unknown): { bytes: number; mime?: string } | null {
+  if (!isRecord(block) || block.type !== "image") return null;
+
+  let data: string | undefined;
+  let mime: string | undefined;
+  if (typeof block.data === "string") {
+    data = block.data;
+    mime = typeof block.mimeType === "string" ? block.mimeType : undefined;
+  } else if (isRecord(block.source) && block.source.type === "base64" && typeof block.source.data === "string") {
+    data = block.source.data;
+    mime = typeof block.source.media_type === "string" ? block.source.media_type : undefined;
+  }
+  if (!data) return null;
+
+  const padding = data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0;
+  return { bytes: Math.max(0, Math.floor(data.length * 3 / 4) - padding), mime };
+}
+
+function omitToolResultBase64Images(message: AgentMessage): AgentMessage {
+  if (message.role !== "toolResult") return message;
+
+  let omitted = 0;
+  let bytes = 0;
+  const mimes = new Set<string>();
+  const content = message.content.filter((block) => {
+    const image = base64ImageInfo(block);
+    if (!image) return true;
+    omitted += 1;
+    bytes += image.bytes;
+    if (image.mime) mimes.add(image.mime);
+    return false;
+  });
+  if (omitted === 0) return message;
+
+  const mimeText = mimes.size > 0 ? `: ${[...mimes].join(", ")}` : "";
+  content.push({
+    type: "text",
+    text: `[${omitted} tool result image${omitted === 1 ? "" : "s"} omitted from initial history payload${mimeText}, ~${bytes} bytes]`,
+  });
+  return { ...message, content };
+}
+
 // Convert a session entry on the active branch into a UI message.
 // Returns null for entries that do not map to chat history (metadata, non-message types).
-function entryToUiMessage(entry: SessionEntry, deferThinking: boolean): AgentMessage | null {
+function entryToUiMessage(
+  entry: SessionEntry,
+  options: { deferThinking?: boolean; deferToolResultImages?: boolean },
+): AgentMessage | null {
   switch (entry.type) {
     case "message": {
-      const message = normalizeToolCalls(entry.message);
-      if (!deferThinking || message.role !== "assistant") return message;
+      const message = options.deferToolResultImages
+        ? omitToolResultBase64Images(normalizeToolCalls(entry.message))
+        : normalizeToolCalls(entry.message);
+      if (!options.deferThinking || message.role !== "assistant") return message;
       return {
         ...message,
         content: message.content.map((block) => (
