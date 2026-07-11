@@ -218,7 +218,7 @@ function entryToUiMessage(entry: SessionEntry, deferThinking: boolean): AgentMes
       return {
         ...message,
         content: message.content.map((block) => (
-          block.type === "thinking"
+          block.type === "thinking" && block.thinking.trim() !== ""
             ? { ...block, thinking: "", deferred: true }
             : block
         )),
