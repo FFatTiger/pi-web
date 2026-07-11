@@ -424,12 +424,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   })();
 
   const loadSession = useCallback(async (sid: string, showLoading = false, includeState = false) => {
+    let messagesLoaded = false;
     try {
       if (showLoading) setLoading(true);
-      const url = includeState
-        ? `/api/sessions/${encodeURIComponent(sid)}?includeState`
-        : `/api/sessions/${encodeURIComponent(sid)}`;
-      const res = await fetch(url);
+      const res = await fetch(`/api/sessions/${encodeURIComponent(sid)}`);
       if (res.status === 404) {
         if (showLoading) {
           setData(null);
@@ -440,33 +438,49 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         return null;
       }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const d = await res.json() as SessionData & { agentState?: { running: boolean; state?: AgentStateResponse } };
+      const d = await res.json() as SessionData;
+      if (sessionIdRef.current !== sid) return null;
       setData(d);
       setActiveLeafId(d.leafId);
       setMessages(d.context.messages);
       setEntryIds(d.context.entryIds ?? []);
       setCurrentModelOverride(null);
       setError(null);
-      const liveState = d.agentState?.state;
-      if (liveState) {
-        if (liveState.contextUsage !== undefined) setContextUsage(liveState.contextUsage ?? null);
-        if (liveState.systemPrompt !== undefined) setSystemPrompt(liveState.systemPrompt ?? null);
-        if (liveState.thinkingLevel !== undefined) setThinkingLevel((liveState.thinkingLevel as ThinkingLevelOption) ?? "auto");
-        if (liveState.extensionStatuses !== undefined) setExtensionStatuses(liveState.extensionStatuses ?? []);
-        if (liveState.extensionWidgets !== undefined) setExtensionWidgets(liveState.extensionWidgets ?? []);
-        if (liveState.queuedMessages !== undefined) setQueuedMessages(normalizeQueuedMessages(liveState.queuedMessages));
-      }
-      else if (d.agentState && !d.agentState.running) setQueuedMessages({ steering: [], followUp: [] });
-      // If no live agent state, fall back to thinking level from session file
-      if (!liveState?.thinkingLevel && d.context.thinkingLevel && d.context.thinkingLevel !== "off") {
+      if (d.context.thinkingLevel && d.context.thinkingLevel !== "off") {
         setThinkingLevel(d.context.thinkingLevel as ThinkingLevelOption);
       }
-      return d.agentState ?? null;
+
+      messagesLoaded = true;
+      if (showLoading) setLoading(false);
+      if (!includeState) return null;
+
+      try {
+        const stateRes = await fetch(`/api/sessions/${encodeURIComponent(sid)}/state`);
+        if (!stateRes.ok) throw new Error(`HTTP ${stateRes.status}`);
+        const agentState = await stateRes.json() as { running: boolean; state?: AgentStateResponse };
+        if (sessionIdRef.current !== sid) return null;
+
+        const liveState = agentState.state;
+        if (liveState) {
+          if (liveState.contextUsage !== undefined) setContextUsage(liveState.contextUsage ?? null);
+          if (liveState.systemPrompt !== undefined) setSystemPrompt(liveState.systemPrompt ?? null);
+          if (liveState.thinkingLevel !== undefined) setThinkingLevel((liveState.thinkingLevel as ThinkingLevelOption) ?? "auto");
+          if (liveState.extensionStatuses !== undefined) setExtensionStatuses(liveState.extensionStatuses ?? []);
+          if (liveState.extensionWidgets !== undefined) setExtensionWidgets(liveState.extensionWidgets ?? []);
+          if (liveState.queuedMessages !== undefined) setQueuedMessages(normalizeQueuedMessages(liveState.queuedMessages));
+        } else if (!agentState.running) {
+          setQueuedMessages({ steering: [], followUp: [] });
+        }
+        return agentState;
+      } catch (e) {
+        console.error("Failed to load agent state:", e);
+        return null;
+      }
     } catch (e) {
       setError(String(e));
       return null;
     } finally {
-      if (showLoading) setLoading(false);
+      if (showLoading && !messagesLoaded) setLoading(false);
     }
   }, []);
 

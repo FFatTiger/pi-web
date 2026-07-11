@@ -111,7 +111,7 @@ function projectTreeForResponse<T extends { entry: { id: string }; children: T[]
 }
 
 export async function GET(
-  req: Request,
+  _req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
@@ -150,18 +150,6 @@ export async function GET(
       parentSessionId,
     } : null;
 
-    const url = new URL(req.url);
-    let agentState: { running: boolean; state?: unknown } | undefined;
-    if (url.searchParams.has("includeState")) {
-      const rpc = getRpcSession(id);
-      if (rpc?.isAlive()) {
-        const state = await rpc.send({ type: "get_state" });
-        agentState = { running: true, state };
-      } else {
-        agentState = { running: false };
-      }
-    }
-
     return NextResponse.json({
       sessionId: id,
       filePath,
@@ -169,7 +157,6 @@ export async function GET(
       leafId,
       tree,
       context,
-      ...(agentState !== undefined ? { agentState } : {}),
     });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
