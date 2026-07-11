@@ -60,7 +60,7 @@ const CODING_TOOL_NAMES = ["read", "bash", "edit", "write", "grep", "find", "ls"
 class PlainTextTheme extends Theme {
   constructor() {
     super(
-      {} as ConstructorParameters<typeof Theme>[0],
+      { thinkingXhigh: "" } as ConstructorParameters<typeof Theme>[0],
       {} as ConstructorParameters<typeof Theme>[1],
       "truecolor",
     );
