@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { Fragment, memo, useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import type { AgentMessage, AssistantContentBlock, AssistantMessage, ExtensionUiRequest, SessionInfo, SessionTreeNode, ToolResultMessage } from "@/lib/types";
 import { normalizeCustomPanelLines, parseAnsiLine } from "@/lib/ansi";
 import { countToolCallBlocks, getDisplayableAssistantBlocks, splitFinalAssistantBlocks } from "@/lib/message-display";
@@ -90,7 +90,7 @@ function withAssistantBlocks(
   return next;
 }
 
-function ProcessDetailsGroup({ messageCount, toolCallCount, children }: { messageCount: number; toolCallCount: number; children: ReactNode }) {
+const ProcessDetailsGroup = memo(function ProcessDetailsGroup({ messageCount, toolCallCount, children }: { messageCount: number; toolCallCount: number; children: ReactNode }) {
   const [expanded, setExpanded] = useState(false);
   const parts = ["Process details", `${messageCount} ${messageCount === 1 ? "message" : "messages"}`];
   if (toolCallCount > 0) parts.push(`${toolCallCount} ${toolCallCount === 1 ? "tool call" : "tool calls"}`);
@@ -131,7 +131,7 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, children }: { messag
       )}
     </div>
   );
-}
+});
 
 export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsChange, onSessionStatsPanelOpen, onContextUsageChange, onOpenFile }: Props) {
   const { soundEnabled, onSoundToggle, playDoneSound, unlockAudio } = useAudio();
@@ -151,6 +151,11 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     }
     onAgentEnd?.();
   }, [onAgentEnd]);
+
+  // 稳定化 onEditContent 引用，配合 React.memo 防止历史消息重渲染
+  const handleEditContent = useCallback((content: string) => {
+    chatInputRef?.current?.insertIfEmpty(content);
+  }, [chatInputRef]);
 
   const {
     loading, error, messages, entryIds, streamState,
@@ -464,7 +469,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                     forking={forkingEntryId === entryIds[idx]}
                     onNavigate={agentRunning ? undefined : handleNavigate}
                     prevAssistantEntryId={agentRunning ? undefined : prevAssistantEntryId}
-                    onEditContent={(content) => chatInputRef?.current?.insertIfEmpty(content)}
+                    onEditContent={handleEditContent}
                     showTimestamp={showTimestamp}
                     prevTimestamp={idx > 0 ? (messages[idx - 1] as AgentMessage & { timestamp?: number }).timestamp : undefined}
                     sessionId={session?.id ?? sessionIdRef.current ?? undefined}
