@@ -1,4 +1,9 @@
-import { SessionManager, buildSessionContext as piBuildSessionContext, getAgentDir } from "@earendil-works/pi-coding-agent";
+import {
+  SessionManager,
+  buildContextEntries as piBuildContextEntries,
+  buildSessionContext as piBuildSessionContext,
+  getAgentDir,
+} from "@earendil-works/pi-coding-agent";
 import { closeSync, openSync, readSync } from "fs";
 import { normalize as normalizePath } from "path";
 import type { AgentMessage, SessionEntry, SessionHeader, SessionInfo, SessionContext } from "./types";
@@ -159,39 +164,22 @@ export function buildSessionContext(
   const piEntries = entries as unknown as PiSessionEntry[];
   const piCtx = piBuildSessionContext(piEntries, leafId, byId as unknown as Map<string, PiSessionEntry>);
 
-  // Build entryIds: parallel array to messages[], mapping each message back to its entry id.
-  // Needed for fork and navigate_tree calls from the UI.
-  let targetLeaf: SessionEntry | undefined;
-  if (leafId === null) {
-    return { messages: [], entryIds: [], thinkingLevel: piCtx.thinkingLevel, model: piCtx.model };
-  }
-  if (leafId) targetLeaf = byId.get(leafId);
-  if (!targetLeaf) targetLeaf = entries[entries.length - 1];
-  if (!targetLeaf) {
-    return { messages: [], entryIds: [], thinkingLevel: piCtx.thinkingLevel, model: piCtx.model };
-  }
+  const contextEntries = piBuildContextEntries(
+    piEntries,
+    leafId,
+    byId as unknown as Map<string, PiSessionEntry>,
+  );
 
-  // Walk path from target leaf to root
-  const path: SessionEntry[] = [];
-  let cur: SessionEntry | undefined = targetLeaf;
-  while (cur) {
-    path.unshift(cur);
-    cur = cur.parentId ? byId.get(cur.parentId) : undefined;
-  }
-
-  // Build UI history from the FULL branch path (root to leaf), without trimming.
-  // pi's buildSessionContext targets LLM context: it drops everything before the last
-  // compaction's firstKeptEntryId. Correct for the model, but it would hide compacted
-  // history from the UI. We keep piCtx only for thinkingLevel/model, and render every
-  // displayable entry on the path ourselves; compaction/branch_summary entries become
-  // inline summary messages so the user still sees where context was compressed.
+  // Convert the SDK-selected context entries and their IDs together. This keeps
+  // fork/navigation targets aligned while preserving pi's compaction ordering.
   const messages: AgentMessage[] = [];
   const entryIds: string[] = [];
-  for (const e of path) {
-    const m = entryToUiMessage(e, options);
+  for (const entry of contextEntries) {
+    const localEntry = entry as unknown as SessionEntry;
+    const m = entryToUiMessage(localEntry, options);
     if (m) {
       messages.push(m);
-      entryIds.push(e.id);
+      entryIds.push(localEntry.id);
     }
   }
 
