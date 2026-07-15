@@ -17,6 +17,7 @@ import {
   getFileExt,
   getImageMime,
 } from "@/lib/file-types";
+import { resolveDirentIsDirectory } from "@/lib/file-dirent";
 import { isFilePathReferencedBySession } from "@/lib/session-file-references";
 
 const IGNORED_NAMES = new Set([
@@ -402,22 +403,16 @@ export async function GET(
       return NextResponse.json({ error: "Not a directory" }, { status: 400 });
     }
 
-    // 使用 withFileTypes 避免每个文件额外调用 fs.statSync，
-    // 一次 getdents64 系统调用即可获取文件名和类型信息。
-    // size/modified 在 FileExplorer 树状视图中不被使用，置为占位值。
-    // Windows 下 Dirent.isDirectory() 对某些 symlink/junction 可能返回 false，
-    // 对 symlink 回退到 statSync 确认目标类型。
+    // Avoid per-entry stat calls for normal files and directories. Symlinks and
+    // filesystems without directory type information use the stat fallback.
     const dirents = fs.readdirSync(filePath, { withFileTypes: true });
     const entries = dirents
       .filter((d) => !IGNORED_NAMES.has(d.name) && !IGNORED_SUFFIXES.some((s) => d.name.endsWith(s)))
-      .map((d) => {
-        let isDir = d.isDirectory();
-        if (!isDir) {
-          try {
-            isDir = d.isSymbolicLink() && fs.statSync(path.join(filePath, d.name)).isDirectory();
-          } catch { /* keep isDir = false */ }
-        }
-        return { name: d.name, isDir, size: 0, modified: "" };
+      .flatMap((d) => {
+        const isDir = resolveDirentIsDirectory(d, path.join(filePath, d.name));
+        return isDir === null
+          ? []
+          : [{ name: d.name, isDir, size: 0, modified: "" }];
       })
       .sort((a, b) => {
         // Dirs first, then files, both alphabetically
