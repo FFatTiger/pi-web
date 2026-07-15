@@ -17,6 +17,7 @@ import {
   getFileExt,
   getImageMime,
 } from "@/lib/file-types";
+import { resolveDirentIsDirectory } from "@/lib/file-dirent";
 import { isFilePathReferencedBySession } from "@/lib/session-file-references";
 
 const IGNORED_NAMES = new Set([
@@ -402,28 +403,21 @@ export async function GET(
       return NextResponse.json({ error: "Not a directory" }, { status: 400 });
     }
 
-    const names = fs.readdirSync(filePath);
-    const entries = names
-      .filter((name) => !IGNORED_NAMES.has(name) && !IGNORED_SUFFIXES.some((s) => name.endsWith(s)))
-      .map((name) => {
-        const full = path.join(filePath, name);
-        try {
-          const s = fs.statSync(full);
-          return {
-            name,
-            isDir: s.isDirectory(),
-            size: s.isFile() ? s.size : 0,
-            modified: s.mtime.toISOString(),
-          };
-        } catch {
-          return null;
-        }
+    // Avoid per-entry stat calls for normal files and directories. Symlinks and
+    // filesystems without directory type information use the stat fallback.
+    const dirents = fs.readdirSync(filePath, { withFileTypes: true });
+    const entries = dirents
+      .filter((d) => !IGNORED_NAMES.has(d.name) && !IGNORED_SUFFIXES.some((s) => d.name.endsWith(s)))
+      .flatMap((d) => {
+        const isDir = resolveDirentIsDirectory(d, path.join(filePath, d.name));
+        return isDir === null
+          ? []
+          : [{ name: d.name, isDir, size: 0, modified: "" }];
       })
-      .filter(Boolean)
       .sort((a, b) => {
         // Dirs first, then files, both alphabetically
-        if (a!.isDir !== b!.isDir) return a!.isDir ? -1 : 1;
-        return a!.name.localeCompare(b!.name);
+        if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+        return a.name.localeCompare(b.name);
       });
 
     return NextResponse.json({ entries, path: filePath });
