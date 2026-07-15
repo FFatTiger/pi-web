@@ -46,10 +46,38 @@ async function loadAllSessions(): Promise<SessionInfo[]> {
 }
 
 export async function listAllSessions(): Promise<SessionInfo[]> {
-  globalThis.__piSessionListPromise ??= loadAllSessions().finally(() => {
-    globalThis.__piSessionListPromise = undefined;
+  const generation = globalThis.__piSessionListGeneration ?? 0;
+
+  // Return cached result if still fresh (avoids re-scanning session files
+  // and re-spawning git processes on every page load).
+  if (globalThis.__piSessionListCache && Date.now() - globalThis.__piSessionListCache.ts < SESSION_LIST_CACHE_TTL_MS) {
+    return globalThis.__piSessionListCache.data;
+  }
+
+  // Coalescing dedup: concurrent callers share the same in-flight promise
+  // only while it belongs to the current cache generation.
+  if (globalThis.__piSessionListPromise && globalThis.__piSessionListPromiseGeneration === generation) {
+    return globalThis.__piSessionListPromise;
+  }
+
+  const loadPromise = loadAllSessions().then((data) => {
+    // An invalidation may happen while the scan is in flight. Do not let that
+    // older result repopulate the cache after a session mutation.
+    if ((globalThis.__piSessionListGeneration ?? 0) === generation) {
+      globalThis.__piSessionListCache = { data, ts: Date.now() };
+    }
+    return data;
   });
-  return globalThis.__piSessionListPromise;
+  const trackedPromise = loadPromise.finally(() => {
+    if (globalThis.__piSessionListPromise === trackedPromise) {
+      globalThis.__piSessionListPromise = undefined;
+      globalThis.__piSessionListPromiseGeneration = undefined;
+    }
+  });
+
+  globalThis.__piSessionListPromise = trackedPromise;
+  globalThis.__piSessionListPromiseGeneration = generation;
+  return trackedPromise;
 }
 
 // ============================================================================
@@ -59,6 +87,16 @@ declare global {
   var __piSessionPathCache: Map<string, string> | undefined;
   var __piPathToSessionIdCache: Map<string, string> | undefined;
   var __piSessionListPromise: Promise<SessionInfo[]> | undefined;
+  var __piSessionListPromiseGeneration: number | undefined;
+  var __piSessionListGeneration: number | undefined;
+  var __piSessionListCache: { data: SessionInfo[]; ts: number } | undefined;
+}
+
+const SESSION_LIST_CACHE_TTL_MS = 30_000;
+
+export function invalidateSessionListCache(): void {
+  globalThis.__piSessionListGeneration = (globalThis.__piSessionListGeneration ?? 0) + 1;
+  globalThis.__piSessionListCache = undefined;
 }
 
 function getPathCache(): Map<string, string> {
