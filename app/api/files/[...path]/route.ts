@@ -405,15 +405,20 @@ export async function GET(
     // 使用 withFileTypes 避免每个文件额外调用 fs.statSync，
     // 一次 getdents64 系统调用即可获取文件名和类型信息。
     // size/modified 在 FileExplorer 树状视图中不被使用，置为占位值。
+    // Windows 下 Dirent.isDirectory() 对某些 symlink/junction 可能返回 false，
+    // 对 symlink 回退到 statSync 确认目标类型。
     const dirents = fs.readdirSync(filePath, { withFileTypes: true });
     const entries = dirents
       .filter((d) => !IGNORED_NAMES.has(d.name) && !IGNORED_SUFFIXES.some((s) => d.name.endsWith(s)))
-      .map((d) => ({
-        name: d.name,
-        isDir: d.isDirectory(),
-        size: 0,
-        modified: "",
-      }))
+      .map((d) => {
+        let isDir = d.isDirectory();
+        if (!isDir) {
+          try {
+            isDir = d.isSymbolicLink() && fs.statSync(path.join(filePath, d.name)).isDirectory();
+          } catch { /* keep isDir = false */ }
+        }
+        return { name: d.name, isDir, size: 0, modified: "" };
+      })
       .sort((a, b) => {
         // Dirs first, then files, both alphabetically
         if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
