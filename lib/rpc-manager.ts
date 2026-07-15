@@ -1,4 +1,4 @@
-import { createAgentSessionFromServices, createAgentSessionServices, getAgentDir, SessionManager, Theme } from "@earendil-works/pi-coding-agent";
+import { createAgentSessionFromServices, createAgentSessionServices, getAgentDir, initTheme, SessionManager, Theme } from "@earendil-works/pi-coding-agent";
 import { KeybindingsManager as TuiKeybindingsManager, TUI_KEYBINDINGS } from "@earendil-works/pi-tui";
 import { randomUUID } from "crypto";
 import { cacheSessionPath } from "./session-reader";
@@ -961,6 +961,8 @@ export async function startRpcSession(
   if (inflight) return inflight;
 
   const starting = (async () => {
+    // Some extensions access the SDK's global theme even outside the terminal UI.
+    initTheme();
     const agentDir = getAgentDir();
 
     const sessionManager = sessionFile
