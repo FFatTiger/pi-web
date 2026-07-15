@@ -1,4 +1,5 @@
 import { AuthStorage } from "@earendil-works/pi-coding-agent";
+import { invalidateModelsCache } from "@/lib/models-cache";
 
 export const dynamic = "force-dynamic";
 
@@ -170,6 +171,7 @@ export async function GET(
           signal: abort.signal,
         });
 
+        invalidateModelsCache();
         send(controller, { type: "success" });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);

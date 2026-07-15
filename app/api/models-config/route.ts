@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { join, dirname } from "path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import { invalidateModelsCache } from "../models/route";
+import { invalidateModelsCache } from "@/lib/models-cache";
 
 export const dynamic = "force-dynamic";
 
