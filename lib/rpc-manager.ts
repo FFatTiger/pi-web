@@ -1,4 +1,5 @@
 import { createAgentSessionFromServices, createAgentSessionServices, getAgentDir, SessionManager, Theme } from "@earendil-works/pi-coding-agent";
+import { KeybindingsManager as TuiKeybindingsManager, TUI_KEYBINDINGS } from "@earendil-works/pi-tui";
 import { randomUUID } from "crypto";
 import { cacheSessionPath } from "./session-reader";
 import type { SlashCommandInfo } from "@earendil-works/pi-coding-agent";
@@ -82,6 +83,7 @@ class PlainTextTheme extends Theme {
 }
 
 const PLAIN_TEXT_THEME = new PlainTextTheme();
+const CUSTOM_UI_KEYBINDINGS = new TuiKeybindingsManager(TUI_KEYBINDINGS);
 
 function withExtensionTools(session: AgentSessionLike, toolNames: string[]): string[] {
   if (toolNames.length === 0) return [];
@@ -621,38 +623,59 @@ export class AgentSessionWrapper {
     const width = this.getCustomUiWidth(options);
 
     return new Promise<T>((resolve) => {
+      let completed = false;
       const tui = {
         requestRender: () => {
           const custom = this.activeCustomUis.get(id);
           if (custom) this.emitCustomUiRender(id, custom);
         },
       };
-      const done = (value: T) => this.closeCustomUi(id, value);
+      const finish = (value: T) => {
+        if (completed) return;
+        completed = true;
+        resolve(value);
+      };
+      const done = (value: T) => {
+        if (this.activeCustomUis.has(id)) {
+          this.closeCustomUi(id, value);
+        } else {
+          finish(value);
+        }
+      };
 
       Promise.resolve()
-        .then(() => factory(tui, undefined, undefined, done))
+        .then(() => factory(tui, PLAIN_TEXT_THEME, CUSTOM_UI_KEYBINDINGS, done))
         .then((component) => {
+          if (completed) {
+            try {
+              (component as CustomUiComponent | undefined)?.dispose?.();
+            } catch {
+              // Ignore dispose errors from a component completed before mounting.
+            }
+            return;
+          }
           if (!component || typeof component !== "object" || typeof (component as CustomUiComponent).render !== "function") {
-            resolve(undefined as T);
+            finish(undefined as T);
             return;
           }
           const custom: ActiveCustomUi = {
             component: component as CustomUiComponent,
             width,
-            resolve: (value) => resolve(value as T),
+            resolve: (value) => finish(value as T),
             settled: false,
           };
           this.activeCustomUis.set(id, custom);
           this.emitCustomUiRender(id, custom);
         })
         .catch((error) => {
+          if (completed) return;
           this.emit({
             type: "extension_error",
             extensionPath: `custom-ui:${id}`,
             event: "custom_ui",
             error: error instanceof Error ? error.message : String(error),
           });
-          resolve(undefined as T);
+          finish(undefined as T);
         });
     });
   }
