@@ -46,10 +46,20 @@ async function loadAllSessions(): Promise<SessionInfo[]> {
 }
 
 export async function listAllSessions(): Promise<SessionInfo[]> {
+  // Return cached result if still fresh (avoids re-scanning session files
+  // and re-spawning git processes on every page load).
+  if (globalThis.__piSessionListCache && Date.now() - globalThis.__piSessionListCache.ts < SESSION_LIST_CACHE_TTL_MS) {
+    return globalThis.__piSessionListCache.data;
+  }
+
+  // Coalescing dedup: concurrent callers share the same in-flight promise
   globalThis.__piSessionListPromise ??= loadAllSessions().finally(() => {
     globalThis.__piSessionListPromise = undefined;
   });
-  return globalThis.__piSessionListPromise;
+  const data = await globalThis.__piSessionListPromise;
+
+  globalThis.__piSessionListCache = { data, ts: Date.now() };
+  return data;
 }
 
 // ============================================================================
@@ -59,6 +69,13 @@ declare global {
   var __piSessionPathCache: Map<string, string> | undefined;
   var __piPathToSessionIdCache: Map<string, string> | undefined;
   var __piSessionListPromise: Promise<SessionInfo[]> | undefined;
+  var __piSessionListCache: { data: SessionInfo[]; ts: number } | undefined;
+}
+
+const SESSION_LIST_CACHE_TTL_MS = 30_000;
+
+export function invalidateSessionListCache(): void {
+  globalThis.__piSessionListCache = undefined;
 }
 
 function getPathCache(): Map<string, string> {
