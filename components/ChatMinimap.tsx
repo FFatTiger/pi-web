@@ -146,22 +146,36 @@ export function ChatMinimap({ messages, streamingMessage, scrollContainer, messa
     return () => el.removeEventListener("scroll", updateScroll);
   }, [scrollContainer, updateScroll]);
 
-  // 内容高度变化时触发节点测量
+  // Keep both node positions and viewport ratios in sync with layout changes.
   useEffect(() => {
     const el = scrollContainer.current;
     if (!el) return;
-    const ro = new ResizeObserver(measureNodes);
+    const syncLayout = () => {
+      updateScroll();
+      measureNodes();
+    };
+    const ro = new ResizeObserver(syncLayout);
     ro.observe(el);
     // Also observe the scroll content for height changes
     if (el.firstElementChild) ro.observe(el.firstElementChild);
-    return () => ro.disconnect();
-  }, [scrollContainer, measureNodes]);
+    syncLayout();
+    return () => {
+      ro.disconnect();
+      if (measureThrottleRef.current) {
+        clearTimeout(measureThrottleRef.current);
+        measureThrottleRef.current = null;
+      }
+    };
+  }, [scrollContainer, measureNodes, updateScroll]);
 
-  // 消息数量变化时触发节点测量（带 50ms 防抖等待 DOM 渲染完成）
+  // Wait briefly for new message DOM before syncing layout.
   useEffect(() => {
-    const t = setTimeout(measureNodes, 50);
+    const t = setTimeout(() => {
+      updateScroll();
+      measureNodes();
+    }, 50);
     return () => clearTimeout(t);
-  }, [messages.length, measureNodes]);
+  }, [messages.length, measureNodes, updateScroll]);
 
   const scrollToMinimapRatio = useCallback((viewportTopRatio: number) => {
     const el = scrollContainer.current;

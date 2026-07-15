@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, memo, useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import type { AgentMessage, AssistantContentBlock, AssistantMessage, ExtensionUiRequest, SessionInfo, SessionTreeNode, ToolResultMessage } from "@/lib/types";
 import { normalizeCustomPanelLines, parseAnsiLine } from "@/lib/ansi";
 import { countToolCallBlocks, getDisplayableAssistantBlocks, splitFinalAssistantBlocks } from "@/lib/message-display";
@@ -12,6 +12,13 @@ import { useAudio } from "@/hooks/useAudio";
 import { useDragDrop } from "@/hooks/useDragDrop";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import type { SessionStatsInfo } from "@/lib/pi-types";
+import {
+  captureScrollDistance,
+  getNextVisibleCount,
+  getVisibleRenderWindow,
+  restoreScrollTop,
+  VISIBLE_PAGE_SIZE,
+} from "@/lib/chat-lazy-load";
 
 interface Props {
   session: SessionInfo | null;
@@ -90,7 +97,7 @@ function withAssistantBlocks(
   return next;
 }
 
-const ProcessDetailsGroup = memo(function ProcessDetailsGroup({ messageCount, toolCallCount, children }: { messageCount: number; toolCallCount: number; children: ReactNode }) {
+function ProcessDetailsGroup({ messageCount, toolCallCount, children }: { messageCount: number; toolCallCount: number; children: ReactNode }) {
   const [expanded, setExpanded] = useState(false);
   const parts = ["Process details", `${messageCount} ${messageCount === 1 ? "message" : "messages"}`];
   if (toolCallCount > 0) parts.push(`${toolCallCount} ${toolCallCount === 1 ? "tool call" : "tool calls"}`);
@@ -131,7 +138,7 @@ const ProcessDetailsGroup = memo(function ProcessDetailsGroup({ messageCount, to
       )}
     </div>
   );
-});
+}
 
 export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsChange, onSessionStatsPanelOpen, onContextUsageChange, onOpenFile }: Props) {
   const { soundEnabled, onSoundToggle, playDoneSound, unlockAudio } = useAudio();
@@ -182,7 +189,6 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
   // --- Lazy-load historical messages ---
   // Only render the last N messages initially. When the user scrolls to the
   // top, load another page while keeping the scroll position stable.
-  const VISIBLE_PAGE_SIZE = 50;
   const [visibleCount, setVisibleCount] = useState(VISIBLE_PAGE_SIZE);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const prevScrollDistanceRef = useRef<number | null>(null);
@@ -193,14 +199,12 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     const sentinel = sentinelRef.current;
     const container = scrollContainerRef.current;
     if (!sentinel || !container) return;
-    if (visibleCount >= messages.length) return;
-
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0]?.isIntersecting) {
           // Save distance from top before prepending to restore scroll later
-          prevScrollDistanceRef.current = container.scrollHeight - container.scrollTop;
-          setVisibleCount((prev) => Math.min(prev + VISIBLE_PAGE_SIZE, messages.length));
+          prevScrollDistanceRef.current = captureScrollDistance(container.scrollHeight, container.scrollTop);
+          setVisibleCount((prev) => getNextVisibleCount(prev));
         }
       },
       { root: container, threshold: 0 }
@@ -215,7 +219,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     if (prevScrollDistanceRef.current == null) return;
     const container = scrollContainerRef.current;
     if (!container) return;
-    container.scrollTop = container.scrollHeight - prevScrollDistanceRef.current;
+    container.scrollTop = restoreScrollTop(container.scrollHeight, prevScrollDistanceRef.current);
     prevScrollDistanceRef.current = null;
   }, [visibleCount, scrollContainerRef]);
   // Push session stats up to AppShell for the top bar.
@@ -603,14 +607,15 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                 }
                 idx = endIdx;
               }
+              const { startIndex, hasMore } = getVisibleRenderWindow(rendered.length, visibleCount);
               return (
                 <>
-                  {rendered.length > visibleCount && (
+                  {hasMore && (
                     <div ref={sentinelRef} className="py-3 text-center text-xs text-text-muted">
-                      Scroll up to load earlier messages ({rendered.length - visibleCount} hidden)
+                      Scroll up to load earlier messages ({startIndex} hidden)
                     </div>
                   )}
-                  {rendered.length > visibleCount ? rendered.slice(rendered.length - visibleCount) : rendered}
+                  {rendered.slice(startIndex)}
                 </>
               );
             })()}
