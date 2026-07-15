@@ -1,7 +1,7 @@
 import { createAgentSessionFromServices, createAgentSessionServices, getAgentDir, initTheme, SessionManager, Theme } from "@earendil-works/pi-coding-agent";
 import { KeybindingsManager as TuiKeybindingsManager, TUI_KEYBINDINGS } from "@earendil-works/pi-tui";
 import { randomUUID } from "crypto";
-import { cacheSessionPath } from "./session-reader";
+import { cacheSessionPath, invalidateSessionListCache } from "./session-reader";
 import type { SlashCommandInfo } from "@earendil-works/pi-coding-agent";
 import type { AgentSessionLike, ExtensionUiContextLike, ToolInfo } from "./pi-types";
 import type { ExtensionUiRequest, ExtensionUiResponse, ExtensionWidgetItem } from "./types";
@@ -140,6 +140,9 @@ export class AgentSessionWrapper {
   start(): void {
     this.unsubscribe = this.inner.subscribe((event: AgentEvent) => {
       this.resetIdleTimer();
+      if (event.type === "agent_end") {
+        invalidateSessionListCache();
+      }
       this.emit(event);
       // Streaming / compaction / tool events flow through here; re-broadcast
       // the running-status snapshot so the sidebar can update live.
@@ -287,6 +290,7 @@ export class AgentSessionWrapper {
           notifyRunningChange();
         }).catch((error) => {
           this.promptRunning = false;
+          invalidateSessionListCache();
           this.emit({
             type: "prompt_error",
             errorMessage: error instanceof Error ? error.message : String(error),
@@ -335,6 +339,7 @@ export class AgentSessionWrapper {
         const model = registry.find(provider, modelId);
         if (!model) throw new Error(`Model not found: ${provider}/${modelId}`);
         await this.inner.setModel(model);
+        invalidateSessionListCache();
         return { id: model.id, provider: model.provider };
       }
 
@@ -367,6 +372,7 @@ export class AgentSessionWrapper {
 
         const newSessionId = SessionManager.open(newSessionFile, sessionDir).getSessionId();
         cacheSessionPath(newSessionId, newSessionFile);
+        invalidateSessionListCache();
         this.destroy();
         return { cancelled: false, newSessionId };
       }
@@ -385,20 +391,25 @@ export class AgentSessionWrapper {
         if (level === "xhigh" && (this.inner.model as { compat?: { thinkingFormat?: string } } | null)?.compat?.thinkingFormat === "deepseek" && this.inner.agent?.state) {
           this.inner.agent.state.thinkingLevel = "xhigh";
         }
+        invalidateSessionListCache();
         return null;
       }
 
       case "compact": {
-        const result = await this.withFinalRunningNotification(() =>
-          this.inner.compact(command.customInstructions as string | undefined)
-        );
-        return result;
+        try {
+          return await this.withFinalRunningNotification(() =>
+            this.inner.compact(command.customInstructions as string | undefined)
+          );
+        } finally {
+          invalidateSessionListCache();
+        }
       }
 
       case "set_session_name": {
         const name = (command.name as string | undefined)?.trim();
         if (!name) throw new Error("Session name cannot be empty");
         this.inner.setSessionName(name);
+        invalidateSessionListCache();
         return null;
       }
 
