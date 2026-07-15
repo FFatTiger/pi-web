@@ -81,15 +81,13 @@ export function ChatMinimap({ messages, streamingMessage, scrollContainer, messa
   const allMessagesRef = useRef(allMessages);
   allMessagesRef.current = allMessages;
 
-  const updatePositionsRef = useRef<() => void>(null!);
-  updatePositionsRef.current = () => {
+  // --- 仅更新视口比例，不读取 DOM ---
+  const updateScroll = useCallback(() => {
     const scrollEl = scrollContainer.current;
     if (!scrollEl) return;
-
     const totalH = scrollEl.scrollHeight;
     const clientH = scrollEl.clientHeight;
     const scrollable = totalH - clientH;
-
     setVisible(scrollable > 20);
     if (scrollable <= 0) {
       setScrollRatio(0);
@@ -98,60 +96,86 @@ export function ChatMinimap({ messages, streamingMessage, scrollContainer, messa
       setScrollRatio(scrollEl.scrollTop / scrollable);
       setViewportRatio(clientH / totalH);
     }
+  }, [scrollContainer]);
 
-    // Build node positions from real DOM refs
-    const refs = messageRefs.current;
-    const newNodes: NodeInfo[] = [];
-    let refIndex = 0;
+  // --- 节流 DOM 测量（仅消息变化/尺寸变化时触发，最多 150ms 一次）---
+  const measureThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const measureNodes = useCallback(() => {
+    // 节流：150ms 内忽略重复调用
+    if (measureThrottleRef.current) return;
+    measureThrottleRef.current = setTimeout(() => {
+      measureThrottleRef.current = null;
+      const scrollEl = scrollContainer.current;
+      if (!scrollEl) return;
+      const totalH = scrollEl.scrollHeight;
+      if (totalH <= 0) return;
 
-    const allMessages = allMessagesRef.current;
-    for (let i = 0; i < allMessages.length; i++) {
-      const msg = allMessages[i];
-      if (msg.role !== "user" && msg.role !== "assistant") continue;
+      const refs = messageRefs.current;
+      const newNodes: NodeInfo[] = [];
+      let refIndex = 0;
+      const allMessages = allMessagesRef.current;
 
-      const el = refs?.[refIndex];
-      refIndex++;
-
-      if (!hasTextContent(msg)) continue;
-
-      if (el && totalH > 0) {
-        const elRect = el.getBoundingClientRect();
-        const containerRect = scrollEl.getBoundingClientRect();
-        const top = elRect.top - containerRect.top + scrollEl.scrollTop;
-        const h = elRect.height;
-        newNodes.push({
-          topRatio: top / totalH,
-          heightRatio: h / totalH,
-          msg,
-          index: newNodes.length,
-        });
+      for (let i = 0; i < allMessages.length; i++) {
+        const msg = allMessages[i];
+        if (msg.role !== "user" && msg.role !== "assistant") continue;
+        const el = refs?.[refIndex];
+        refIndex++;
+        if (!hasTextContent(msg)) continue;
+        if (el) {
+          const elRect = el.getBoundingClientRect();
+          const containerRect = scrollEl.getBoundingClientRect();
+          const top = elRect.top - containerRect.top + scrollEl.scrollTop;
+          const h = elRect.height;
+          newNodes.push({
+            topRatio: top / totalH,
+            heightRatio: h / totalH,
+            msg,
+            index: newNodes.length,
+          });
+        }
       }
-    }
-    setNodes(newNodes);
-  };
+      setNodes(newNodes);
+    }, 150);
+  }, [scrollContainer, messageRefs]);
 
-  const updatePositions = useCallback(() => updatePositionsRef.current(), []);
-
+  // scroll 事件 → 只更新视口，不碰 DOM
   useEffect(() => {
     const el = scrollContainer.current;
     if (!el) return;
-    el.addEventListener("scroll", updatePositions, { passive: true });
-    const ro = new ResizeObserver(updatePositions);
+    el.addEventListener("scroll", updateScroll, { passive: true });
+    return () => el.removeEventListener("scroll", updateScroll);
+  }, [scrollContainer, updateScroll]);
+
+  // Keep both node positions and viewport ratios in sync with layout changes.
+  useEffect(() => {
+    const el = scrollContainer.current;
+    if (!el) return;
+    const syncLayout = () => {
+      updateScroll();
+      measureNodes();
+    };
+    const ro = new ResizeObserver(syncLayout);
     ro.observe(el);
     // Also observe the scroll content for height changes
     if (el.firstElementChild) ro.observe(el.firstElementChild);
-    updatePositions();
+    syncLayout();
     return () => {
-      el.removeEventListener("scroll", updatePositions);
       ro.disconnect();
+      if (measureThrottleRef.current) {
+        clearTimeout(measureThrottleRef.current);
+        measureThrottleRef.current = null;
+      }
     };
-  }, [scrollContainer, updatePositions]);
+  }, [scrollContainer, measureNodes, updateScroll]);
 
-  // Re-measure when message count changes (new messages arrive)
+  // Wait briefly for new message DOM before syncing layout.
   useEffect(() => {
-    const t = setTimeout(updatePositions, 50);
+    const t = setTimeout(() => {
+      updateScroll();
+      measureNodes();
+    }, 50);
     return () => clearTimeout(t);
-  }, [messages.length, updatePositions]);
+  }, [messages.length, measureNodes, updateScroll]);
 
   const scrollToMinimapRatio = useCallback((viewportTopRatio: number) => {
     const el = scrollContainer.current;

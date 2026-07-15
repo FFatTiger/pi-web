@@ -12,6 +12,13 @@ import { useAudio } from "@/hooks/useAudio";
 import { useDragDrop } from "@/hooks/useDragDrop";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import type { SessionStatsInfo } from "@/lib/pi-types";
+import {
+  captureScrollDistance,
+  getNextVisibleCount,
+  getVisibleRenderWindow,
+  restoreScrollTop,
+  VISIBLE_PAGE_SIZE,
+} from "@/lib/chat-lazy-load";
 
 interface Props {
   session: SessionInfo | null;
@@ -152,6 +159,11 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     onAgentEnd?.();
   }, [onAgentEnd]);
 
+  // 稳定化 onEditContent 引用，配合 React.memo 防止历史消息重渲染
+  const handleEditContent = useCallback((content: string) => {
+    chatInputRef?.current?.insertIfEmpty(content);
+  }, [chatInputRef]);
+
   const {
     loading, error, messages, entryIds, streamState,
     agentRunning, modelNames, modelList, modelThinkingLevels, modelThinkingLevelMaps, toolPreset, thinkingLevel,
@@ -174,6 +186,42 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsPanelOpen,
   });
 
+  // --- Lazy-load historical messages ---
+  // Only render the last N messages initially. When the user scrolls to the
+  // top, load another page while keeping the scroll position stable.
+  const [visibleCount, setVisibleCount] = useState(VISIBLE_PAGE_SIZE);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const prevScrollDistanceRef = useRef<number | null>(null);
+
+  // IntersectionObserver on the sentinel div at the top of the message list.
+  // When it becomes visible, load the next page of older messages.
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    const container = scrollContainerRef.current;
+    if (!sentinel || !container) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          // Save distance from top before prepending to restore scroll later
+          prevScrollDistanceRef.current = captureScrollDistance(container.scrollHeight, container.scrollTop);
+          setVisibleCount((prev) => getNextVisibleCount(prev));
+        }
+      },
+      { root: container, threshold: 0 }
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [visibleCount, messages.length, scrollContainerRef]);
+
+  // After visibleCount increases (more messages prepended), restore the
+  // scroll position so the viewport doesn't jump.
+  useEffect(() => {
+    if (prevScrollDistanceRef.current == null) return;
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    container.scrollTop = restoreScrollTop(container.scrollHeight, prevScrollDistanceRef.current);
+    prevScrollDistanceRef.current = null;
+  }, [visibleCount, scrollContainerRef]);
   // Push session stats up to AppShell for the top bar.
   // Compare scalar fields to avoid loops from new object identity each render.
   const statsKey = sessionStats
@@ -464,7 +512,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                     forking={forkingEntryId === entryIds[idx]}
                     onNavigate={agentRunning ? undefined : handleNavigate}
                     prevAssistantEntryId={agentRunning ? undefined : prevAssistantEntryId}
-                    onEditContent={(content) => chatInputRef?.current?.insertIfEmpty(content)}
+                    onEditContent={handleEditContent}
                     showTimestamp={showTimestamp}
                     prevTimestamp={idx > 0 ? (messages[idx - 1] as AgentMessage & { timestamp?: number }).timestamp : undefined}
                     sessionId={session?.id ?? sessionIdRef.current ?? undefined}
@@ -559,9 +607,18 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                 }
                 idx = endIdx;
               }
-              return rendered;
+              const { startIndex, hasMore } = getVisibleRenderWindow(rendered.length, visibleCount);
+              return (
+                <>
+                  {hasMore && (
+                    <div ref={sentinelRef} className="py-3 text-center text-xs text-text-muted">
+                      Scroll up to load earlier messages ({startIndex} hidden)
+                    </div>
+                  )}
+                  {rendered.slice(startIndex)}
+                </>
+              );
             })()}
-
             {streamState.isStreaming && streamState.streamingMessage && (
               <MessageView message={streamState.streamingMessage as AgentMessage} isStreaming modelNames={modelNames} cwd={messageCwd} onOpenFile={onOpenFile} />
             )}
