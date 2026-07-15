@@ -4,6 +4,13 @@ import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 
 export const dynamic = "force-dynamic";
 
+// TTL cache keyed by cwd, invalidated when models.json is written
+let modelsCache: { data: Record<string, unknown>; ts: number; cwd: string } | null = null;
+const MODELS_CACHE_TTL_MS = 60_000;
+
+export function invalidateModelsCache(): void {
+  modelsCache = null;
+}
 const modelNameCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
 function compareModelEntries(
@@ -54,6 +61,12 @@ export async function GET(req: Request) {
     return Response.json({ error: `Not a directory: ${cwd}` }, { status: 400 });
   }
 
+  // Return cached result if TTL hasn't expired (models are global config,
+  // re-initializing the SDK service layer on every request is wasteful).
+  if (modelsCache && modelsCache.cwd === cwd && Date.now() - modelsCache.ts < MODELS_CACHE_TTL_MS) {
+    return Response.json(modelsCache.data);
+  }
+
   try {
     const agentDir = getAgentDir();
     const services = await createAgentSessionServices({ cwd, agentDir });
@@ -81,5 +94,7 @@ export async function GET(req: Request) {
     }
   } catch { /* return empty */ }
 
-  return Response.json({ models: Object.fromEntries(nameMap), modelList, defaultModel, thinkingLevels, thinkingLevelMaps });
+  const data = { models: Object.fromEntries(nameMap), modelList, defaultModel, thinkingLevels, thinkingLevelMaps };
+  modelsCache = { data, ts: Date.now(), cwd };
+  return Response.json(data);
 }
