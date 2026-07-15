@@ -4,6 +4,14 @@ import { useEffect, useLayoutEffect, useState, useCallback, useRef, type CSSProp
 import type { SessionInfo } from "@/lib/types";
 import { FileExplorer } from "./FileExplorer";
 
+declare global {
+  interface Window {
+    piDesktop?: {
+      selectDirectory: () => Promise<string | null>;
+    };
+  }
+}
+
 interface Props {
   selectedSessionId: string | null;
   onSelectSession: (session: SessionInfo, isRestore?: boolean) => void;
@@ -543,8 +551,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     }
   }, [allSessions, selectedCwd, initialSessionId, onSelectSession, onInitialRestoreDone]);
 
-  const commitCustomPath = useCallback(async () => {
-    const path = customPathValue.trim();
+  const commitCustomPath = useCallback(async (candidate?: string) => {
+    const path = (candidate ?? customPathValue).trim();
     if (!path || customPathValidating) return;
 
     setCustomPathValidating(true);
@@ -570,6 +578,30 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       setCustomPathValidating(false);
     }
   }, [customPathValue, customPathValidating]);
+
+  const handleCustomPathClick = useCallback(async () => {
+    const desktop = window.piDesktop;
+    if (!desktop) {
+      setCustomPathOpen(true);
+      setCustomPathError(null);
+      setTimeout(() => customPathInputRef.current?.focus(), 0);
+      return;
+    }
+
+    try {
+      setCustomPathError(null);
+      const path = await desktop.selectDirectory();
+      if (path === null) return;
+
+      setCustomPathValue(path);
+      setCustomPathOpen(true);
+      await commitCustomPath(path);
+    } catch (e) {
+      setCustomPathOpen(true);
+      setCustomPathError(e instanceof Error ? e.message : String(e));
+      setTimeout(() => customPathInputRef.current?.focus(), 0);
+    }
+  }, [commitCustomPath]);
 
   const handleDefaultCwd = useCallback(async () => {
     try {
@@ -997,9 +1029,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    setCustomPathOpen(true);
-                    setCustomPathError(null);
-                    setTimeout(() => customPathInputRef.current?.focus(), 0);
+                    void handleCustomPathClick();
                   }}
                   style={{
                     display: "flex",
