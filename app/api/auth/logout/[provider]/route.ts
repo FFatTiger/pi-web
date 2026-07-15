@@ -1,4 +1,5 @@
 import { AuthStorage } from "@earendil-works/pi-coding-agent";
+import { invalidateModelsCache } from "@/lib/models-cache";
 
 export const dynamic = "force-dynamic";
 
@@ -13,5 +14,6 @@ export async function POST(
     return Response.json({ error: `Unknown provider: ${provider}` }, { status: 400 });
   }
   authStorage.logout(provider);
+  invalidateModelsCache();
   return Response.json({ ok: true });
 }

@@ -1,5 +1,6 @@
 import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { NextResponse } from "next/server";
+import { invalidateModelsCache } from "@/lib/models-cache";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +27,7 @@ export async function POST(req: Request, { params }: Params) {
     }
     const authStorage = AuthStorage.create();
     authStorage.set(provider, { type: "api_key", key: apiKey.trim() });
+    invalidateModelsCache();
     return NextResponse.json({ success: true });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
@@ -38,6 +40,7 @@ export async function DELETE(_req: Request, { params }: Params) {
   try {
     const authStorage = AuthStorage.create();
     authStorage.remove(provider);
+    invalidateModelsCache();
     return NextResponse.json({ success: true });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });

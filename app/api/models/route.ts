@@ -1,6 +1,8 @@
 import { stat } from "fs/promises";
+import { resolve } from "path";
 import { createAgentSessionServices, getAgentDir, type SettingsManager } from "@earendil-works/pi-coding-agent";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
+import { loadModelsWithCache, type ModelsData } from "@/lib/models-cache";
 
 export const dynamic = "force-dynamic";
 
@@ -36,13 +38,52 @@ function filterByExactEnabledModels<T extends { id: string; provider: string }>(
   return visible.length > 0 ? visible : available;
 }
 
-export async function GET(req: Request) {
+async function loadModels(cwd: string): Promise<ModelsData> {
   const nameMap = new Map<string, string>();
   let modelList: { id: string; name: string; provider: string }[] = [];
   let defaultModel: { provider: string; modelId: string } | null = null;
   const thinkingLevels: Record<string, string[]> = {};
   const thinkingLevelMaps: Record<string, Record<string, string | null>> = {};
-  const cwd = new URL(req.url).searchParams.get("cwd") || process.cwd();
+
+  const agentDir = getAgentDir();
+  const services = await createAgentSessionServices({ cwd, agentDir });
+  const registry = services.modelRegistry;
+  const available = registry.getAvailable();
+  const settings: SettingsManager = services.settingsManager;
+  const enabledModels = settings.getEnabledModels();
+  const visible = filterByExactEnabledModels(available, enabledModels);
+  modelList = visible.map((m: { id: string; name: string; provider: string }) => ({
+    id: m.id,
+    name: m.name,
+    provider: m.provider,
+  })).sort(compareModelEntries);
+  for (const m of visible) {
+    const key = `${m.provider}:${m.id}`;
+    nameMap.set(key, m.name);
+    thinkingLevels[key] = getSupportedThinkingLevels(m);
+    if (m.thinkingLevelMap) thinkingLevelMaps[key] = m.thinkingLevelMap;
+  }
+
+  const provider = settings.getDefaultProvider();
+  const modelId = settings.getDefaultModel();
+  if (provider && modelId && visible.some((m) => m.provider === provider && m.id === modelId)) {
+    defaultModel = { provider, modelId };
+  }
+
+  return { models: Object.fromEntries(nameMap), modelList, defaultModel, thinkingLevels, thinkingLevelMaps };
+}
+
+const EMPTY_MODELS: ModelsData = {
+  models: {},
+  modelList: [],
+  defaultModel: null,
+  thinkingLevels: {},
+  thinkingLevelMaps: {},
+};
+
+export async function GET(req: Request) {
+  const requestedCwd = new URL(req.url).searchParams.get("cwd") || process.cwd();
+  const cwd = resolve(requestedCwd);
 
   let cwdStat;
   try {
@@ -55,31 +96,8 @@ export async function GET(req: Request) {
   }
 
   try {
-    const agentDir = getAgentDir();
-    const services = await createAgentSessionServices({ cwd, agentDir });
-    const registry = services.modelRegistry;
-    const available = registry.getAvailable();
-    const settings: SettingsManager = services.settingsManager;
-    const enabledModels = settings.getEnabledModels();
-    const visible = filterByExactEnabledModels(available, enabledModels);
-    modelList = visible.map((m: { id: string; name: string; provider: string }) => ({
-      id: m.id,
-      name: m.name,
-      provider: m.provider,
-    })).sort(compareModelEntries);
-    for (const m of visible) {
-      const key = `${m.provider}:${m.id}`;
-      nameMap.set(key, m.name);
-      thinkingLevels[key] = getSupportedThinkingLevels(m);
-      if (m.thinkingLevelMap) thinkingLevelMaps[key] = m.thinkingLevelMap;
-    }
-
-    const provider = settings.getDefaultProvider();
-    const modelId = settings.getDefaultModel();
-    if (provider && modelId && visible.some((m) => m.provider === provider && m.id === modelId)) {
-      defaultModel = { provider, modelId };
-    }
-  } catch { /* return empty */ }
-
-  return Response.json({ models: Object.fromEntries(nameMap), modelList, defaultModel, thinkingLevels, thinkingLevelMaps });
+    return Response.json(await loadModelsWithCache(cwd, () => loadModels(cwd)));
+  } catch {
+    return Response.json(EMPTY_MODELS);
+  }
 }
