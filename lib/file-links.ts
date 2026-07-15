@@ -74,7 +74,11 @@ function fileUrlToPath(href: string): string | null {
   }
 }
 
-export function resolveLocalFileHref(href: string | undefined, cwd?: string): string | null {
+export function resolveLocalFileHref(
+  href: string | undefined,
+  baseDir?: string,
+  relativeRoot = baseDir,
+): string | null {
   if (!href) return null;
 
   const cleanHref = href.split("#", 1)[0].split("?", 1)[0].trim();
@@ -102,14 +106,14 @@ export function resolveLocalFileHref(href: string | undefined, cwd?: string): st
   } else if (normalizedHref.startsWith("/")) {
     candidate = normalizedHref;
     candidateKind = "absolute";
-  } else if (cwd && looksLikeRelativeFileHref(normalizedHref)) {
-    candidate = `${normalizeFilePathSlashes(cwd).replace(/\/+$/, "")}/${normalizedHref}`;
+  } else if (baseDir && looksLikeRelativeFileHref(normalizedHref)) {
+    candidate = `${normalizeFilePathSlashes(baseDir).replace(/\/+$/, "")}/${normalizedHref}`;
     candidateKind = "relative";
   }
 
   if (!candidate) return null;
 
   const filePath = stripLineSuffix(normalizeLocalPath(candidate));
-  if (candidateKind === "relative" && cwd && !isPathInside(filePath, cwd)) return null;
+  if (candidateKind === "relative" && relativeRoot && !isPathInside(filePath, relativeRoot)) return null;
   return filePath;
 }
