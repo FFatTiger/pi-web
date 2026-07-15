@@ -1,6 +1,6 @@
 "use client";
 
-import { createElement, useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vs } from "react-syntax-highlighter/dist/cjs/styles/prism";
@@ -50,13 +50,15 @@ export function MarkdownBody({ children, className, isStreaming, cwd, onOpenFile
             return <>{children}</>;
           },
           a({ href, children, ...props }) {
+            // `node` is react-markdown metadata, not a DOM attribute.
+            delete props.node;
             const filePath = onOpenFile ? resolveLocalFileHref(href, cwd) : null;
             const openFile = onOpenFile;
             if (!filePath || !openFile) {
-              return createElement(
-                "a",
-                { href, ...props, target: "_blank", rel: "noopener noreferrer" },
-                children,
+              return (
+                <a href={href} {...props} target="_blank" rel="noopener noreferrer">
+                  {children}
+                </a>
               );
             }
 
@@ -69,7 +71,11 @@ export function MarkdownBody({ children, className, isStreaming, cwd, onOpenFile
               openFile(filePath);
             };
 
-            return createElement("a", { href, ...props, onClick: handleClick }, children);
+            return (
+              <a href={href} {...props} onClick={handleClick}>
+                {children}
+              </a>
+            );
           },
           table({ children }) {
             return (
