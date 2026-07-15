@@ -27,8 +27,10 @@ pi-web
 pi-web --port 8080              # 自定义端口
 pi-web --hostname 127.0.0.1     # 仅本机访问
 pi-web -p 8080 -H 127.0.0.1     # 组合使用
+pi-web --no-open                # 不自动打开浏览器
 
 PORT=8080 pi-web                # 也支持环境变量
+PI_WEB_NO_OPEN=1 pi-web         # 适用于后台服务或开机自启
 ```
 
 ## 功能介绍

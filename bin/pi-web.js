@@ -8,7 +8,7 @@ const path = require("path");
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const fs = require("fs");
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { parseArgs } = require("util");
+const { parseLaunchOptions } = require("./pi-web-options");
 
 const pkgDir = path.join(__dirname, "..");
 const nextDir = path.join(pkgDir, ".next");
@@ -28,16 +28,7 @@ try {
   }
 }
 
-const { values: cliArgs } = parseArgs({
-  options: {
-    port:     { type: "string", short: "p" },
-    hostname: { type: "string", short: "H" },
-  },
-  strict: false,
-});
-
-const port     = cliArgs.port     ?? process.env.PORT     ?? "30141";
-const hostname = cliArgs.hostname ?? process.env.HOSTNAME ?? null;
+const { port, hostname, openBrowser } = parseLaunchOptions();
 
 if (!fs.existsSync(nextDir)) {
   console.error("Build artifacts not found. Please report this issue.");
@@ -61,7 +52,7 @@ const url = `http://${hostname ?? "localhost"}:${port}`;
 child.stdout.on("data", (chunk) => {
   const text = chunk.toString();
   process.stdout.write(text);
-  if (!browserOpened && text.includes("Ready")) {
+  if (openBrowser && !browserOpened && text.includes("Ready")) {
     browserOpened = true;
     const isWindows = process.platform === "win32";
     const isMac = process.platform === "darwin";

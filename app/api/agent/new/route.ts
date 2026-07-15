@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { existsSync } from "fs";
 import { allowFileRoot } from "@/lib/file-access";
+import { invalidateSessionListCache } from "@/lib/session-reader";
 import { startRpcSession } from "@/lib/rpc-manager";
-
 // POST /api/agent/new  body: { cwd: string; type: string; message?: string; ... }
 // Spawns a brand-new pi session. Most calls immediately send the first command;
 // type:"ensure_session" only creates the runtime so clients can query commands.
@@ -29,6 +29,7 @@ export async function POST(req: Request) {
     // in sync so the new cwd is immediately readable via /api/files. Without this,
     // a file request under a brand-new cwd would 403 for up to the cache TTL.
     allowFileRoot(cwd);
+    invalidateSessionListCache();
 
     // Apply pre-selected model before sending the prompt
     if (provider && modelId) {

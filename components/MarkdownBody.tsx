@@ -50,11 +50,13 @@ export function MarkdownBody({ children, className, isStreaming, cwd, onOpenFile
             return <>{children}</>;
           },
           a({ href, children, ...props }) {
+            // `node` is react-markdown metadata, not a DOM attribute.
+            delete props.node;
             const filePath = onOpenFile ? resolveLocalFileHref(href, cwd) : null;
             const openFile = onOpenFile;
             if (!filePath || !openFile) {
               return (
-                <a href={href} {...props}>
+                <a href={href} {...props} target="_blank" rel="noopener noreferrer">
                   {children}
                 </a>
               );

@@ -1026,6 +1026,11 @@ export function AppShell() {
               filePath={activeFileTab.filePath}
               cwd={activeCwd ?? undefined}
               sourceSessionId={activeFileTab.sourceSessionId}
+              onOpenFile={(filePath) => handleOpenFile(
+                filePath,
+                getFileName(filePath),
+                activeFileTab.sourceSessionId,
+              )}
             />
           ) : (
             <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-dim)", fontSize: 12 }}>
