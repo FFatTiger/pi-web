@@ -177,6 +177,12 @@ export function AppShell() {
     router.replace("/", { scroll: false });
   }, [router, selectedSession]);
 
+  // Update browser tab title when workspace changes
+  useEffect(() => {
+    const name = activeCwd ? getFileName(activeCwd) : null;
+    document.title = name ? `${name} — Pi Agent Web` : "Pi Agent Web";
+  }, [activeCwd]);
+
   const handleSelectSession = useCallback((session: SessionInfo, isRestore = false) => {
     setNewSessionCwd(null);
     setSelectedSession(session);
