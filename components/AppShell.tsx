@@ -179,7 +179,7 @@ export function AppShell() {
 
   // Update browser tab title when workspace changes
   useEffect(() => {
-    const name = activeCwd ? getFileName(activeCwd) : null;
+    const name = activeCwd ? getFileName(activeCwd) || activeCwd : null;
     document.title = name ? `${name} — Pi Agent Web` : "Pi Agent Web";
   }, [activeCwd]);
 
