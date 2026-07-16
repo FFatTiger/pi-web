@@ -960,7 +960,7 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile }: Props) {
         ) : isMarkdown && previewMode ? (
           <div
             className="markdown-body markdown-file-preview"
-            style={{ padding: "24px 32px", maxWidth: 800 }}
+            style={{ padding: "24px 32px" }}
           >
             <ReactMarkdown
               remarkPlugins={markdownPreviewRemarkPlugins}
