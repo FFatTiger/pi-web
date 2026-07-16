@@ -19,6 +19,11 @@ import {
 } from "@/lib/file-types";
 import { resolveDirentIsDirectory } from "@/lib/file-dirent";
 import { isFilePathReferencedBySession } from "@/lib/session-file-references";
+import {
+  inspectUploadTargets,
+  parseUploadConflictStrategy,
+  validateUploadFileNames,
+} from "@/lib/file-upload";
 
 const IGNORED_NAMES = new Set([
   "node_modules", ".git", ".next", "dist", "build", "__pycache__",
@@ -66,6 +71,149 @@ function filePathFromSegments(segments: string[]): string {
 
 function parseFileRequestType(value: string): FileRequestType | null {
   return FILE_REQUEST_TYPE_SET.has(value) ? (value as FileRequestType) : null;
+}
+
+async function getUploadDirectory(segments: string[]): Promise<
+  { directory: string } | { response: NextResponse }
+> {
+  const directory = filePathFromSegments(segments);
+  const allowedRoots = await getAllowedFileRoots();
+  if (!isFilePathAllowed(directory, allowedRoots)) {
+    return { response: NextResponse.json({ error: "Access denied" }, { status: 403 }) };
+  }
+
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(directory);
+  } catch {
+    return { response: NextResponse.json({ error: "Upload directory not found" }, { status: 404 }) };
+  }
+  if (!stat.isDirectory()) {
+    return { response: NextResponse.json({ error: "Upload target is not a directory" }, { status: 400 }) };
+  }
+
+  // A browsable directory can be a symlink. Resolve both sides before writes
+  // so a symlink inside an allowed root cannot redirect uploads outside it.
+  const realDirectory = fs.realpathSync(directory);
+  const realRoots = new Set<string>();
+  for (const root of allowedRoots) {
+    try {
+      realRoots.add(fs.realpathSync(root));
+    } catch {
+      // Ignore stale session roots that no longer exist.
+    }
+  }
+  if (!isFilePathAllowed(realDirectory, realRoots)) {
+    return { response: NextResponse.json({ error: "Access denied" }, { status: 403 }) };
+  }
+
+  return { directory: realDirectory };
+}
+
+function parseUploadFileNames(value: unknown): string[] | null {
+  if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) return null;
+  return value;
+}
+
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ path: string[] }> }
+) {
+  try {
+    const { path: segments } = await params;
+    const uploadDirectory = await getUploadDirectory(segments);
+    if ("response" in uploadDirectory) return uploadDirectory.response;
+    const { directory } = uploadDirectory;
+    const type = request.nextUrl.searchParams.get("type") ?? "upload";
+
+    if (type === "upload-check") {
+      const body = await request.json().catch(() => null) as { fileNames?: unknown } | null;
+      const fileNames = parseUploadFileNames(body?.fileNames);
+      if (!fileNames) {
+        return NextResponse.json({ error: "fileNames must be an array of strings" }, { status: 400 });
+      }
+      const validationError = validateUploadFileNames(fileNames);
+      if (validationError) {
+        return NextResponse.json({ error: validationError }, { status: 400 });
+      }
+      return NextResponse.json(inspectUploadTargets(directory, fileNames));
+    }
+
+    if (type !== "upload") {
+      return NextResponse.json({ error: "Invalid upload request type" }, { status: 400 });
+    }
+
+    const strategy = parseUploadConflictStrategy(request.nextUrl.searchParams.get("conflict"));
+    if (!strategy) {
+      return NextResponse.json({ error: "Invalid conflict strategy" }, { status: 400 });
+    }
+
+    const formData = await request.formData();
+    const files = formData.getAll("files").filter((entry): entry is File => typeof entry !== "string");
+    const fileNames = files.map((file) => file.name);
+    const validationError = validateUploadFileNames(fileNames);
+    if (validationError) {
+      return NextResponse.json({ error: validationError }, { status: 400 });
+    }
+
+    const inspection = inspectUploadTargets(directory, fileNames);
+    if (strategy === "error" && inspection.conflicts.length > 0) {
+      return NextResponse.json({
+        error: "One or more files already exist",
+        conflicts: inspection.conflicts,
+        nonReplaceable: inspection.nonReplaceable,
+      }, { status: 409 });
+    }
+
+    const conflictSet = new Set(inspection.conflicts);
+    const nonReplaceableSet = new Set(inspection.nonReplaceable);
+    const uploaded: string[] = [];
+    const skipped: string[] = [];
+    const errors: Array<{ name: string; error: string }> = [];
+
+    for (const file of files) {
+      const destination = path.join(directory, file.name);
+      if (conflictSet.has(file.name) && strategy === "skip") {
+        skipped.push(file.name);
+        continue;
+      }
+      if (conflictSet.has(file.name) && nonReplaceableSet.has(file.name)) {
+        errors.push({ name: file.name, error: "Cannot replace a directory or symbolic link" });
+        continue;
+      }
+
+      let bytes: Buffer;
+      try {
+        bytes = Buffer.from(await file.arrayBuffer());
+      } catch (error) {
+        errors.push({ name: file.name, error: error instanceof Error ? error.message : String(error) });
+        continue;
+      }
+
+      if (conflictSet.has(file.name)) {
+        try {
+          fs.unlinkSync(destination);
+        } catch (error) {
+          errors.push({ name: file.name, error: error instanceof Error ? error.message : String(error) });
+          continue;
+        }
+      }
+
+      try {
+        fs.writeFileSync(destination, bytes, { flag: "wx" });
+        uploaded.push(file.name);
+      } catch (error) {
+        errors.push({ name: file.name, error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+
+    return NextResponse.json(
+      { uploaded, skipped, errors },
+      { status: errors.length > 0 ? 207 : 200 },
+    );
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });
+  }
 }
 
 function createFileBodyStream(filePath: string, range?: { start: number; end: number }): ReadableStream<Uint8Array> {

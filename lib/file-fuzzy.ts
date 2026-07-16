@@ -174,3 +174,7 @@ export function buildAtMentionText(entryPath: string, isDir: boolean): string {
   const p = isDir ? `${entryPath}/` : entryPath;
   return p.includes(" ") ? `@"${p}" ` : `@${p} `;
 }
+
+export function buildFileAtMentionsText(entryPaths: string[]): string {
+  return entryPaths.map((entryPath) => buildAtMentionText(entryPath, false)).join("");
+}

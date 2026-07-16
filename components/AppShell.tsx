@@ -15,7 +15,7 @@ import { useTheme } from "@/hooks/useTheme";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { copyText } from "@/lib/clipboard";
 import { getFileName } from "@/lib/file-paths";
-import { buildAtMentionText } from "@/lib/file-fuzzy";
+import { buildAtMentionText, buildFileAtMentionsText } from "@/lib/file-fuzzy";
 import type { SessionInfo, SessionTreeNode } from "@/lib/types";
 import type { ChatInputHandle } from "./ChatInput";
 import type { SessionStatsInfo } from "@/lib/pi-types";
@@ -139,6 +139,11 @@ export function AppShell() {
   // read tool resolves it the same way (it strips the @ prefix).
   const handleAtMention = useCallback((relativePath: string, isDir: boolean) => {
     chatInputRef.current?.insertText(buildAtMentionText(relativePath, isDir));
+  }, []);
+
+  const handleAtMentions = useCallback((relativePaths: string[]) => {
+    const mentions = buildFileAtMentionsText(relativePaths);
+    if (mentions) chatInputRef.current?.insertText(mentions);
   }, []);
 
   const [initialSessionId] = useState<string | null>(() => searchParams.get("session"));
@@ -345,6 +350,7 @@ export function AppShell() {
         onOpenFile={handleOpenFile}
         explorerRefreshKey={explorerRefreshKey}
         onAtMention={handleAtMention}
+        onAtMentions={handleAtMentions}
       />
       <div style={{ padding: "8px", flexShrink: 0, display: "flex", justifyContent: "space-between", gap: 4 }}>
         {([
