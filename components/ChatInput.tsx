@@ -731,8 +731,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         }
       }
 
-      // Esc stops the agent when no slash/@ menu is open
-      if (e.key === "Escape" && isStreaming && onAbort) {
+      // Esc stops the agent when no slash/@ menu or IME composition is active.
+      if (e.key === "Escape" && !isComposing && isStreaming && onAbort) {
         e.preventDefault();
         onAbort();
         return;
