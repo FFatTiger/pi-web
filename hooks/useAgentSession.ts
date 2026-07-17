@@ -3,6 +3,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo, useReducer } from "react";
 import type {
   AgentMessage,
+  BashExecutionMessage,
   ExtensionStatusItem,
   ExtensionUiRequest,
   ExtensionWidgetItem,
@@ -334,6 +335,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [entryIds, setEntryIds] = useState<string[]>([]);
   const [streamState, dispatch] = useReducer(streamReducer, { isStreaming: false, streamingMessage: null });
   const [agentRunning, setAgentRunning] = useState(false);
+  const [bashRunning, setBashRunning] = useState(false);
+  const [pendingBash, setPendingBash] = useState<{ command: string; excludeFromContext: boolean } | null>(null);
   const [modelNames, setModelNames] = useState<Record<string, string>>({});
   const [modelList, setModelList] = useState<ModelEntry[]>([]);
   const [modelThinkingLevels, setModelThinkingLevels] = useState<Record<string, string[]>>({});
@@ -370,6 +373,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const lastUserMsgRef = useRef<HTMLDivElement | null>(null);
   const pendingScrollToUserRef = useRef(false);
   const completionScrollAllowedRef = useRef(true);
+  const executeBashRef = useRef<(command: string, excludeFromContext: boolean) => Promise<void> | undefined>(undefined);
   const userScrollIntentUntilRef = useRef(0);
   const ignoreProgrammaticScrollUntilRef = useRef(0);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -993,8 +997,19 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const handleSend = useCallback(async (message: string, images?: AttachedImage[]) => {
     const trimmedMessage = message.trim();
     if (!trimmedMessage && !images?.length) return;
-    if (agentRunning) return;
+    if (agentRunning || bashRunning) return;
     const isSlashCommandPrompt = !images?.length && trimmedMessage.startsWith("/");
+
+    const isBashCommand = !images?.length && trimmedMessage.startsWith("!");
+    if (isBashCommand) {
+      const isExcluded = trimmedMessage.startsWith("!!");
+      const bashCmd = (isExcluded ? trimmedMessage.slice(2) : trimmedMessage.slice(1)).trim();
+      if (!bashCmd) return;
+      if (agentRunning || bashRunning) return;
+      await executeBashRef.current?.(bashCmd, isExcluded);
+      return;
+    }
+
     const promptRunId = promptRunIdRef.current + 1;
 
     const imageBlocks = images?.map((img) => ({ type: "image" as const, source: { type: "base64" as const, media_type: img.mimeType, data: img.data } }));
@@ -1072,17 +1087,75 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       setAgentPhase(null);
       dispatch({ type: "end" });
     }
-  }, [isNew, newSessionCwd, newSessionModel, session, agentRunning, ensureNewSession, ensureEventsConnected, promoteNewSession, waitForPromptSettlement, addNotice]);
+  }, [isNew, newSessionCwd, newSessionModel, session, agentRunning, bashRunning, ensureNewSession, ensureEventsConnected, promoteNewSession, waitForPromptSettlement, addNotice]);
+
+  const executeBash = useCallback(async (command: string, excludeFromContext: boolean) => {
+    const sid = sessionIdRef.current ?? session?.id;
+    if (!sid) return;
+    setPendingBash({ command, excludeFromContext });
+    setBashRunning(true);
+    agentRunningRef.current = true;
+    setAgentPhase({ kind: "running_command" });
+    dispatch({ type: "start" });
+    pendingScrollToUserRef.current = true;
+    try {
+      const result = await sendAgentCommand<{ output: string; exitCode?: number; cancelled?: boolean; truncated?: boolean; fullOutputPath?: string }>(sid, {
+        type: "bash",
+        command,
+        excludeFromContext,
+      });
+      const msg: BashExecutionMessage = {
+        role: "bashExecution",
+        command,
+        output: result.output ?? "",
+        exitCode: result.exitCode,
+        cancelled: result.cancelled,
+        truncated: result.truncated,
+        fullOutputPath: result.fullOutputPath,
+        excludeFromContext,
+        timestamp: Date.now(),
+      };
+      setMessages((prev) => [...prev, msg]);
+      // fullOutputPath allowlist registration happens server-side in
+      // AgentSessionWrapper.send() case "bash" — the client must not import
+      // rpc-manager (it is server-only and pulls in fs).
+    } catch (e) {
+      const msg: BashExecutionMessage = {
+        role: "bashExecution",
+        command,
+        output: String(e),
+        cancelled: true,
+        excludeFromContext,
+        timestamp: Date.now(),
+      };
+      setMessages((prev) => [...prev, msg]);
+    } finally {
+      setPendingBash(null);
+      setBashRunning(false);
+      agentRunningRef.current = false;
+      setAgentPhase(null);
+      dispatch({ type: "end" });
+    }
+  }, [session]);
+  executeBashRef.current = executeBash;
 
   const handleAbort = useCallback(async () => {
     const sid = sessionIdRef.current;
     if (!sid) return;
+    if (bashRunning) {
+      try {
+        await sendAgentCommand(sid, { type: "abort_bash" });
+      } catch (e) {
+        console.error("Failed to abort bash:", e);
+      }
+      return;
+    }
     try {
       await sendAgentCommand(sid, { type: "abort" });
     } catch (e) {
       console.error("Failed to abort:", e);
     }
-  }, []);
+  }, [bashRunning]);
 
   const handleFork = useCallback(async (entryId: string) => {
     const sid = sessionIdRef.current;
@@ -1547,6 +1620,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     handleBuiltinSlashCommand,
     handleToolPresetChange, handleThinkingLevelChange, loadTools, loadSlashCommands, setActiveLeafId, setData, setMessages,
     dispatch, setAgentRunning, setForkingEntryId,
+    bashRunning, pendingBash,
     // Subscriptions
     handleAgentEventRef,
   };

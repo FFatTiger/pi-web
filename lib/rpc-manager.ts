@@ -1,6 +1,7 @@
 import { createAgentSessionFromServices, createAgentSessionServices, getAgentDir, initTheme, SessionManager, Theme } from "@earendil-works/pi-coding-agent";
 import { KeybindingsManager as TuiKeybindingsManager, TUI_KEYBINDINGS } from "@earendil-works/pi-tui";
 import { randomUUID } from "crypto";
+import { existsSync, readFileSync } from "fs";
 import { invalidateModelsCache } from "./models-cache";
 import { cacheSessionPath, invalidateSessionListCache } from "./session-reader";
 import type { SlashCommandInfo } from "@earendil-works/pi-coding-agent";
@@ -119,6 +120,7 @@ export class AgentSessionWrapper {
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private onDestroyCallback: (() => void) | null = null;
   private _alive = true;
+  private bashOutputPaths = new Set<string>();
 
   constructor(public readonly inner: AgentSessionLike) {}
 
@@ -134,8 +136,42 @@ export class AgentSessionWrapper {
     return this._alive;
   }
 
+  /** Register a bash full-output path as allowed for this session (called after bash execution returns). */
+  registerBashOutputPath(path: string): void {
+    if (!path) return;
+    this.bashOutputPaths.add(path);
+  }
+
+  /** Check whether a path is allowed for reading full bash output. Falls back to scanning the session file. */
+  isBashOutputPathAllowed(path: string): boolean {
+    if (!path) return false;
+    if (this.bashOutputPaths.has(path)) return true;
+    // Fallback: scan session file for bashExecution messages with this fullOutputPath
+    try {
+      const sessionFile = this.sessionFile;
+      if (!sessionFile || !existsSync(sessionFile)) return false;
+      const content = readFileSync(sessionFile, "utf-8");
+      const lines = content.split("\n");
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const entry = JSON.parse(line);
+          if (entry?.message?.role === "bashExecution" && entry?.message?.fullOutputPath === path) {
+            this.bashOutputPaths.add(path);
+            return true;
+          }
+        } catch {
+          // skip malformed line
+        }
+      }
+    } catch {
+      // best-effort
+    }
+    return false;
+  }
+
   isRunning(): boolean {
-    return this._alive && (this.promptRunning || this.inner.isStreaming || this.inner.isCompacting);
+    return this._alive && (this.promptRunning || this.inner.isStreaming || this.inner.isCompacting || this.inner.isBashRunning);
   }
 
   start(): void {
@@ -524,6 +560,27 @@ export class AgentSessionWrapper {
 
       case "set_auto_retry": {
         this.inner.setAutoRetryEnabled(command.enabled as boolean);
+        return null;
+      }
+
+      case "bash": {
+        const result = await this.inner.executeBash(
+          command.command as string,
+          undefined,
+          { excludeFromContext: command.excludeFromContext as boolean | undefined },
+        );
+        // Register the full-output temp path in the session allowlist so the
+        // /api/agent/[id]/bash-output endpoint can read it later. Done here
+        // (server-side) because rpc-manager is server-only and must not be
+        // imported from client code.
+        if (result.fullOutputPath) {
+          this.registerBashOutputPath(result.fullOutputPath);
+        }
+        return result;
+      }
+
+      case "abort_bash": {
+        this.inner.abortBash();
         return null;
       }
 
