@@ -1,4 +1,4 @@
-import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 
 export const dynamic = "force-dynamic";
 
@@ -6,9 +6,8 @@ export const dynamic = "force-dynamic";
 const OAUTH_PROVIDER_IDS = new Set(["anthropic", "github-copilot", "openai-codex"]);
 
 export async function GET() {
-  const authStorage = AuthStorage.create();
-  const registry = ModelRegistry.create(authStorage);
-  const all = registry.getAll();
+  const modelRuntime = await ModelRuntime.create();
+  const all = modelRuntime.getModels();
 
   // Deduplicate by provider, skip OAuth-only providers and custom providers (source=models_json_key)
   const seen = new Set<string>();
@@ -20,18 +19,17 @@ export async function GET() {
     modelCount: number;
   }[] = [];
 
-  for (const m of all) {
-    if (seen.has(m.provider)) continue;
-    seen.add(m.provider);
-    if (OAUTH_PROVIDER_IDS.has(m.provider)) continue;
-    const status = registry.getProviderAuthStatus(m.provider);
+  for (const provider of modelRuntime.getProviders()) {
+    if (seen.has(provider.id)) continue;
+    seen.add(provider.id);
+    if (OAUTH_PROVIDER_IDS.has(provider.id) || !provider.auth.apiKey?.login) continue;
+    const status = modelRuntime.getProviderAuthStatus(provider.id);
     // Skip providers whose key comes from models.json (those are custom providers)
     if (status.source === "models_json_key") continue;
-    const displayName = registry.getProviderDisplayName(m.provider);
-    const modelCount = all.filter((x) => x.provider === m.provider).length;
+    const modelCount = all.filter((model) => model.provider === provider.id).length;
     result.push({
-      id: m.provider,
-      displayName,
+      id: provider.id,
+      displayName: provider.name,
       configured: status.configured,
       source: status.source,
       modelCount,

@@ -28,9 +28,9 @@ function stripThinkingSuffix(modelRef: string): string {
 }
 
 function filterByExactEnabledModels<T extends { id: string; provider: string }>(
-  available: T[],
+  available: readonly T[],
   enabledModels: string[] | undefined,
-): T[] {
+): readonly T[] {
   if (!enabledModels || enabledModels.length === 0) return available;
 
   const refs = new Set(enabledModels.map(stripThinkingSuffix).filter(Boolean));
@@ -47,8 +47,7 @@ async function loadModels(cwd: string): Promise<ModelsData> {
 
   const agentDir = getAgentDir();
   const services = await createAgentSessionServices({ cwd, agentDir });
-  const registry = services.modelRegistry;
-  const available = registry.getAvailable();
+  const available = await services.modelRuntime.getAvailable();
   const settings: SettingsManager = services.settingsManager;
   const enabledModels = settings.getEnabledModels();
   const visible = filterByExactEnabledModels(available, enabledModels);

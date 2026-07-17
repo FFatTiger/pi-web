@@ -1,4 +1,4 @@
-import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { NextResponse } from "next/server";
 import { invalidateModelsCache } from "@/lib/models-cache";
 
@@ -9,11 +9,10 @@ type Params = { params: Promise<{ provider: string }> };
 // GET /api/auth/api-key/[provider] — returns auth status (never returns the actual key)
 export async function GET(_req: Request, { params }: Params) {
   const { provider } = await params;
-  const authStorage = AuthStorage.create();
-  const registry = ModelRegistry.create(authStorage);
-  const status = registry.getProviderAuthStatus(provider);
-  const displayName = registry.getProviderDisplayName(provider);
-  const models = registry.getAll().filter((m) => m.provider === provider).length;
+  const modelRuntime = await ModelRuntime.create();
+  const status = modelRuntime.getProviderAuthStatus(provider);
+  const displayName = modelRuntime.getProvider(provider)?.name ?? provider;
+  const models = modelRuntime.getModels(provider).length;
   return NextResponse.json({ provider, displayName, configured: status.configured, source: status.source, models });
 }
 
@@ -25,8 +24,23 @@ export async function POST(req: Request, { params }: Params) {
     if (!apiKey || typeof apiKey !== "string" || !apiKey.trim()) {
       return NextResponse.json({ error: "apiKey is required" }, { status: 400 });
     }
-    const authStorage = AuthStorage.create();
-    authStorage.set(provider, { type: "api_key", key: apiKey.trim() });
+    const modelRuntime = await ModelRuntime.create();
+    let keySubmitted = false;
+    await modelRuntime.login(provider, "api_key", {
+      notify: () => {},
+      prompt: async (prompt) => {
+        if (prompt.type === "select") {
+          const keyOption = prompt.options.find((option) => option.id === "api-key" || option.id === "bearer-token");
+          if (keyOption) return keyOption.id;
+          throw new Error(`${provider} requires interactive authentication setup`);
+        }
+        if (!keySubmitted && prompt.type === "secret") {
+          keySubmitted = true;
+          return apiKey.trim();
+        }
+        throw new Error(`${provider} requires additional authentication settings`);
+      },
+    });
     invalidateModelsCache();
     return NextResponse.json({ success: true });
   } catch (error) {
@@ -38,8 +52,8 @@ export async function POST(req: Request, { params }: Params) {
 export async function DELETE(_req: Request, { params }: Params) {
   const { provider } = await params;
   try {
-    const authStorage = AuthStorage.create();
-    authStorage.remove(provider);
+    const modelRuntime = await ModelRuntime.create();
+    await modelRuntime.logout(provider);
     invalidateModelsCache();
     return NextResponse.json({ success: true });
   } catch (error) {
