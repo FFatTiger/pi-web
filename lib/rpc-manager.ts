@@ -166,6 +166,10 @@ export class AgentSessionWrapper {
     });
   }
 
+  async waitUntilReady(): Promise<void> {
+    await this.waitForExtensionsBound();
+  }
+
   private ensureExtensionsBound(options: ExtensionBindingOptions = {}): Promise<void> {
     if (options.forceEmptySystemPrompt) this.forceEmptySystemPrompt = true;
     if (this.extensionsBound) {

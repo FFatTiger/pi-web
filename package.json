@@ -32,6 +32,7 @@
     "release": "npm version patch --no-git-tag-version && npm run build && npm publish --access public"
   },
   "dependencies": {
+    "@earendil-works/pi-agent-core": "^0.81.0",
     "@earendil-works/pi-ai": "^0.81.0",
     "@earendil-works/pi-coding-agent": "^0.81.0",
     "@earendil-works/pi-tui": "^0.81.0",

@@ -21,6 +21,11 @@ import type { ChatInputHandle } from "./ChatInput";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 
 type SessionCopyField = "file" | "id";
+type AutoNameStatus =
+  | { kind: "idle" }
+  | { kind: "naming" }
+  | { kind: "success" }
+  | { kind: "error"; message: string };
 
 export function AppShell() {
   const router = useRouter();
@@ -74,6 +79,10 @@ export function AppShell() {
 
   // Session stats (tokens + cost) — populated by ChatWindow, displayed in top bar
   const [sessionStats, setSessionStats] = useState<SessionStatsInfo | null>(null);
+  const [autoNameStatus, setAutoNameStatus] = useState<AutoNameStatus>({ kind: "idle" });
+  const autoNameTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const activeSessionIdRef = useRef<string | null>(selectedSession?.id ?? null);
+  activeSessionIdRef.current = selectedSession?.id ?? null;
   const handleSessionStatsChange = useCallback((stats: SessionStatsInfo | null) => {
     setSessionStats(stats);
   }, []);
@@ -90,6 +99,7 @@ export function AppShell() {
   useEffect(() => {
     return () => {
       if (sessionCopyTimerRef.current) clearTimeout(sessionCopyTimerRef.current);
+      if (autoNameTimerRef.current) clearTimeout(autoNameTimerRef.current);
     };
   }, []);
 
@@ -249,6 +259,42 @@ export function AppShell() {
     setRefreshKey((k) => k + 1);
     setExplorerRefreshKey((k) => k + 1);
   }, []);
+
+  const handleAutoName = useCallback(async () => {
+    const sessionId = selectedSession?.id;
+    if (!sessionId || autoNameStatus.kind === "naming") return;
+    if (autoNameTimerRef.current) clearTimeout(autoNameTimerRef.current);
+    setActiveTopPanel(null);
+    setAutoNameStatus({ kind: "naming" });
+
+    try {
+      const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/auto-name`, {
+        method: "POST",
+      });
+      const body = (await response.json().catch(() => ({}))) as { title?: string; error?: string };
+      if (!response.ok || !body.title) {
+        throw new Error(body.error || `HTTP ${response.status}`);
+      }
+
+      const title = body.title.trim();
+      setRefreshKey((key) => key + 1);
+      if (activeSessionIdRef.current !== sessionId) return;
+      setSelectedSession((current) => current?.id === sessionId ? { ...current, name: title } : current);
+      setSessionStats((current) => current?.sessionId === sessionId ? { ...current, sessionName: title } : current);
+      setAutoNameStatus({ kind: "success" });
+      autoNameTimerRef.current = setTimeout(() => setAutoNameStatus({ kind: "idle" }), 1800);
+    } catch (error) {
+      if (activeSessionIdRef.current !== sessionId) return;
+      const message = error instanceof Error ? error.message : String(error);
+      setAutoNameStatus({ kind: "error", message });
+      autoNameTimerRef.current = setTimeout(() => setAutoNameStatus({ kind: "idle" }), 5000);
+    }
+  }, [autoNameStatus.kind, selectedSession?.id]);
+
+  useEffect(() => {
+    if (autoNameTimerRef.current) clearTimeout(autoNameTimerRef.current);
+    setAutoNameStatus({ kind: "idle" });
+  }, [selectedSession?.id]);
 
   const handleExplorerRefresh = useCallback(() => {
     setExplorerRefreshKey((k) => k + 1);
@@ -646,6 +692,78 @@ export function AppShell() {
                 </svg>
                 {!isMobile && <span>Full history</span>}
               </button>
+              {(() => {
+                const hasMessages = Boolean(
+                  selectedSession
+                  && (sessionStats?.userMessages ?? selectedSession.messageCount) > 0,
+                );
+                const disabled = !selectedSession || !hasMessages || autoNameStatus.kind === "naming";
+                const isSuccess = autoNameStatus.kind === "success";
+                const isError = autoNameStatus.kind === "error";
+                const label = autoNameStatus.kind === "naming"
+                  ? "Naming..."
+                  : isSuccess
+                    ? "Named"
+                    : isError
+                      ? "Name failed"
+                      : "Auto name";
+                const title = !selectedSession
+                  ? "Auto naming is available after the session is saved"
+                  : !hasMessages
+                    ? "Send a message before naming this session"
+                    : isError
+                      ? autoNameStatus.message
+                      : "Generate a session title";
+
+                return (
+                  <button
+                    type="button"
+                    onClick={() => void handleAutoName()}
+                    disabled={disabled}
+                    title={title}
+                    aria-label={label}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 6,
+                      height: "100%", padding: "0 12px",
+                      background: "none", border: "none",
+                      borderTop: "2px solid transparent",
+                      borderRight: "1px solid var(--border)",
+                      color: isError ? "#dc2626" : isSuccess ? "var(--accent)" : disabled ? "var(--text-dim)" : "var(--text-muted)",
+                      cursor: disabled ? "not-allowed" : "pointer",
+                      opacity: disabled && autoNameStatus.kind !== "naming" ? 0.45 : 1,
+                      flexShrink: 0, fontSize: 11, whiteSpace: "nowrap",
+                      transition: "color 0.1s, background 0.1s, opacity 0.1s",
+                    }}
+                    onMouseEnter={(e) => {
+                      if (disabled) return;
+                      e.currentTarget.style.color = isError ? "#dc2626" : "var(--text)";
+                      e.currentTarget.style.background = "var(--bg-hover)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.color = isError ? "#dc2626" : isSuccess ? "var(--accent)" : disabled ? "var(--text-dim)" : "var(--text-muted)";
+                      e.currentTarget.style.background = "none";
+                    }}
+                  >
+                    {autoNameStatus.kind === "naming" ? (
+                      <svg className="animate-spin" width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" opacity="0.25" />
+                        <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                      </svg>
+                    ) : isSuccess ? (
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                    ) : (
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="m15 4 5 5L7 22l-5-5Z" />
+                        <path d="m14 5 5 5" />
+                        <path d="M6 4V2M5 3H3M19 19v3M17.5 20.5h3" />
+                      </svg>
+                    )}
+                    {!isMobile && <span>{label}</span>}
+                  </button>
+                );
+              })()}
               <BranchNavigator
                 tree={branchTree}
                 activeLeafId={branchActiveLeafId}
