@@ -516,14 +516,14 @@ export function SessionSidebar({
   }, []);
 
   const toggleProject = useCallback((group: SidebarProjectGroup) => {
-    onSelectProject(group.root, group.root);
+    if (!selectedSessionId) onSelectProject(group.root, group.root);
     setExpandedProjects((previous) => {
       const next = new Set(previous);
       if (next.has(group.root)) next.delete(group.root);
       else next.add(group.root);
       return next;
     });
-  }, [onSelectProject]);
+  }, [onSelectProject, selectedSessionId]);
 
   const toggleShowAllSessions = useCallback((projectRoot: string) => {
     setShowAllSessionProjects((previous) => {
@@ -906,7 +906,7 @@ function ProjectGroup({
           aria-hidden="true"
           style={{
             flexShrink: 0,
-            color: "var(--text-dim)",
+            color: selected ? "var(--project-row-selected-text)" : "var(--text-dim)",
             transform: expanded ? "rotate(90deg)" : "none",
             transition: "transform 0.15s",
           }}
@@ -919,7 +919,7 @@ function ProjectGroup({
             flex: 1,
             fontFamily: "var(--font-mono)",
             fontSize: 11,
-            color: selected ? "var(--text)" : "var(--text-muted)",
+            color: selected ? "var(--project-row-selected-text)" : "var(--text-muted)",
             fontWeight: selected ? 650 : 550,
             letterSpacing: "0.01em",
           }}
@@ -939,7 +939,7 @@ function ProjectGroup({
             background: "none",
             border: "none",
             borderRadius: 5,
-            color: "var(--text-dim)",
+            color: selected ? "var(--project-row-selected-text)" : "var(--text-dim)",
             cursor: "pointer",
             flexShrink: 0,
             transition: "color 0.12s, background 0.12s",
