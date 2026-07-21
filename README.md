@@ -55,6 +55,33 @@ PI_WEB_NO_OPEN=1 pi-web         # useful when running as a background service
 - **Git worktrees**: see [Worktrees in pi-web](./docs/worktrees.md) for when the switcher appears, how new worktrees are created, and what removal does.
 - **Forks vs in-session branches**: Fork creates a new `.jsonl` file. "Edit from here" creates another branch inside the same session file.
 
+### Local password authentication
+
+When the application gate is enabled, pi-web requires a local password before the UI and business APIs are available. This is **not** the same as model-provider login or API keys under `/api/auth/*` (OAuth / keys for LLM providers). The application gate uses `/api/gate/*` (`/api/gate/status`, `/api/gate/login`, `/api/gate/logout`).
+
+Config file path: `$PI_CODING_AGENT_DIR/pi-web.json` (default `~/.pi/agent/pi-web.json`).
+
+```json
+{
+  "auth": {
+    "password": "replace-with-a-strong-password",
+    "disabled": false
+  }
+}
+```
+
+```bash
+chmod 600 ~/.pi/agent/pi-web.json
+PI_WEB_PASSWORD=replace-with-a-strong-password pi-web
+PI_WEB_AUTH_DISABLED=true pi-web
+```
+
+- Environment variables override the matching file fields (`PI_WEB_PASSWORD` for `auth.password`, `PI_WEB_AUTH_DISABLED` for `auth.disabled`).
+- If the config is missing, invalid, or has no usable password while the gate is not disabled, the app stays locked.
+- Only an **explicit** disable (`"disabled": true` in the file, or `PI_WEB_AUTH_DISABLED=true`) removes the application gate entirely.
+- After changing the config file or auth-related environment variables, restart pi-web so the new settings take effect.
+- For LAN or public exposure, use a strong password, serve over HTTPS, and restrict access with a firewall or reverse proxy. Prefer binding to localhost when you do not need remote access.
+
 ## Development
 
 ```bash
