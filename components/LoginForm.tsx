@@ -15,7 +15,7 @@ export type LoginFormProps = {
 const cardStyle: React.CSSProperties = {
   width: "100%",
   maxWidth: 440,
-  margin: "0 auto",
+  margin: "auto",
   padding: "28px 24px",
   borderRadius: 12,
   border: "1px solid var(--border)",
@@ -183,8 +183,6 @@ export function LoginForm({ nextPath }: LoginFormProps): React.ReactElement {
         width: "100%",
         overflowY: "auto",
         display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
         padding: "32px 16px",
         background: "var(--bg)",
         color: "var(--text)",
@@ -196,15 +194,15 @@ export function LoginForm({ nextPath }: LoginFormProps): React.ReactElement {
 
         {loadError ? (
           <>
-            <p style={mutedStyle}>{loadError}</p>
+            <p style={mutedStyle} role="alert">{loadError}</p>
             <p style={mutedStyle}>请检查服务是否在运行，然后刷新页面重试。</p>
           </>
         ) : !status ? (
-          <p style={mutedStyle}>正在读取认证配置…</p>
+          <p style={mutedStyle} aria-live="polite" aria-busy="true">正在读取认证配置…</p>
         ) : status.status === "enabled" ? (
           <>
             <p style={mutedStyle}>输入访问密码以继续。</p>
-            <form onSubmit={handleSubmit}>
+            <form onSubmit={handleSubmit} aria-busy={submitting}>
               <label htmlFor="pi-web-password" style={{ display: "block", marginBottom: 6, color: "var(--text-muted)" }}>
                 密码
               </label>
@@ -218,10 +216,10 @@ export function LoginForm({ nextPath }: LoginFormProps): React.ReactElement {
                 onChange={(event) => setPassword(event.target.value)}
                 style={inputStyle}
               />
-              <button type="submit" disabled={submitting} style={{ ...buttonStyle, opacity: submitting ? 0.7 : 1, cursor: submitting ? "not-allowed" : "pointer" }}>
+              <button type="submit" disabled={submitting} aria-busy={submitting} style={{ ...buttonStyle, opacity: submitting ? 0.7 : 1, cursor: submitting ? "not-allowed" : "pointer" }}>
                 {submitting ? "登录中…" : "登录"}
               </button>
-              {error ? <p style={errorStyle}>{error}</p> : null}
+              {error ? <p style={errorStyle} role="alert">{error}</p> : null}
             </form>
           </>
         ) : status.status === "unconfigured" ? (
