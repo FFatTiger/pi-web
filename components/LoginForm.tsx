@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import type {
   GateStatusResponse,
@@ -262,7 +263,7 @@ export PI_WEB_AUTH_DISABLED=true`}</code>
             <div style={warningStyle}>
               认证已关闭。当前服务未启用密码门禁。配置：{status.configPath}
             </div>
-            <a href="/" style={linkStyle}>进入 Pi Agent Web</a>
+            <Link href="/" style={linkStyle}>进入 Pi Agent Web</Link>
           </>
         )}
       </div>

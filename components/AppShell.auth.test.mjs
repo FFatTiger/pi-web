@@ -29,9 +29,6 @@ test("AuthControls is outside the session-stats conditional", () => {
   assert.ok(authUsage >= 0, "AuthControls usage missing");
 
   // AuthControls must not live only inside the stats IIFE/conditional.
-  // Find the closing of that conditional block and ensure AuthControls is not nested solely in it.
-  const statsBlockStart = source.lastIndexOf("{/* Session stats", statsStart + 1);
-  const statsMarker = statsBlockStart >= 0 ? statsBlockStart : statsStart;
   // If AuthControls appears after the stats condition expression, ensure it's a sibling via wrapper.
   assert.ok(
     !source.slice(statsStart, statsStart + 400).includes("<AuthControls"),
@@ -74,7 +71,6 @@ test("right-aligned auth wrapper preserves fixed-button clearance", () => {
 });
 
 test("AuthControls is not placed in the fixed Explorer/File group", () => {
-  const fixedGroupStart = source.indexOf('position: "fixed"');
   // There may be multiple fixed elements; check the Explorer/File buttons region.
   const explorerTitle = source.indexOf('title={rightPanelMode === "explorer"');
   assert.ok(explorerTitle >= 0);
