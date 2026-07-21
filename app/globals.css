@@ -24,7 +24,8 @@
   --bg-hover: #eeeeee;
   --bg-selected: #e8e8e8;
   --project-row-bg: #e8edf3;
-  --project-row-selected: #dfe8f5;
+  --project-row-selected: #dbeafe;
+  --project-row-selected-text: #1d4ed8;
   --project-row-border: #d7dde5;
   --session-group-bg: #fafbfc;
   --project-tree-guide: #cbd3dd;
@@ -46,7 +47,8 @@ html.dark {
   --bg-hover: #2e2e2e;
   --bg-selected: #383838;
   --project-row-bg: #292d32;
-  --project-row-selected: #303a47;
+  --project-row-selected: #263b55;
+  --project-row-selected-text: #93c5fd;
   --project-row-border: #3a414a;
   --session-group-bg: #1d1f22;
   --project-tree-guide: #464e58;
