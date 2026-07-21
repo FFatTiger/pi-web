@@ -422,6 +422,72 @@ pre, code {
   font-size: 12px;
 }
 
+/* Clickable mermaid preview — opens zoom modal on click */
+.mermaid-block-clickable {
+  transition: opacity 0.15s;
+}
+.mermaid-block-clickable:hover {
+  opacity: 0.85;
+}
+
+/* ---- Mermaid zoom modal ---- */
+.mermaid-zoom-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(0, 0, 0, 0.75);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 60px 20px 20px;
+}
+.mermaid-zoom-toolbar {
+  position: fixed;
+  top: 12px;
+  right: 16px;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(30, 30, 30, 0.85);
+  border-radius: 8px;
+  padding: 6px 10px;
+  color: #eee;
+  font-size: 13px;
+  font-family: var(--font-mono);
+}
+.mermaid-zoom-toolbar button {
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #eee;
+  border-radius: 5px;
+  padding: 3px 10px;
+  font-size: 14px;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  transition: background 0.15s;
+}
+.mermaid-zoom-toolbar button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.22);
+}
+.mermaid-zoom-toolbar button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.mermaid-zoom-canvas {
+  transform-origin: top center;
+  transition: transform 0.2s ease;
+}
+.mermaid-zoom-canvas svg {
+  display: block;
+  max-width: none;
+  background: #fff;
+  border-radius: 4px;
+}
+
 /* File viewer markdown preview — larger headings */
 .markdown-file-preview h1 { font-size: 1.8em; }
 .markdown-file-preview h2 { font-size: 1.4em; }
