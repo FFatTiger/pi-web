@@ -1,6 +1,7 @@
 import { createAgentSessionFromServices, createAgentSessionServices, getAgentDir, initTheme, SessionManager, Theme } from "@earendil-works/pi-coding-agent";
 import { KeybindingsManager as TuiKeybindingsManager, TUI_KEYBINDINGS } from "@earendil-works/pi-tui";
 import { randomUUID } from "crypto";
+import { existsSync, writeFileSync } from "fs";
 import { invalidateModelsCache } from "./models-cache";
 import { cacheSessionPath, invalidateSessionListCache } from "./session-reader";
 import type { SlashCommandInfo } from "@earendil-works/pi-coding-agent";
@@ -135,7 +136,7 @@ export class AgentSessionWrapper {
   }
 
   isRunning(): boolean {
-    return this._alive && (this.promptRunning || this.inner.isStreaming || this.inner.isCompacting);
+    return this._alive && (this.promptRunning || this.inner.isStreaming || this.inner.isCompacting || this.inner.isBashRunning);
   }
 
   start(): void {
@@ -253,7 +254,33 @@ export class AgentSessionWrapper {
 
   private resetIdleTimer(): void {
     if (this.idleTimer) clearTimeout(this.idleTimer);
-    this.idleTimer = setTimeout(() => this.destroy(), 10 * 60 * 1000);
+    this.idleTimer = setTimeout(() => {
+      if (this.isRunning()) {
+        this.resetIdleTimer();
+        return;
+      }
+      this.destroy();
+    }, 10 * 60 * 1000);
+  }
+
+  private persistBashOnlySession(): void {
+    const manager = this.inner.sessionManager;
+    const sessionFile = manager.getSessionFile();
+    if (!sessionFile || existsSync(sessionFile)) return;
+
+    const header = manager.getHeader();
+    if (!header) return;
+
+    const content = [header, ...manager.getEntries()]
+      .map((entry) => JSON.stringify(entry))
+      .join("\n") + "\n";
+    writeFileSync(sessionFile, content, { encoding: "utf8", flag: "wx" });
+
+    // Pi normally delays the first flush until an assistant message exists.
+    // A leading shell command has no assistant message, so mark this SDK
+    // manager as flushed after writing its own generated entries.
+    (manager as unknown as { flushed: boolean }).flushed = true;
+    cacheSessionPath(this.inner.sessionId, sessionFile);
   }
 
   onEvent(listener: EventListener): () => void {
@@ -276,6 +303,9 @@ export class AgentSessionWrapper {
 
     switch (type) {
       case "prompt": {
+        if (this.inner.isBashRunning) {
+          throw new Error("Cannot send a prompt while a shell command is running");
+        }
         // Fire and forget — events come via subscribe
         const promptImages = command.images as Array<{ type: "image"; data: string; mimeType: string }> | undefined;
         const streamingBehavior = command.streamingBehavior as "steer" | "followUp" | undefined;
@@ -314,6 +344,7 @@ export class AgentSessionWrapper {
           sessionFile: this.inner.sessionFile ?? "",
           isStreaming: this.inner.isStreaming,
           isPromptRunning: this.promptRunning,
+          isBashRunning: this.inner.isBashRunning,
           isCompacting: this.inner.isCompacting,
           autoCompactionEnabled: this.inner.autoCompactionEnabled,
           autoRetryEnabled: this.inner.autoRetryEnabled,
@@ -345,6 +376,9 @@ export class AgentSessionWrapper {
       }
 
       case "fork": {
+        if (this.inner.isBashRunning) {
+          throw new Error("Cannot fork while a shell command is running");
+        }
         const entryId = command.entryId as string;
         const sessionManager = this.inner.sessionManager;
         const currentSessionFile = this.inner.sessionFile;
@@ -379,6 +413,9 @@ export class AgentSessionWrapper {
       }
 
       case "navigate_tree": {
+        if (this.inner.isBashRunning) {
+          throw new Error("Cannot navigate while a shell command is running");
+        }
         const result = await this.inner.navigateTree(command.targetId as string, {});
         return { cancelled: result.cancelled };
       }
@@ -527,6 +564,31 @@ export class AgentSessionWrapper {
         return null;
       }
 
+      case "bash": {
+        if (this.promptRunning || this.inner.isStreaming || this.inner.isCompacting || this.inner.isBashRunning) {
+          throw new Error("Cannot run a shell command while the session is busy");
+        }
+        const execution = this.inner.executeBash(
+          command.command as string,
+          undefined,
+          { excludeFromContext: command.excludeFromContext as boolean | undefined },
+        );
+        notifyRunningChange();
+        try {
+          const result = await execution;
+          this.persistBashOnlySession();
+          return result;
+        } finally {
+          invalidateSessionListCache();
+          notifyRunningChange();
+        }
+      }
+
+      case "abort_bash": {
+        this.inner.abortBash();
+        return null;
+      }
+
       default:
         throw new Error(`Unsupported command: ${type}`);
     }
@@ -536,6 +598,7 @@ export class AgentSessionWrapper {
     if (!this._alive) return;
     this._alive = false;
     if (this.idleTimer) clearTimeout(this.idleTimer);
+    if (this.inner.isBashRunning) this.inner.abortBash();
     this.unsubscribe?.();
     for (const pending of this.pendingUiResponses.values()) pending.cancel();
     for (const id of Array.from(this.activeCustomUis.keys())) this.closeCustomUi(id, undefined);
