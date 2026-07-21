@@ -128,3 +128,9 @@ test("LoginForm does not leak secrets or raw server errors", () => {
   assert.doesNotMatch(formSource, /JSON\.stringify\(data\)/);
   assert.doesNotMatch(formSource, /String\(error\)/);
 });
+
+test("disabled state uses next/link for home navigation", () => {
+  assert.match(formSource, /import Link from "next\/link"/);
+  assert.match(formSource, /<Link\s+href="\/"/);
+  assert.doesNotMatch(formSource, /<a\s+href="\/"/);
+});
