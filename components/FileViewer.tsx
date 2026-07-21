@@ -16,6 +16,7 @@ import {
 import { encodeFilePathForApi, getFileDirectory, getFileName, getRelativeFilePath } from "@/lib/file-paths";
 import { resolveLocalFileHref } from "@/lib/file-links";
 import { markdownPreviewRehypePlugins, markdownPreviewRemarkPlugins } from "@/lib/markdown";
+import { CodeBlock, MermaidBlock } from "./MermaidBlock";
 
 interface Props {
   filePath: string;
@@ -966,6 +967,27 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile }: Props) {
               remarkPlugins={markdownPreviewRemarkPlugins}
               rehypePlugins={markdownPreviewRehypePlugins}
               components={{
+                code({ className, children, ...props }) {
+                  const lang = className?.replace("language-", "").toLowerCase() ?? "";
+                  const raw = String(children);
+                  const isBlock = className?.includes("language-") || raw.includes("\n");
+                  if (isBlock) {
+                    if (lang === "mermaid") {
+                      return <MermaidBlock code={raw.replace(/\n$/, "")} />;
+                    }
+                    return <CodeBlock code={raw.replace(/\n$/, "")} lang={lang} />;
+                  }
+                  return (
+                    <code className={className} {...props}>
+                      {children}
+                    </code>
+                  );
+                },
+                pre({ children }) {
+                  // Render the code block directly — CodeBlock provides its own wrapping.
+                  // For non-mermaid blocks, pass through to default pre rendering.
+                  return <>{children}</>;
+                },
                 a({ href, children, ...props }) {
                   delete props.node;
                   const linkedFile = onOpenFile

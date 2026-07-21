@@ -1,14 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react";
+import { useMemo, type MouseEvent } from "react";
 import ReactMarkdown from "react-markdown";
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import { vs } from "react-syntax-highlighter/dist/cjs/styles/prism";
-import { vscDarkPlus } from "react-syntax-highlighter/dist/cjs/styles/prism";
-import { useTheme } from "@/hooks/useTheme";
-import { copyText } from "@/lib/clipboard";
 import { resolveLocalFileHref } from "@/lib/file-links";
 import { markdownRehypePlugins, markdownRemarkPlugins } from "@/lib/markdown";
+import { MermaidBlock, CodeBlock } from "./MermaidBlock";
 
 interface MarkdownBodyProps {
   children: string;
@@ -121,132 +117,4 @@ function normalizeDisplayMath(markdown: string): string {
     .join(lineBreak);
 }
 
-function MermaidBlock({ code, isStreaming }: { code: string; isStreaming?: boolean }) {
-  const { isDark } = useTheme();
-  const [showPreview, setShowPreview] = useState(false);
-  const [svg, setSvg] = useState<string | null>(null);
-  const [renderedKey, setRenderedKey] = useState("");
-  const [failedKey, setFailedKey] = useState<string | null>(null);
-  const currentKey = `${isDark ? "dark" : "light"}\n${code}`;
 
-  useEffect(() => {
-    if (!showPreview || isStreaming) return;
-
-    let cancelled = false;
-    setFailedKey(null);
-
-    const render = async () => {
-      const { default: mermaid } = await import("mermaid");
-      mermaid.initialize({
-        startOnLoad: false,
-        securityLevel: "strict",
-        suppressErrorRendering: true,
-        theme: isDark ? "dark" : "default",
-      });
-
-      const parsed = await mermaid.parse(code, { suppressErrors: true });
-      if (!parsed) throw new Error("Invalid Mermaid diagram");
-
-      const id =
-        typeof crypto !== "undefined" && "randomUUID" in crypto
-          ? `mermaid-${crypto.randomUUID()}`
-          : `mermaid-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const result = await mermaid.render(id, code);
-      if (!cancelled) {
-        setSvg(result.svg);
-        setRenderedKey(currentKey);
-      }
-    };
-
-    render().catch(() => {
-      if (!cancelled) setFailedKey(currentKey);
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [code, currentKey, isDark, isStreaming, showPreview]);
-
-  const previewButton = (
-    <button
-      onClick={() => setShowPreview((v) => !v)}
-      disabled={isStreaming}
-      title={isStreaming ? "Preview available after streaming" : (showPreview ? "Show Mermaid source" : "Preview Mermaid diagram")}
-      className={["markdown-code-action", showPreview ? "is-active" : ""].filter(Boolean).join(" ")}
-    >
-      {showPreview ? "Source" : "Preview"}
-    </button>
-  );
-
-  if (!showPreview || isStreaming) {
-    return <CodeBlock code={code} lang="mermaid" headerAction={previewButton} />;
-  }
-
-  const body =
-    failedKey === currentKey ? (
-      <div className="mermaid-block mermaid-block-error">Invalid Mermaid diagram</div>
-    ) : !svg || renderedKey !== currentKey ? (
-      <div className="mermaid-block mermaid-block-loading" aria-label="Rendering Mermaid diagram" />
-    ) : (
-      <div
-        className="mermaid-block"
-        dangerouslySetInnerHTML={{ __html: svg }}
-      />
-    );
-
-  return (
-    <div className="markdown-code-block">
-      <div className="markdown-code-header">
-        <span className="markdown-code-lang">mermaid</span>
-        {previewButton}
-      </div>
-      {body}
-    </div>
-  );
-}
-
-function CodeBlock({ code, lang, headerAction }: { code: string; lang: string; headerAction?: ReactNode }) {
-  const { isDark } = useTheme();
-  const [copied, setCopied] = useState(false);
-
-  const copy = () => {
-    copyText(code).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
-  };
-
-  return (
-    <div className="markdown-code-block">
-      <div className="markdown-code-header">
-        <span className="markdown-code-lang">{lang || "text"}</span>
-        <div className="markdown-code-actions">
-          {headerAction}
-          <button
-            onClick={copy}
-            className="markdown-code-action"
-          >
-            {copied ? "copied" : "copy"}
-          </button>
-        </div>
-      </div>
-      <SyntaxHighlighter
-        language={lang || "text"}
-        style={isDark ? vscDarkPlus : vs}
-        showLineNumbers
-        lineNumberStyle={{ color: "var(--text-dim)", fontStyle: "normal" }}
-        customStyle={{
-          margin: 0,
-          padding: "11px 13px",
-          fontSize: 12.5,
-          lineHeight: 1.62,
-          borderRadius: 0,
-          background: "color-mix(in srgb, var(--bg) 92%, var(--bg-panel))",
-        }}
-        codeTagProps={{ style: { fontFamily: "var(--font-mono)" } }}
-      >
-        {code}
-      </SyntaxHighlighter>
-    </div>
-  );
-}
