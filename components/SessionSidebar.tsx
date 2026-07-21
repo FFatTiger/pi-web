@@ -883,13 +883,9 @@ function ProjectGroup({
           gap: 6,
           padding: "0 8px 0 10px",
           cursor: "pointer",
-          background: selected
-            ? "var(--project-row-selected)"
-            : hovered
-              ? "var(--bg-hover)"
-              : "var(--project-row-bg)",
-          borderTop: "1px solid var(--project-row-border)",
-          borderBottom: "1px solid var(--project-row-border)",
+          background: hovered ? "var(--bg-hover)" : "var(--bg-panel)",
+          borderTop: "1px solid var(--border)",
+          borderBottom: "1px solid var(--border)",
           borderLeft: selected ? "2px solid var(--accent)" : "2px solid transparent",
           transition: "background 0.1s",
         }}
@@ -906,7 +902,7 @@ function ProjectGroup({
           aria-hidden="true"
           style={{
             flexShrink: 0,
-            color: selected ? "var(--project-row-selected-text)" : "var(--text-dim)",
+            color: selected ? "var(--text-muted)" : "var(--text-dim)",
             transform: expanded ? "rotate(90deg)" : "none",
             transition: "transform 0.15s",
           }}
@@ -919,7 +915,7 @@ function ProjectGroup({
             flex: 1,
             fontFamily: "var(--font-mono)",
             fontSize: 11,
-            color: selected ? "var(--project-row-selected-text)" : "var(--text-muted)",
+            color: selected ? "var(--text)" : "var(--text-muted)",
             fontWeight: selected ? 650 : 550,
             letterSpacing: "0.01em",
           }}
@@ -939,7 +935,7 @@ function ProjectGroup({
             background: "none",
             border: "none",
             borderRadius: 5,
-            color: selected ? "var(--project-row-selected-text)" : "var(--text-dim)",
+            color: "var(--text-dim)",
             cursor: "pointer",
             flexShrink: 0,
             transition: "color 0.12s, background 0.12s",
@@ -983,16 +979,16 @@ function ProjectGroup({
             padding: "7px 14px 11px 17px",
             fontSize: 11,
             color: "var(--text-dim)",
-            background: "var(--session-group-bg)",
-            borderLeft: "1px solid var(--project-tree-guide)",
+            background: "var(--bg)",
+            borderLeft: "1px solid var(--border)",
           }}>
             No sessions yet
           </div>
         ) : (
           <div style={{
             marginLeft: 10,
-            background: "var(--session-group-bg)",
-            borderLeft: "1px solid var(--project-tree-guide)",
+            background: "var(--bg)",
+            borderLeft: "1px solid var(--border)",
           }}>
             {tree.map((node) => (
               <SessionTreeItem
