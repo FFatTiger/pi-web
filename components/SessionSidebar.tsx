@@ -975,21 +975,15 @@ function ProjectGroup({
       {expanded && (
         group.sessions.length === 0 ? (
           <div style={{
-            marginLeft: 10,
-            padding: "7px 14px 11px 17px",
+            padding: "7px 14px 11px 28px",
             fontSize: 11,
             color: "var(--text-dim)",
             background: "var(--bg)",
-            borderLeft: "1px solid var(--border)",
           }}>
             No sessions yet
           </div>
         ) : (
-          <div style={{
-            marginLeft: 10,
-            background: "var(--bg)",
-            borderLeft: "1px solid var(--border)",
-          }}>
+          <div style={{ background: "var(--bg)" }}>
             {tree.map((node) => (
               <SessionTreeItem
                 key={node.session.id}
@@ -1014,7 +1008,7 @@ function ProjectGroup({
                 style={{
                   width: "100%",
                   height: 30,
-                  padding: "0 14px 0 18px",
+                  padding: "0 14px 0 28px",
                   display: "flex",
                   alignItems: "center",
                   background: "transparent",
