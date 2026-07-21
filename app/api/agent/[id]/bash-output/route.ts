@@ -1,21 +1,28 @@
 import { NextResponse } from "next/server";
-import { resolve, dirname, basename } from "node:path";
 import { tmpdir } from "node:os";
-import { readFile } from "node:fs/promises";
-import { getRpcSession } from "@/lib/rpc-manager";
+import { Readable } from "node:stream";
+import {
+  MAX_INLINE_BASH_OUTPUT_BYTES,
+  openRegularFileNoFollow,
+  readUtf8FileWithinLimit,
+  resolveBashOutputPath,
+} from "@/lib/bash-output";
+import { isBashOutputPathReferencedBySession } from "@/lib/session-file-references";
 
 // GET /api/agent/[id]/bash-output?path=<absPath>
-// Reads the full (truncated) bash output temp file for a session.
-// Guarded by a session-scoped allowlist + temp-prefix + path-traversal checks.
+// Reads a bash output temp file referenced by this session. Inline display is
+// size-limited; download responses stream the file without buffering it.
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
   let path: string | null = null;
+  let download = false;
   try {
     const url = new URL(_req.url);
     path = url.searchParams.get("path");
+    download = url.searchParams.get("download") === "1";
   } catch {
     return NextResponse.json({ error: "invalid url" }, { status: 400 });
   }
@@ -24,28 +31,37 @@ export async function GET(
     return NextResponse.json({ error: "path required" }, { status: 400 });
   }
 
-  const wrapper = getRpcSession(id);
-  if (!wrapper || !wrapper.isAlive() || !wrapper.isBashOutputPathAllowed(path)) {
-    return NextResponse.json({ error: "forbidden" }, { status: 403 });
-  }
-
-  // Path traversal + temp-prefix guard. pi writes bash full output to
-  // `<tmpdir>/pi-bash-<id>.log` (see bash-executor.ts). Validate that the
-  // resolved path's directory is exactly tmpdir and its basename matches
-  // the pi-bash-*.log shape — this blocks traversal, arbitrary temp files,
-  // and prefix-cousin attacks like /tmp/pi-bash-evil.
-  const resolved = resolve(path);
-  const tmpDir = resolve(tmpdir());
-  const dir = dirname(resolved);
-  const base = basename(resolved);
-  if (dir !== tmpDir || !/^pi-bash-.*\.log$/.test(base)) {
+  const resolved = resolveBashOutputPath(path, tmpdir());
+  if (!resolved) {
     return NextResponse.json({ error: "invalid path" }, { status: 400 });
   }
 
+  if (!await isBashOutputPathReferencedBySession(resolved, id)) {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
+
   try {
-    const content = await readFile(resolved, "utf-8");
-    return NextResponse.json({ success: true, data: { output: content } });
-  } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 });
+    if (download) {
+      const { handle } = await openRegularFileNoFollow(resolved);
+      const stream = Readable.toWeb(handle.createReadStream()) as ReadableStream<Uint8Array>;
+      return new Response(stream, {
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8",
+          "Content-Disposition": "attachment; filename=\"bash-output.log\"",
+          "Cache-Control": "no-store",
+        },
+      });
+    }
+
+    const result = await readUtf8FileWithinLimit(resolved);
+    if (result.tooLarge) {
+      return NextResponse.json({
+        error: `Full output is too large to display (limit ${MAX_INLINE_BASH_OUTPUT_BYTES} bytes)`,
+        data: { size: result.size, maxBytes: MAX_INLINE_BASH_OUTPUT_BYTES },
+      }, { status: 413 });
+    }
+    return NextResponse.json({ success: true, data: { output: result.content } });
+  } catch {
+    return NextResponse.json({ error: "full output unavailable" }, { status: 404 });
   }
 }

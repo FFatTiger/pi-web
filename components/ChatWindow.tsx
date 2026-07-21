@@ -185,11 +185,12 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     session, newSessionCwd, onAgentEnd: wrappedOnAgentEnd, onSessionCreated, onSessionForked,
     modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsPanelOpen,
   });
+  const sessionBusy = agentRunning || bashRunning;
 
   // Register the abort handler for the global Esc shortcut
   useEffect(() => {
-    registerAbortHandler(agentRunning ? handleAbort : null);
-  }, [agentRunning, handleAbort]);
+    registerAbortHandler(sessionBusy ? handleAbort : null);
+  }, [sessionBusy, handleAbort]);
 
   // --- Lazy-load historical messages ---
   // Only render the last N messages initially. When the user scrolls to the
@@ -266,16 +267,16 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
   useEffect(() => () => { onContextUsageChange?.(null); }, [onContextUsageChange]);
 
   const onDrop = useCallback((files: File[]) => {
-    if (agentRunning) return;
+    if (sessionBusy) return;
     chatInputRef?.current?.addImages(files);
-  }, [agentRunning, chatInputRef]);
+  }, [sessionBusy, chatInputRef]);
 
   const { isDragOver, handleDragEnter, handleDragOver, handleDragLeave, handleDrop } = useDragDrop(onDrop);
 
   const visibleMessages = messages.filter((m) => m.role === "user" || m.role === "assistant");
   const messageRefs = useMessageRefs(visibleMessages.length);
 
-  const isEmptyNew = isNew && messages.length === 0 && !streamState.isStreaming && !agentRunning;
+  const isEmptyNew = isNew && messages.length === 0 && !streamState.isStreaming && !sessionBusy;
   const messageCwd = session?.cwd ?? newSessionCwd ?? undefined;
 
   const availableThinkingLevels = displayModelValue
@@ -294,7 +295,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
       onSteer={agentRunning ? handleSteer : undefined}
       onFollowUp={agentRunning ? handleFollowUp : undefined}
       onPromptWithStreamingBehavior={agentRunning ? handlePromptWithStreamingBehavior : undefined}
-      isStreaming={agentRunning || bashRunning}
+      isStreaming={sessionBusy}
       model={displayModelValue}
       isAutoModelSelection={isAutoModelSelection}
       modelNames={modelNames}
@@ -353,7 +354,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      {isDragOver && !agentRunning && (
+      {isDragOver && !sessionBusy && (
         <div className="pointer-events-none absolute inset-0 z-50 flex animate-[drop-zone-in_0.15s_ease_both] items-center justify-center bg-[rgba(37,99,235,0.06)] backdrop-blur-[1px]">
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
             {[0, 0.8, 1.6].map((delay) => (
@@ -513,10 +514,10 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                     cwd={messageCwd}
                     onOpenFile={onOpenFile}
                     entryId={entryIds[idx]}
-                    onFork={agentRunning || isNew || (idx === 0 && msg.role === "user") ? undefined : handleFork}
+                    onFork={sessionBusy || isNew || (idx === 0 && msg.role === "user") ? undefined : handleFork}
                     forking={forkingEntryId === entryIds[idx]}
-                    onNavigate={agentRunning ? undefined : handleNavigate}
-                    prevAssistantEntryId={agentRunning ? undefined : prevAssistantEntryId}
+                    onNavigate={sessionBusy ? undefined : handleNavigate}
+                    prevAssistantEntryId={sessionBusy ? undefined : prevAssistantEntryId}
                     onEditContent={handleEditContent}
                     showTimestamp={showTimestamp}
                     prevTimestamp={idx > 0 ? (messages[idx - 1] as AgentMessage & { timestamp?: number }).timestamp : undefined}
@@ -554,7 +555,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                   continue;
                 }
 
-                const isLiveTail = (agentRunning || streamState.isStreaming) && endIdx === messages.length && userIdx === lastUserIdx;
+                const isLiveTail = (sessionBusy || streamState.isStreaming) && endIdx === messages.length && userIdx === lastUserIdx;
                 if (isLiveTail) {
                   for (let renderIdx = userIdx; renderIdx < endIdx; renderIdx++) {
                     rendered.push(renderMessage(renderIdx));
@@ -631,6 +632,12 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
             {agentRunning && !streamState.streamingMessage && (
               <div className="py-2 text-[13px] text-text-muted">
                 <span className="animate-[pulse_1.5s_infinite]">{phaseLabel(agentPhase)}</span>
+              </div>
+            )}
+
+            {bashRunning && !pendingBash && (
+              <div className="py-2 text-[13px] text-text-muted">
+                <span className="animate-[pulse_1.5s_infinite]">Running command...</span>
               </div>
             )}
 

@@ -1376,18 +1376,21 @@ function BashExecutionView({ message, sessionId }: { message: BashExecutionMessa
 
   const isPending = !message.output && message.exitCode === undefined && !message.cancelled;
   const isError = message.cancelled || (message.exitCode !== undefined && message.exitCode !== 0);
-  const showFullButton = message.truncated && message.fullOutputPath && !fullOutput;
+  const fullOutputUrl = sessionId && message.fullOutputPath
+    ? `/api/agent/${encodeURIComponent(sessionId)}/bash-output?path=${encodeURIComponent(message.fullOutputPath)}`
+    : null;
+  const showFullButton = message.truncated && fullOutputUrl && fullOutput === null;
   const displayOutput = fullOutput ?? message.output;
 
   async function loadFullOutput() {
-    if (!sessionId || !message.fullOutputPath) return;
+    if (!fullOutputUrl) return;
     setLoadingFull(true);
     setFullError(null);
     try {
-      const res = await fetch(`/api/agent/${encodeURIComponent(sessionId)}/bash-output?path=${encodeURIComponent(message.fullOutputPath)}`);
-      const d = await res.json();
+      const res = await fetch(fullOutputUrl);
+      const d = await res.json() as { success?: boolean; data?: { output?: string }; error?: string };
       if (d.success) {
-        setFullOutput(d.data.output);
+        setFullOutput(d.data?.output ?? "");
       } else {
         setFullError(d.error ?? "failed");
       }
@@ -1422,16 +1425,24 @@ function BashExecutionView({ message, sessionId }: { message: BashExecutionMessa
   return (
     <div style={{ margin: "6px 0" }}>
       <ToolCallBlock block={block} result={result} />
-      {showFullButton && (
+      {message.truncated && fullOutputUrl && (
         <div style={{ padding: "4px 10px", fontSize: 11, marginTop: -1 }}>
-          <button
-            onClick={loadFullOutput}
-            disabled={loadingFull}
-            style={{ background: "none", border: "none", color: "var(--accent)", cursor: loadingFull ? "default" : "pointer", fontSize: 11, padding: 0, textDecoration: "underline" }}
+          {showFullButton && (
+            <button
+              onClick={loadFullOutput}
+              disabled={loadingFull}
+              style={{ background: "none", border: "none", color: "var(--accent)", cursor: loadingFull ? "default" : "pointer", fontSize: 11, padding: 0, textDecoration: "underline" }}
+            >
+              {loadingFull ? "loading…" : "view full output"}
+            </button>
+          )}
+          <a
+            href={`${fullOutputUrl}&download=1`}
+            style={{ marginLeft: showFullButton ? 10 : 0, color: "var(--accent)", fontSize: 11, textDecoration: "underline" }}
           >
-            {loadingFull ? "loading…" : "view full output"}
-          </button>
-          {fullError && <span style={{ marginLeft: 6, color: "var(--text-dim)", fontSize: 11 }}>(full output unavailable)</span>}
+            download full output
+          </a>
+          {fullError && <span style={{ marginLeft: 6, color: "var(--text-dim)", fontSize: 11 }}>({fullError})</span>}
         </div>
       )}
     </div>

@@ -201,9 +201,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
 }: Props, ref) {
   const isMobile = useIsMobile();
   const [value, setValue] = useState(() => (draftKey ? getDraft(draftKey)?.value ?? "" : ""));
-  const trimmedValue = value.trimStart();
-  const bashMode = trimmedValue.startsWith("!");
-  const bashExcluded = trimmedValue.startsWith("!!");
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const [modelDropdownRect, setModelDropdownRect] = useState<{ top: number; left: number; width: number } | null>(null);
   const [toolDropdownOpen, setToolDropdownOpen] = useState(false);
@@ -212,6 +209,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const [attachedImages, setAttachedImages] = useState<AttachedImage[]>(() => (
     draftKey ? getDraft(draftKey)?.images.map(draftImageToAttachedImage) ?? [] : []
   ));
+  const trimmedValue = value.trimStart();
+  const bashMode = attachedImages.length === 0 && trimmedValue.startsWith("!");
+  const bashExcluded = bashMode && trimmedValue.startsWith("!!");
   const [slashMenuOpen, setSlashMenuOpen] = useState(false);
   const [slashActiveIndex, setSlashActiveIndex] = useState(0);
   const [atQuery, setAtQuery] = useState<AtQueryMatch | null>(null);
