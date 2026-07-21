@@ -19,6 +19,141 @@ export interface SidebarSessionTreeNode {
   children: SidebarSessionTreeNode[];
 }
 
+export interface SidebarSessionVisibilityOptions {
+  runningSessionIds: ReadonlySet<string>;
+  unreadSessionIds: ReadonlySet<string>;
+  selectedSessionId: string | null;
+  nowMs?: number;
+  ordinaryLimit?: number;
+  recentWindowMs?: number;
+}
+
+export interface SidebarSessionVisibility {
+  tree: SidebarSessionTreeNode[];
+  hiddenCount: number;
+}
+
+const DEFAULT_ORDINARY_SESSION_LIMIT = 5;
+const DEFAULT_RECENT_SESSION_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
+
+function parseSessionTimestamp(modified: string): number {
+  const parsed = Date.parse(modified);
+  return Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY;
+}
+
+function sessionPriority(
+  sessionId: string,
+  options: Pick<
+    SidebarSessionVisibilityOptions,
+    "runningSessionIds" | "unreadSessionIds" | "selectedSessionId"
+  >,
+): number {
+  if (options.runningSessionIds.has(sessionId)) return 0;
+  if (options.unreadSessionIds.has(sessionId)) return 1;
+  if (options.selectedSessionId === sessionId) return 2;
+  return 3;
+}
+
+export function getSidebarSessionVisibility(
+  sessions: SessionInfo[],
+  options: SidebarSessionVisibilityOptions,
+): SidebarSessionVisibility {
+  const nowMs = options.nowMs ?? Date.now();
+  const ordinaryLimit = options.ordinaryLimit ?? DEFAULT_ORDINARY_SESSION_LIMIT;
+  const recentWindowMs = options.recentWindowMs ?? DEFAULT_RECENT_SESSION_WINDOW_MS;
+  const cutoffMs = nowMs - recentWindowMs;
+  const byId = new Map(sessions.map((session) => [session.id, session]));
+
+  const ranked = sessions
+    .map((session) => ({
+      session,
+      priority: sessionPriority(session.id, options),
+      timestamp: parseSessionTimestamp(session.modified),
+    }))
+    .sort((a, b) => {
+      if (a.priority !== b.priority) return a.priority - b.priority;
+      if (a.timestamp !== b.timestamp) return b.timestamp - a.timestamp;
+      return a.session.id.localeCompare(b.session.id);
+    });
+
+  const visibleIds = new Set<string>();
+  let ordinarySelected = 0;
+  for (const item of ranked) {
+    if (item.priority <= 2) {
+      visibleIds.add(item.session.id);
+      continue;
+    }
+    if (ordinarySelected >= ordinaryLimit) continue;
+    if (item.timestamp < cutoffMs) continue;
+    visibleIds.add(item.session.id);
+    ordinarySelected += 1;
+  }
+
+  for (const id of [...visibleIds]) {
+    let current = byId.get(id)?.parentSessionId;
+    const visited = new Set<string>();
+    while (current && byId.has(current) && !visited.has(current)) {
+      visited.add(current);
+      visibleIds.add(current);
+      current = byId.get(current)?.parentSessionId;
+    }
+  }
+
+  const visibleSessions = sessions.filter((session) => visibleIds.has(session.id));
+  const tree = buildSidebarSessionTree(visibleSessions);
+
+  type SubtreeScore = { priority: number; priorityTimestamp: number; nodeTimestamp: number; id: string };
+
+  const scoreNode = (node: SidebarSessionTreeNode): SubtreeScore => {
+    const nodeTimestamp = parseSessionTimestamp(node.session.modified);
+    let best: SubtreeScore = {
+      priority: sessionPriority(node.session.id, options),
+      priorityTimestamp: nodeTimestamp,
+      nodeTimestamp,
+      id: node.session.id,
+    };
+
+    for (const child of node.children) {
+      const childScore = scoreNode(child);
+      if (
+        childScore.priority < best.priority
+        || (childScore.priority === best.priority && childScore.priorityTimestamp > best.priorityTimestamp)
+      ) {
+        best = {
+          priority: childScore.priority,
+          priorityTimestamp: childScore.priorityTimestamp,
+          nodeTimestamp: best.nodeTimestamp,
+          id: best.id,
+        };
+      }
+    }
+
+    return best;
+  };
+
+  const sortTree = (nodes: SidebarSessionTreeNode[]) => {
+    const scored = nodes.map((node) => ({ node, score: scoreNode(node) }));
+    scored.sort((a, b) => {
+      if (a.score.priority !== b.score.priority) return a.score.priority - b.score.priority;
+      if (a.score.priorityTimestamp !== b.score.priorityTimestamp) {
+        return b.score.priorityTimestamp - a.score.priorityTimestamp;
+      }
+      if (a.score.nodeTimestamp !== b.score.nodeTimestamp) {
+        return b.score.nodeTimestamp - a.score.nodeTimestamp;
+      }
+      return a.score.id.localeCompare(b.score.id);
+    });
+    nodes.splice(0, nodes.length, ...scored.map((entry) => entry.node));
+    for (const node of nodes) sortTree(node.children);
+  };
+  sortTree(tree);
+
+  return {
+    tree,
+    hiddenCount: sessions.length - visibleIds.size,
+  };
+}
+
 export function groupSidebarProjects(
   sessions: SessionInfo[],
   manualProjects: ManualProject[],
