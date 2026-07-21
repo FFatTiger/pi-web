@@ -173,25 +173,7 @@ export function AppShell() {
         return next;
       });
     }
-
-    // Skip if cwd is null (initial mount).
-    if (!cwd) return;
-    // Worktrees of one repo share a project root. Moving the effective cwd
-    // within the same project (e.g. switching worktree, or clicking a session
-    // that lives in another worktree) must not close the open session.
-    if (selectedSession && (selectedSession.projectRoot ?? selectedSession.cwd) === nextProject) return;
-
-    // Close any session that belongs to a different project — it no longer
-    // matches the selected project directory.
-    setSelectedSession(null);
-    setNewSessionCwd((previous) => previous && previous !== cwd ? null : previous);
-    setSessionKey((value) => value + 1);
-    setBranchTree([]);
-    setBranchActiveLeafId(null);
-    setSystemPrompt(null);
-    setActiveTopPanel(null);
-    router.replace("/", { scroll: false });
-  }, [router, selectedSession]);
+  }, []);
 
   const handleSelectProject = useCallback((projectRoot: string, fallbackCwd: string) => {
     // Resolve remembered cwd immediately from the ref so project-row + and
@@ -253,10 +235,9 @@ export function AppShell() {
     activeCwd,
   });
 
-  // Client-built transient SessionInfo (new session / fork) lacks the
-  // server-computed projectRoot, which the same-project check in
-  // activateWorkspace relies on. Hydrate it from the session list so switching
-  // worktrees right after creating a session doesn't close the chat.
+  // Client-built transient SessionInfo (new session / fork) lacks server-computed
+  // metadata such as projectRoot. Hydrate it from the session list so later
+  // session/project UI has the full record without needing activateWorkspace.
   const hydrateSelectedSession = useCallback((sessionId: string) => {
     void fetch("/api/sessions")
       .then((r) => (r.ok ? (r.json() as Promise<{ sessions: SessionInfo[] }>) : null))
@@ -367,8 +348,8 @@ export function AppShell() {
     );
   }, [selectedSession]);
 
-  // Show chat area if a session is selected, or if we have a cwd to start a new session in
-  const effectiveNewSessionCwd = newSessionCwd ?? (selectedSession === null && activeCwd ? activeCwd : null);
+  // Chat appears only for a selected session or an explicitly requested new session.
+  const effectiveNewSessionCwd = newSessionCwd;
   const showChat = selectedSession !== null || effectiveNewSessionCwd !== null;
   // While restoring initial session from URL, don't show the placeholder
   const showPlaceholder = initialSessionRestored && !showChat;
