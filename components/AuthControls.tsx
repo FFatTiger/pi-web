@@ -75,21 +75,25 @@ export function AuthControls(): React.ReactElement | null {
           justifyContent: "center",
           gap: 6,
           height: 36,
-          padding: "0 12px",
-          background: "none",
-          border: "none",
-          borderLeft: "1px solid var(--border)",
+          minWidth: 36,
+          padding: isMobile ? 0 : "0 12px",
+          background: "var(--bg-panel)",
+          border: "1px solid var(--border)",
+          borderRadius: 10,
+          boxShadow: "0 6px 18px rgba(0,0,0,0.12)",
           color: "var(--text-muted)",
           cursor: loggingOut ? "wait" : "pointer",
           flexShrink: 0,
-          fontSize: 11,
+          fontSize: 12,
           whiteSpace: "nowrap",
-          transition: "color 0.12s",
+          transition: "background 0.12s, color 0.12s, border-color 0.12s",
         }}
         onMouseEnter={(e) => {
+          e.currentTarget.style.background = "var(--bg-hover)";
           e.currentTarget.style.color = "var(--text)";
         }}
         onMouseLeave={(e) => {
+          e.currentTarget.style.background = "var(--bg-panel)";
           e.currentTarget.style.color = "var(--text-muted)";
         }}
       >
@@ -124,17 +128,21 @@ export function AuthControls(): React.ReactElement | null {
         style={{
           display: "flex",
           alignItems: "center",
+          justifyContent: "center",
           gap: 6,
           height: 36,
-          padding: "0 10px",
-          borderLeft: "1px solid var(--border)",
+          minWidth: 36,
+          padding: isMobile ? 0 : "0 12px",
+          borderRadius: 10,
+          border: "1px solid color-mix(in srgb, #f59e0b 45%, var(--border))",
           color: "#f59e0b",
-          background: "rgba(245, 158, 11, 0.08)",
+          background: "color-mix(in srgb, #f59e0b 12%, var(--bg-panel))",
+          boxShadow: "0 6px 18px rgba(0,0,0,0.12)",
           flexShrink: 0,
-          maxWidth: isMobile ? 40 : 220,
           overflow: "hidden",
-          fontSize: 11,
+          fontSize: 12,
           whiteSpace: "nowrap",
+          maxWidth: isMobile ? 40 : 240,
         }}
       >
         <svg
