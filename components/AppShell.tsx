@@ -5,12 +5,13 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useGlobalKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { SessionSidebar } from "./SessionSidebar";
 import { ChatWindow } from "./ChatWindow";
-import { FileViewer } from "./FileViewer";
-import { TabBar, type Tab } from "./TabBar";
+import type { Tab } from "./TabBar";
 import { ModelsConfig } from "./ModelsConfig";
 import { SkillsConfig } from "./SkillsConfig";
 import { PluginsConfig } from "./PluginsConfig";
 import { BranchNavigator } from "./BranchNavigator";
+import { WorktreeSwitcher } from "./WorktreeSwitcher";
+import { WorkspaceFilePanel, type RightPanelMode } from "./WorkspaceFilePanel";
 import { useTheme } from "@/hooks/useTheme";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { copyText } from "@/lib/clipboard";
@@ -114,7 +115,10 @@ export function AppShell() {
   }, [isMobile]);
 
   const handleSidebarToggle = useCallback(() => {
-    if (isMobile) setActiveTopPanel(null);
+    if (isMobile) {
+      setActiveTopPanel(null);
+      setRightPanelMode("closed");
+    }
     setSidebarOpen((open) => !open);
   }, [isMobile]);
 
@@ -130,10 +134,10 @@ export function AppShell() {
     return () => ro.disconnect();
   }, [activeTopPanel]);
 
-  // Right panel — file tabs only
+  // Right panel — mutually exclusive explorer/file modes
   const [fileTabs, setFileTabs] = useState<Tab[]>([]);
   const [activeFileTabId, setActiveFileTabId] = useState<string | null>(null);
-  const [rightPanelOpen, setRightPanelOpen] = useState(false);
+  const [rightPanelMode, setRightPanelMode] = useState<RightPanelMode>("closed");
 
   // Same @mention format as the chat input's @ autocomplete, so the agent's
   // read tool resolves it the same way (it strips the @ prefix).
@@ -148,40 +152,34 @@ export function AppShell() {
 
   const [initialSessionId] = useState<string | null>(() => searchParams.get("session"));
   const [activeCwd, setActiveCwd] = useState<string | null>(null);
+  const [activeProjectRoot, setActiveProjectRoot] = useState<string | null>(null);
+  // Per-project remembered worktree/cwd for this page lifetime only.
+  const [projectCwds, setProjectCwds] = useState<Map<string, string>>(() => new Map());
   // True once the initial ?session= URL param has been resolved (or confirmed absent)
   const [initialSessionRestored, setInitialSessionRestored] = useState<boolean>(() => !searchParams.get("session"));
-  // Suppresses sessionKey bump in handleCwdChange during the initial URL restore
-  const suppressCwdBumpRef = useRef(false);
+  // Ref mirror so handleSelectProject can resolve remembered cwds without
+  // depending on projectCwds identity (avoids URL-restore effect loops).
+  const projectCwdsRef = useRef(projectCwds);
+  projectCwdsRef.current = projectCwds;
 
-  const handleCwdChange = useCallback((cwd: string | null, projectRoot?: string | null) => {
+  const activateWorkspace = useCallback((cwd: string | null, projectRoot?: string | null) => {
+    const nextProject = projectRoot ?? cwd;
     setActiveCwd(cwd);
-    // Skip if cwd is null (initial mount) or during the initial URL restore.
-    if (!cwd) return;
-    if (suppressCwdBumpRef.current) {
-      suppressCwdBumpRef.current = false;
-      return;
+    setActiveProjectRoot(nextProject);
+    if (cwd && nextProject) {
+      setProjectCwds((previous) => {
+        const next = new Map(previous);
+        next.set(nextProject, cwd);
+        return next;
+      });
     }
-    // Worktrees of one repo share a project root. Moving the effective cwd
-    // within the same project (e.g. switching worktree, or clicking a session
-    // that lives in another worktree) must not close the open session.
-    const newProject = projectRoot ?? cwd;
-    if (selectedSession && (selectedSession.projectRoot ?? selectedSession.cwd) === newProject) {
-      return;
-    }
-    // Close any session that belongs to a different project — it no longer
-    // matches the selected project directory.
-    setSelectedSession(null);
-    setNewSessionCwd((prev) => {
-      if (prev && prev !== cwd) return null;
-      return prev;
-    });
-    setSessionKey((k) => k + 1);
-    setBranchTree([]);
-    setBranchActiveLeafId(null);
-    setSystemPrompt(null);
-    setActiveTopPanel(null);
-    router.replace("/", { scroll: false });
-  }, [router, selectedSession]);
+  }, []);
+
+  const handleSelectProject = useCallback((projectRoot: string, fallbackCwd: string) => {
+    // Resolve remembered cwd immediately from the ref so project-row + and
+    // selection do not wait for a React state update of projectCwds.
+    activateWorkspace(projectCwdsRef.current.get(projectRoot) ?? fallbackCwd, projectRoot);
+  }, [activateWorkspace]);
 
   // Update browser tab title when workspace changes
   useEffect(() => {
@@ -190,6 +188,14 @@ export function AppShell() {
   }, [activeCwd]);
 
   const handleSelectSession = useCallback((session: SessionInfo, isRestore = false) => {
+    const projectRoot = session.projectRoot ?? session.cwd;
+    setActiveProjectRoot(projectRoot);
+    setActiveCwd(session.cwd);
+    setProjectCwds((previous) => {
+      const next = new Map(previous);
+      next.set(projectRoot, session.cwd);
+      return next;
+    });
     setNewSessionCwd(null);
     setSelectedSession(session);
     setSessionKey((k) => k + 1);
@@ -197,40 +203,41 @@ export function AppShell() {
     setInitialSessionRestored(true);
     // On mobile, collapse the overlay drawer so the chat is revealed after pick.
     if (isMobile && !isRestore) setSidebarOpen(false);
-    if (isRestore) {
-      // Suppress the redundant sessionKey bump that would come from the
-      // onCwdChange effect firing after setSelectedCwd in the sidebar
-      suppressCwdBumpRef.current = true;
-    }
     // Skip router.replace when restoring from URL — the param is already correct
-    // and calling replace in production Next.js triggers a Suspense remount loop
+    // and calling replace in production Next.js triggers a Suspense remount loop.
+    // Restore does not call activateWorkspace; it writes cwd/projectRoot directly.
     if (!isRestore) {
       router.replace(`?session=${encodeURIComponent(session.id)}`, { scroll: false });
     }
   }, [router, isMobile]);
 
-  const handleNewSession = useCallback((_sessionId: string, cwd: string) => {
+  const handleNewSession = useCallback((_sessionId: string, fallbackCwd: string, projectRoot = fallbackCwd) => {
+    // Resolve remembered cwd immediately from the ref so project-row + uses the
+    // last worktree without waiting for React state.
+    const cwd = projectCwdsRef.current.get(projectRoot) ?? fallbackCwd;
+    setActiveProjectRoot(projectRoot);
+    setActiveCwd(cwd);
+    setProjectCwds((previous) => new Map(previous).set(projectRoot, cwd));
     setSelectedSession(null);
     setNewSessionCwd(cwd);
-    setSessionKey((k) => k + 1);
+    setSessionKey((value) => value + 1);
     setBranchTree([]);
     setBranchActiveLeafId(null);
     setSystemPrompt(null);
     setActiveTopPanel(null);
     if (isMobile) setSidebarOpen(false);
     router.replace("/", { scroll: false });
-  }, [router, isMobile]);
+  }, [isMobile, router]);
 
   // Global keyboard shortcuts (handles Esc, Ctrl+Alt+N etc.)
   useGlobalKeyboardShortcuts({
-    onNewSession: (cwd: string) => handleNewSession(`kb-${Date.now()}`, cwd),
+    onNewSession: (cwd: string) => handleNewSession(`kb-${Date.now()}`, cwd, activeProjectRoot ?? cwd),
     activeCwd,
   });
 
-  // Client-built transient SessionInfo (new session / fork) lacks the
-  // server-computed projectRoot, which the same-project check in
-  // handleCwdChange relies on. Hydrate it from the session list so switching
-  // worktrees right after creating a session doesn't close the chat.
+  // Client-built transient SessionInfo (new session / fork) lacks server-computed
+  // metadata such as projectRoot. Hydrate it from the session list so later
+  // session/project UI has the full record without needing activateWorkspace.
   const hydrateSelectedSession = useCallback((sessionId: string) => {
     void fetch("/api/sessions")
       .then((r) => (r.ok ? (r.json() as Promise<{ sessions: SessionInfo[] }>) : null))
@@ -296,7 +303,7 @@ export function AppShell() {
       return prev.map((t) => t.id === tabId ? { ...t, sourceSessionId } : t);
     });
     setActiveFileTabId(tabId);
-    setRightPanelOpen(true);
+    setRightPanelMode("file");
     // On mobile the file panel is full-screen; close the drawer so it shows.
     if (isMobile) setSidebarOpen(false);
   }, [isMobile]);
@@ -308,7 +315,9 @@ export function AppShell() {
   const handleCloseFileTab = useCallback((tabId: string) => {
     setFileTabs((prev) => {
       const next = prev.filter((t) => t.id !== tabId);
-      if (next.length === 0) setRightPanelOpen(false);
+      if (next.length === 0) {
+        setRightPanelMode((mode) => mode === "file" ? "closed" : mode);
+      }
       return next;
     });
     setActiveFileTabId((cur) => {
@@ -317,6 +326,18 @@ export function AppShell() {
       return remaining.length > 0 ? remaining[remaining.length - 1].id : null;
     });
   }, [fileTabs]);
+
+  const toggleExplorerPanel = useCallback(() => {
+    if (!activeCwd) return;
+    if (isMobile) setSidebarOpen(false);
+    setRightPanelMode((mode) => mode === "explorer" ? "closed" : "explorer");
+  }, [activeCwd, isMobile]);
+
+  const toggleFilePanel = useCallback(() => {
+    if (fileTabs.length === 0) return;
+    if (isMobile) setSidebarOpen(false);
+    setRightPanelMode((mode) => mode === "file" ? "closed" : "file");
+  }, [fileTabs.length, isMobile]);
 
   const handleViewFullHistory = useCallback(() => {
     if (!selectedSession) return;
@@ -327,30 +348,24 @@ export function AppShell() {
     );
   }, [selectedSession]);
 
-  // Show chat area if a session is selected, or if we have a cwd to start a new session in
-  const effectiveNewSessionCwd = newSessionCwd ?? (selectedSession === null && activeCwd ? activeCwd : null);
+  // Chat appears only for a selected session or an explicitly requested new session.
+  const effectiveNewSessionCwd = newSessionCwd;
   const showChat = selectedSession !== null || effectiveNewSessionCwd !== null;
   // While restoring initial session from URL, don't show the placeholder
   const showPlaceholder = initialSessionRestored && !showChat;
-
-  const activeFileTab = fileTabs.find((t) => t.id === activeFileTabId) ?? null;
 
   const sidebarContent = (
     <>
       <SessionSidebar
         selectedSessionId={selectedSession?.id ?? null}
+        activeProjectRoot={activeProjectRoot}
+        onSelectProject={handleSelectProject}
         onSelectSession={handleSelectSession}
         onNewSession={handleNewSession}
         initialSessionId={initialSessionId}
         onInitialRestoreDone={handleInitialRestoreDone}
         refreshKey={refreshKey}
         onSessionDeleted={handleSessionDeleted}
-        selectedCwd={selectedSession?.cwd ?? newSessionCwd ?? null}
-        onCwdChange={handleCwdChange}
-        onOpenFile={handleOpenFile}
-        explorerRefreshKey={explorerRefreshKey}
-        onAtMention={handleAtMention}
-        onAtMentions={handleAtMentions}
       />
       <div style={{ padding: "8px", flexShrink: 0, display: "flex", justifyContent: "space-between", gap: 4 }}>
         {([
@@ -581,6 +596,11 @@ export function AppShell() {
           </button>
           {showChat && (
             <div style={{ display: "flex", alignItems: "stretch", height: "100%" }}>
+              <WorktreeSwitcher
+                projectRoot={activeProjectRoot}
+                cwd={activeCwd}
+                onCwdChange={(cwd, projectRoot) => activateWorkspace(cwd, projectRoot)}
+              />
               <button
                 onClick={handleViewFullHistory}
                 disabled={!selectedSession}
@@ -716,7 +736,7 @@ export function AppShell() {
                   marginLeft: "auto",
                   display: "flex", alignItems: "center", gap: 10,
                   paddingLeft: 12,
-                  paddingRight: rightPanelOpen ? 12 : 48,
+                  paddingRight: rightPanelMode === "closed" ? 84 : 12,
                   height: "100%",
                   background: activeTopPanel === "session" ? "var(--bg-selected)" : "none",
                   border: "none",
@@ -1015,70 +1035,80 @@ export function AppShell() {
         </div>
       </div>
 
-      {/* Right panel: file viewer — always mounted, width animated via CSS */}
-      <div
-        className={`right-panel-container${rightPanelOpen ? " right-panel-open" : " right-panel-closed"}`}
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          borderLeft: "1px solid var(--border)",
-          background: "var(--bg)",
-        }}
-      >
-        {/* Right panel tab bar */}
-        <div style={{ display: "flex", alignItems: "center", flexShrink: 0, background: "var(--bg-panel)", borderBottom: "1px solid var(--border)", height: 36 }}>
-          <div style={{ flex: 1, overflow: "hidden" }}>
-            <TabBar
-              tabs={fileTabs}
-              activeTabId={activeFileTabId ?? ""}
-              onSelectTab={setActiveFileTabId}
-              onCloseTab={handleCloseFileTab}
-            />
-          </div>
-
-        </div>
-
-        {/* File content */}
-        <div style={{ flex: 1, overflow: "hidden" }}>
-          {activeFileTab?.filePath ? (
-            <FileViewer
-              filePath={activeFileTab.filePath}
-              cwd={activeCwd ?? undefined}
-              sourceSessionId={activeFileTab.sourceSessionId}
-              onOpenFile={(filePath) => handleOpenFile(
-                filePath,
-                getFileName(filePath),
-                activeFileTab.sourceSessionId,
-              )}
-            />
-          ) : (
-            <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-dim)", fontSize: 12 }}>
-              No file open
-            </div>
-          )}
-        </div>
-      </div>
+      <WorkspaceFilePanel
+        mode={rightPanelMode}
+        cwd={activeCwd}
+        fileTabs={fileTabs}
+        activeFileTabId={activeFileTabId}
+        explorerRefreshKey={explorerRefreshKey}
+        onSelectFileTab={setActiveFileTabId}
+        onCloseFileTab={handleCloseFileTab}
+        onOpenFile={handleOpenFile}
+        onAtMention={handleAtMention}
+        onAtMentions={handleAtMentions}
+      />
     </div>
-    {/* File panel toggle — always visible at top-right */}
-    <button
-      onClick={() => setRightPanelOpen((v) => !v)}
-      title={rightPanelOpen ? "Hide file panel" : "Show file panel"}
-      aria-label={rightPanelOpen ? "Hide file panel" : "Show file panel"}
+    {/* Fixed right-corner controls: explorer then file detail */}
+    <div
       style={{
-        position: "fixed", top: 0, right: 0, zIndex: 300,
-        display: "flex", alignItems: "center", justifyContent: "center",
-        width: 36, height: 36, padding: 0,
-        background: "var(--bg-panel)", border: "none", borderLeft: "1px solid var(--border)", borderBottom: "1px solid var(--border)",
-        color: rightPanelOpen ? "var(--text)" : "var(--text-muted)",
-        cursor: "pointer", transition: "color 0.12s",
+        position: "fixed",
+        top: 0,
+        right: 0,
+        zIndex: 300,
+        display: "flex",
       }}
-      onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
-      onMouseLeave={(e) => { e.currentTarget.style.color = rightPanelOpen ? "var(--text)" : "var(--text-muted)"; }}
     >
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="3" y="3" width="18" height="18" rx="2" /><line x1="15" y1="3" x2="15" y2="21" />
-      </svg>
-    </button>
+      <button
+        onClick={toggleExplorerPanel}
+        disabled={!activeCwd}
+        title={rightPanelMode === "explorer" ? "Hide file explorer" : "Show file explorer"}
+        aria-label={rightPanelMode === "explorer" ? "Hide file explorer" : "Show file explorer"}
+        aria-pressed={rightPanelMode === "explorer"}
+        style={{
+          display: "flex", alignItems: "center", justifyContent: "center",
+          width: 36, height: 36, padding: 0,
+          background: "var(--bg-panel)", border: "none",
+          borderLeft: "1px solid var(--border)", borderBottom: "1px solid var(--border)",
+          color: rightPanelMode === "explorer" ? "var(--text)" : "var(--text-muted)",
+          cursor: !activeCwd ? "not-allowed" : "pointer",
+          opacity: !activeCwd ? 0.4 : 1,
+          transition: "color 0.12s, opacity 0.12s",
+        }}
+        onMouseEnter={(e) => { if (activeCwd) e.currentTarget.style.color = "var(--text)"; }}
+        onMouseLeave={(e) => { e.currentTarget.style.color = rightPanelMode === "explorer" ? "var(--text)" : "var(--text-muted)"; }}
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M4 4h6v6H4z" />
+          <path d="M14 4h6v6h-6z" />
+          <path d="M4 14h6v6H4z" />
+          <path d="M17 14v6" />
+          <path d="M14 17h6" />
+        </svg>
+      </button>
+      <button
+        onClick={toggleFilePanel}
+        disabled={fileTabs.length === 0}
+        title={rightPanelMode === "file" ? "Hide file panel" : "Show file panel"}
+        aria-label={rightPanelMode === "file" ? "Hide file panel" : "Show file panel"}
+        aria-pressed={rightPanelMode === "file"}
+        style={{
+          display: "flex", alignItems: "center", justifyContent: "center",
+          width: 36, height: 36, padding: 0,
+          background: "var(--bg-panel)", border: "none",
+          borderLeft: "1px solid var(--border)", borderBottom: "1px solid var(--border)",
+          color: rightPanelMode === "file" ? "var(--text)" : "var(--text-muted)",
+          cursor: fileTabs.length === 0 ? "not-allowed" : "pointer",
+          opacity: fileTabs.length === 0 ? 0.4 : 1,
+          transition: "color 0.12s, opacity 0.12s",
+        }}
+        onMouseEnter={(e) => { if (fileTabs.length > 0) e.currentTarget.style.color = "var(--text)"; }}
+        onMouseLeave={(e) => { e.currentTarget.style.color = rightPanelMode === "file" ? "var(--text)" : "var(--text-muted)"; }}
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <rect x="3" y="3" width="18" height="18" rx="2" /><line x1="15" y1="3" x2="15" y2="21" />
+        </svg>
+      </button>
+    </div>
     {modelsConfigOpen && <ModelsConfig onClose={() => { setModelsConfigOpen(false); setModelsRefreshKey((k) => k + 1); }} />}
     {skillsConfigOpen && (activeCwd ?? selectedSession?.cwd ?? newSessionCwd) && (
       <SkillsConfig cwd={(activeCwd ?? selectedSession?.cwd ?? newSessionCwd)!} onClose={() => setSkillsConfigOpen(false)} />
