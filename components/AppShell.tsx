@@ -183,12 +183,6 @@ export function AppShell() {
     router.replace("/", { scroll: false });
   }, [router, selectedSession]);
 
-  // Update browser tab title when workspace changes
-  useEffect(() => {
-    const name = activeCwd ? getFileName(activeCwd) || activeCwd : null;
-    document.title = name ? `${name} — Pi Agent Web` : "Pi Agent Web";
-  }, [activeCwd]);
-
   const handleSelectSession = useCallback((session: SessionInfo, isRestore = false) => {
     setNewSessionCwd(null);
     setSelectedSession(session);
@@ -253,6 +247,10 @@ export function AppShell() {
 
   const handleAgentEnd = useCallback(() => {
     setRefreshKey((k) => k + 1);
+    setExplorerRefreshKey((k) => k + 1);
+  }, []);
+
+  const handleExplorerRefresh = useCallback(() => {
     setExplorerRefreshKey((k) => k + 1);
   }, []);
 
@@ -334,6 +332,19 @@ export function AppShell() {
   const showPlaceholder = initialSessionRestored && !showChat;
 
   const activeFileTab = fileTabs.find((t) => t.id === activeFileTabId) ?? null;
+  const activeCwdName = activeCwd ? getFileName(activeCwd) || activeCwd : null;
+  const windowTitle = activeCwdName ? `${activeCwdName} — Pi Agent Web` : "Pi Agent Web";
+
+  useEffect(() => {
+    const syncWindowTitle = () => {
+      if (document.title !== windowTitle) document.title = windowTitle;
+    };
+
+    syncWindowTitle();
+    const observer = new MutationObserver(syncWindowTitle);
+    observer.observe(document.head, { childList: true, subtree: true, characterData: true });
+    return () => observer.disconnect();
+  }, [windowTitle]);
 
   const sidebarContent = (
     <>
@@ -349,6 +360,7 @@ export function AppShell() {
         onCwdChange={handleCwdChange}
         onOpenFile={handleOpenFile}
         explorerRefreshKey={explorerRefreshKey}
+        onExplorerRefresh={handleExplorerRefresh}
         onAtMention={handleAtMention}
         onAtMentions={handleAtMentions}
       />
@@ -1045,6 +1057,7 @@ export function AppShell() {
               filePath={activeFileTab.filePath}
               cwd={activeCwd ?? undefined}
               sourceSessionId={activeFileTab.sourceSessionId}
+              gitRefreshKey={explorerRefreshKey}
               onOpenFile={(filePath) => handleOpenFile(
                 filePath,
                 getFileName(filePath),

@@ -503,6 +503,8 @@ export async function GET(
         return NextResponse.json({ error: "Not a file" }, { status: 400 });
       }
       let watcher: fs.FSWatcher | null = null;
+      let lastMtimeMs = stat.mtimeMs;
+      let lastSize = stat.size;
       const stream = new ReadableStream({
         start(controller) {
           const send = (eventName: string, data: Record<string, unknown>) => {
@@ -519,6 +521,11 @@ export async function GET(
             watcher = fs.watch(filePath, () => {
               try {
                 const s = fs.statSync(filePath);
+                // Some platforms emit watch events for file reads/attribute
+                // access. Ignore those or the client's refresh read loops.
+                if (s.mtimeMs === lastMtimeMs && s.size === lastSize) return;
+                lastMtimeMs = s.mtimeMs;
+                lastSize = s.size;
                 send("change", { mtime: s.mtime.toISOString(), size: s.size });
               } catch {
                 send("change", { mtime: new Date().toISOString(), size: 0 });
