@@ -5,6 +5,7 @@ import type { SessionInfo } from "@/lib/types";
 import {
   buildSidebarSessionTree,
   getProjectActivity,
+  getSidebarSessionVisibility,
   groupSidebarProjects,
   parseExpandedProjects,
   parseManualProjects,
@@ -267,6 +268,7 @@ export function SessionSidebar({
     if (typeof window === "undefined") return new Set();
     return parseExpandedProjects(window.localStorage.getItem(EXPANDED_PROJECTS_STORAGE_KEY));
   });
+  const [showAllSessionProjects, setShowAllSessionProjects] = useState<Set<string>>(() => new Set());
   const customPathInputRef = useRef<HTMLInputElement>(null);
   const directoryPopoverRef = useRef<HTMLDivElement>(null);
   const initializedExpansionRef = useRef(false);
@@ -523,6 +525,15 @@ export function SessionSidebar({
     });
   }, [onSelectProject]);
 
+  const toggleShowAllSessions = useCallback((projectRoot: string) => {
+    setShowAllSessionProjects((previous) => {
+      const next = new Set(previous);
+      if (next.has(projectRoot)) next.delete(projectRoot);
+      else next.add(projectRoot);
+      return next;
+    });
+  }, []);
+
   const startProjectSession = useCallback((group: SidebarProjectGroup) => {
     const tempId = typeof crypto.randomUUID === "function"
       ? crypto.randomUUID()
@@ -767,7 +778,13 @@ export function SessionSidebar({
           const expanded = expandedProjects.has(group.root);
           const selected = activeProjectRoot === group.root;
           const activity = getProjectActivity(group.sessions, runningSessionIds, unreadSessionIds);
-          const tree = buildSidebarSessionTree(group.sessions);
+          const fullTree = buildSidebarSessionTree(group.sessions);
+          const visibility = getSidebarSessionVisibility(group.sessions, {
+            runningSessionIds,
+            unreadSessionIds,
+            selectedSessionId,
+          });
+          const showAllSessions = showAllSessionProjects.has(group.root);
           return (
             <ProjectGroup
               key={group.root}
@@ -790,7 +807,10 @@ export function SessionSidebar({
                 onSessionDeleted?.(id);
                 void loadSessions();
               }}
-              tree={tree}
+              tree={showAllSessions ? fullTree : visibility.tree}
+              hiddenCount={visibility.hiddenCount}
+              showAllSessions={showAllSessions}
+              onToggleShowAllSessions={() => toggleShowAllSessions(group.root)}
             />
           );
         })}
@@ -814,6 +834,9 @@ function ProjectGroup({
   onRenamed,
   onSessionDeleted,
   tree,
+  hiddenCount,
+  showAllSessions,
+  onToggleShowAllSessions,
 }: {
   group: SidebarProjectGroup;
   expanded: boolean;
@@ -829,6 +852,9 @@ function ProjectGroup({
   onRenamed: () => void;
   onSessionDeleted: (id: string) => void;
   tree: SidebarSessionTreeNode[];
+  hiddenCount: number;
+  showAllSessions: boolean;
+  onToggleShowAllSessions: () => void;
 }) {
   const [hovered, setHovered] = useState(false);
   const label = displayCwd(group.root, homeDir);
@@ -857,7 +883,11 @@ function ProjectGroup({
           gap: 6,
           padding: "0 8px 0 10px",
           cursor: "pointer",
-          background: selected ? "var(--bg-selected)" : hovered ? "var(--bg-hover)" : "transparent",
+          background: selected
+            ? "var(--bg-selected)"
+            : hovered
+              ? "var(--bg-hover)"
+              : "var(--project-row-bg)",
           borderLeft: selected ? "2px solid var(--accent)" : "2px solid transparent",
           transition: "background 0.1s",
         }}
@@ -944,24 +974,51 @@ function ProjectGroup({
         </span>
       </div>
       {expanded && (
-        tree.length === 0 ? (
+        group.sessions.length === 0 ? (
           <div style={{ padding: "6px 14px 10px 28px", fontSize: 11, color: "var(--text-dim)" }}>
             No sessions yet
           </div>
         ) : (
-          tree.map((node) => (
-            <SessionTreeItem
-              key={node.session.id}
-              node={node}
-              selectedSessionId={selectedSessionId}
-              runningSessionIds={runningSessionIds}
-              unreadSessionIds={unreadSessionIds}
-              onSelectSession={onSelectSession}
-              onRenamed={onRenamed}
-              onSessionDeleted={onSessionDeleted}
-              depth={0}
-            />
-          ))
+          <>
+            {tree.map((node) => (
+              <SessionTreeItem
+                key={node.session.id}
+                node={node}
+                selectedSessionId={selectedSessionId}
+                runningSessionIds={runningSessionIds}
+                unreadSessionIds={unreadSessionIds}
+                onSelectSession={onSelectSession}
+                onRenamed={onRenamed}
+                onSessionDeleted={onSessionDeleted}
+                depth={0}
+              />
+            ))}
+            {hiddenCount > 0 && (
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onToggleShowAllSessions();
+                }}
+                aria-expanded={showAllSessions}
+                style={{
+                  width: "100%",
+                  height: 30,
+                  padding: "0 14px 0 28px",
+                  display: "flex",
+                  alignItems: "center",
+                  background: "transparent",
+                  border: "none",
+                  color: "var(--text-dim)",
+                  cursor: "pointer",
+                  fontSize: 11,
+                  fontFamily: "var(--font-mono)",
+                }}
+              >
+                {showAllSessions ? "Show less" : `Show all (${hiddenCount})`}
+              </button>
+            )}
+          </>
         )
       )}
     </div>
