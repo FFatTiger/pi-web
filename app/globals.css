@@ -623,13 +623,23 @@ span.linenumber {
     flex-shrink: 0;
   }
   .right-panel-container.right-panel-open {
+    position: fixed;
+    inset: 0;
     width: 100%;
     min-width: 0;
+    z-index: 250;
   }
   .right-panel-container.right-panel-closed {
     width: 0 !important;
     min-width: 0 !important;
     border-left: none !important;
     display: none !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .right-panel-container,
+  .sidebar-container {
+    transition: none !important;
   }
 }
