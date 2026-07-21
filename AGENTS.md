@@ -38,32 +38,37 @@ Browser                Next.js Server              AgentSession (in-process)
 ## File Map
 
 ```
-app/api/
-  sessions/route.ts               GET  list all sessions
-  sessions/[id]/route.ts          GET/PATCH/DELETE session
-  sessions/[id]/context/route.ts  GET ?leafId= — context for a specific leaf
-  sessions/[id]/export/route.ts   GET exported HTML for a session
-  agent/new/route.ts              POST { cwd, message, toolNames?, provider?, modelId? }
-  agent/[id]/route.ts             GET state | POST any command
-  agent/[id]/events/route.ts      GET SSE stream
-  agent/running/events/route.ts   GET SSE stream of currently-running session ids
-  auth/all-providers/route.ts     GET API-key provider list
-  auth/api-key/[provider]/route.ts GET/POST/DELETE provider API key status/storage
-  auth/login/[provider]/route.ts  GET OAuth/device-code SSE | POST manual code
-  auth/logout/[provider]/route.ts POST OAuth logout
-  auth/providers/route.ts         GET OAuth provider list
-  cwd/validate/route.ts           POST validate/select a cwd
-  default-cwd/route.ts            POST create ~/pi-cwd-YYYYMMDD
-  files/[...path]/route.ts        GET file contents for viewer
-  home/route.ts                   GET user home directory
-  models/route.ts                 GET { models, modelList, defaultModel }
-  models-config/route.ts          GET/PUT — read/write ~/.pi/agent/models.json
-  models-config/test/route.ts     POST test a configured model/provider
-  plugins/route.ts                GET/POST package plugin management
-  skills/route.ts                 GET/PATCH loaded skills and disable-model-invocation
-  skills/install/route.ts         POST install skills through npx skills add
-  skills/search/route.ts          GET/POST skills.sh search
-  worktrees/route.ts              GET/POST/DELETE git worktrees
+app/
+  login/page.tsx                  application gate login page
+  api/
+    sessions/route.ts               GET  list all sessions
+    sessions/[id]/route.ts          GET/PATCH/DELETE session
+    sessions/[id]/context/route.ts  GET ?leafId= — context for a specific leaf
+    sessions/[id]/export/route.ts   GET exported HTML for a session
+    agent/new/route.ts              POST { cwd, message, toolNames?, provider?, modelId? }
+    agent/[id]/route.ts             GET state | POST any command
+    agent/[id]/events/route.ts      GET SSE stream
+    agent/running/events/route.ts   GET SSE stream of currently-running session ids
+    auth/all-providers/route.ts     GET API-key provider list
+    auth/api-key/[provider]/route.ts GET/POST/DELETE provider API key status/storage
+    auth/login/[provider]/route.ts  GET OAuth/device-code SSE | POST manual code
+    auth/logout/[provider]/route.ts POST OAuth logout
+    auth/providers/route.ts         GET OAuth provider list
+    gate/status/route.ts            GET application gate public status
+    gate/login/route.ts             POST application password login
+    gate/logout/route.ts            POST clear application gate session cookie
+    cwd/validate/route.ts           POST validate/select a cwd
+    default-cwd/route.ts            POST create ~/pi-cwd-YYYYMMDD
+    files/[...path]/route.ts        GET file contents for viewer
+    home/route.ts                   GET user home directory
+    models/route.ts                 GET { models, modelList, defaultModel }
+    models-config/route.ts          GET/PUT — read/write ~/.pi/agent/models.json
+    models-config/test/route.ts     POST test a configured model/provider
+    plugins/route.ts                GET/POST package plugin management
+    skills/route.ts                 GET/PATCH loaded skills and disable-model-invocation
+    skills/install/route.ts         POST install skills through npx skills add
+    skills/search/route.ts          GET/POST skills.sh search
+    worktrees/route.ts              GET/POST/DELETE git worktrees
 
 lib/
   agent-client.ts      typed fetch helper for /api/agent commands
@@ -79,6 +84,10 @@ lib/
   types.ts            shared TypeScript types
   normalize.ts        normalizeToolCalls() — field name mismatch between file format and our types
   worktree.ts         project/worktree resolution and git worktree operations
+  web-auth-config.ts  pi-web.json + PI_WEB_* env → GateConfig
+  web-auth-session.ts signed cookie issue/verify for the application gate
+  web-auth-request.ts gate decision helper (redirect / JSON / next)
+  web-auth-rate-limit.ts login attempt rate limiting
 
 components/
   AppShell.tsx        layout + URL state + tab management
@@ -96,6 +105,10 @@ components/
   FileIcons.tsx       file icon helpers
   FileViewer.tsx      file content in a tab
   TabBar.tsx          tab bar (Chat + open file tabs)
+  LoginForm.tsx       application gate login form
+  AuthControls.tsx    shell gate status + logout control
+
+proxy.ts              Next.js 16 request gate (replaces middleware.ts)
 
 hooks/
   useAgentSession.ts  messages + streaming + SSE + fork/navigate/reconciliation logic
@@ -168,6 +181,15 @@ Newer pi emits `compaction_start` / `compaction_end`; older versions emitted `au
 - OAuth/device-code/manual-code flows are streamed by `GET /api/auth/login/[provider]`; manual code responses POST back with a short-lived token stored in `globalThis.__piLoginCallbacks`.
 - API-key routes store and remove keys through `AuthStorage`. Status endpoints must never return the raw key.
 - The model test route is `app/api/models-config/test/route.ts`; `app/api/models/test/` is not a real route.
+
+### Application password gate (do not confuse with provider auth)
+- `app/api/auth/*` is **model-provider** auth (OAuth / API keys). `/api/gate/*` is the **application password gate** that protects the UI and business APIs.
+- Config lives at `$PI_CODING_AGENT_DIR/pi-web.json` (default `~/.pi/agent/pi-web.json`) with `auth.password` / `auth.disabled`. Env overrides: `PI_WEB_PASSWORD`, `PI_WEB_AUTH_DISABLED`.
+- Missing/invalid `pi-web.json` (or unusable password without disable) must **lock**; only explicit `disabled: true` / `PI_WEB_AUTH_DISABLED=true` bypasses the gate.
+- `proxy.ts` is the Next.js 16 filename; do **not** reintroduce `middleware.ts`.
+- All business APIs, including SSE and provider auth, stay inside the `proxy.ts` matcher. Public gate routes and `/login` are allow-listed by `decideGateRequest`.
+- Password changes invalidate cookies because the signing key derives from the current password.
+- Never return config `logMessage` to the browser; log server-side only on `status: "error"`.
 
 ### Completion sound
 - `hooks/useAudio.ts` stores the toggle in `localStorage` as `pi-sound-enabled` and reuses one `AudioContext`.

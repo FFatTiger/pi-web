@@ -51,6 +51,33 @@ PI_WEB_NO_OPEN=1 pi-web         # 适用于后台服务或开机自启
 - **Git worktree**：什么时候显示切换器、新建目录在哪里、删除会影响什么，见 [pi-web 里的 Worktree](./docs/worktrees.zh-CN.md)。
 - **Fork 与会话内分支不同**：Fork 会创建新的 `.jsonl` 文件；“Edit from here” 是同一会话文件里的分支。
 
+### 本地密码认证
+
+当应用门禁开启时，pi-web 会要求先输入本地密码，才能使用界面与业务 API。这**不是**模型提供商的登录 / API key（`/api/auth/*` 下的 OAuth 与密钥管理）。应用门禁走 `/api/gate/*`（`/api/gate/status`、`/api/gate/login`、`/api/gate/logout`）。
+
+配置文件路径：`$PI_CODING_AGENT_DIR/pi-web.json`（默认 `~/.pi/agent/pi-web.json`）。
+
+```json
+{
+  "auth": {
+    "password": "replace-with-a-strong-password",
+    "disabled": false
+  }
+}
+```
+
+```bash
+chmod 600 ~/.pi/agent/pi-web.json
+PI_WEB_PASSWORD=replace-with-a-strong-password pi-web
+PI_WEB_AUTH_DISABLED=true pi-web
+```
+
+- 环境变量会按字段覆盖文件配置（`PI_WEB_PASSWORD` 对应 `auth.password`，`PI_WEB_AUTH_DISABLED` 对应 `auth.disabled`）。
+- 未配置、配置无效、或在未关闭门禁时没有可用密码时，应用会保持锁定状态。
+- 只有**明确**关闭（文件中 `"disabled": true`，或 `PI_WEB_AUTH_DISABLED=true`）才会完全移除应用门禁。
+- 修改配置文件或认证相关环境变量后，需要重启 pi-web 才会生效。
+- 若要在局域网或公网暴露，请使用强密码、HTTPS，并配合防火墙或反代限制访问。不需要远程访问时建议仅绑定本机。
+
 ## 开发
 
 ```bash
