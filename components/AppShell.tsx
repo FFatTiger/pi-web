@@ -157,8 +157,6 @@ export function AppShell() {
   const [projectCwds, setProjectCwds] = useState<Map<string, string>>(() => new Map());
   // True once the initial ?session= URL param has been resolved (or confirmed absent)
   const [initialSessionRestored, setInitialSessionRestored] = useState<boolean>(() => !searchParams.get("session"));
-  // Suppresses sessionKey bump in activateWorkspace during the initial URL restore
-  const suppressCwdBumpRef = useRef(false);
   // Ref mirror so handleSelectProject can resolve remembered cwds without
   // depending on projectCwds identity (avoids URL-restore effect loops).
   const projectCwdsRef = useRef(projectCwds);
@@ -176,10 +174,8 @@ export function AppShell() {
       });
     }
 
-    if (!cwd || suppressCwdBumpRef.current) {
-      if (suppressCwdBumpRef.current) suppressCwdBumpRef.current = false;
-      return;
-    }
+    // Skip if cwd is null (initial mount).
+    if (!cwd) return;
     // Worktrees of one repo share a project root. Moving the effective cwd
     // within the same project (e.g. switching worktree, or clicking a session
     // that lives in another worktree) must not close the open session.
@@ -225,13 +221,9 @@ export function AppShell() {
     setInitialSessionRestored(true);
     // On mobile, collapse the overlay drawer so the chat is revealed after pick.
     if (isMobile && !isRestore) setSidebarOpen(false);
-    if (isRestore) {
-      // Suppress the redundant sessionKey bump that would come from the
-      // workspace activation path during initial URL restore.
-      suppressCwdBumpRef.current = true;
-    }
     // Skip router.replace when restoring from URL — the param is already correct
-    // and calling replace in production Next.js triggers a Suspense remount loop
+    // and calling replace in production Next.js triggers a Suspense remount loop.
+    // Restore does not call activateWorkspace; it writes cwd/projectRoot directly.
     if (!isRestore) {
       router.replace(`?session=${encodeURIComponent(session.id)}`, { scroll: false });
     }
