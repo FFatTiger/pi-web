@@ -45,13 +45,12 @@ function sessionPriority(
   sessionId: string,
   options: Pick<
     SidebarSessionVisibilityOptions,
-    "runningSessionIds" | "unreadSessionIds" | "selectedSessionId"
+    "runningSessionIds" | "unreadSessionIds"
   >,
 ): number {
   if (options.runningSessionIds.has(sessionId)) return 0;
   if (options.unreadSessionIds.has(sessionId)) return 1;
-  if (options.selectedSessionId === sessionId) return 2;
-  return 3;
+  return 2;
 }
 
 export function getSidebarSessionVisibility(
@@ -79,7 +78,7 @@ export function getSidebarSessionVisibility(
   const visibleIds = new Set<string>();
   let ordinarySelected = 0;
   for (const item of ranked) {
-    if (item.priority <= 2) {
+    if (item.priority <= 1 || options.selectedSessionId === item.session.id) {
       visibleIds.add(item.session.id);
       continue;
     }

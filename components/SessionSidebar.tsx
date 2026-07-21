@@ -884,10 +884,12 @@ function ProjectGroup({
           padding: "0 8px 0 10px",
           cursor: "pointer",
           background: selected
-            ? "var(--bg-selected)"
+            ? "var(--project-row-selected)"
             : hovered
               ? "var(--bg-hover)"
               : "var(--project-row-bg)",
+          borderTop: "1px solid var(--project-row-border)",
+          borderBottom: "1px solid var(--project-row-border)",
           borderLeft: selected ? "2px solid var(--accent)" : "2px solid transparent",
           transition: "background 0.1s",
         }}
@@ -918,7 +920,8 @@ function ProjectGroup({
             fontFamily: "var(--font-mono)",
             fontSize: 11,
             color: selected ? "var(--text)" : "var(--text-muted)",
-            fontWeight: selected ? 500 : 400,
+            fontWeight: selected ? 650 : 550,
+            letterSpacing: "0.01em",
           }}
         />
         <button
@@ -975,11 +978,22 @@ function ProjectGroup({
       </div>
       {expanded && (
         group.sessions.length === 0 ? (
-          <div style={{ padding: "6px 14px 10px 28px", fontSize: 11, color: "var(--text-dim)" }}>
+          <div style={{
+            marginLeft: 10,
+            padding: "7px 14px 11px 17px",
+            fontSize: 11,
+            color: "var(--text-dim)",
+            background: "var(--session-group-bg)",
+            borderLeft: "1px solid var(--project-tree-guide)",
+          }}>
             No sessions yet
           </div>
         ) : (
-          <>
+          <div style={{
+            marginLeft: 10,
+            background: "var(--session-group-bg)",
+            borderLeft: "1px solid var(--project-tree-guide)",
+          }}>
             {tree.map((node) => (
               <SessionTreeItem
                 key={node.session.id}
@@ -1004,7 +1018,7 @@ function ProjectGroup({
                 style={{
                   width: "100%",
                   height: 30,
-                  padding: "0 14px 0 28px",
+                  padding: "0 14px 0 18px",
                   display: "flex",
                   alignItems: "center",
                   background: "transparent",
@@ -1018,7 +1032,7 @@ function ProjectGroup({
                 {showAllSessions ? "Show less" : `Show all (${hiddenCount})`}
               </button>
             )}
-          </>
+          </div>
         )
       )}
     </div>
