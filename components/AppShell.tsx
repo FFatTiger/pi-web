@@ -12,6 +12,7 @@ import { PluginsConfig } from "./PluginsConfig";
 import { BranchNavigator } from "./BranchNavigator";
 import { WorktreeSwitcher } from "./WorktreeSwitcher";
 import { WorkspaceFilePanel, type RightPanelMode } from "./WorkspaceFilePanel";
+import { AuthControls } from "./AuthControls";
 import { useTheme } from "@/hooks/useTheme";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { copyText } from "@/lib/clipboard";
@@ -1048,6 +1049,18 @@ export function AppShell() {
         onAtMentions={handleAtMentions}
       />
     </div>
+    {/* Fixed bottom-right auth control */}
+    <div
+      style={{
+        position: "fixed",
+        right: 12,
+        bottom: 12,
+        zIndex: 300,
+      }}
+    >
+      <AuthControls />
+    </div>
+
     {/* Fixed right-corner controls: explorer then file detail */}
     <div
       style={{
