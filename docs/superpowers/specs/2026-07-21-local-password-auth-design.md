@@ -150,7 +150,7 @@ PI_WEB_AUTH_DISABLED=true
 
 ### 4.2 访问 API
 
-- `/api/gate/status`、`/api/gate/login` 和 ` /api/gate/logout` 可在未登录时访问。
+- `/api/gate/status`、`/api/gate/login` 和 `/api/gate/logout` 可在未登录时访问。
 - 其他 API 在认证开启但未登录时返回：
 
 ```json
