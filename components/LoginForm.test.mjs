@@ -70,17 +70,17 @@ test("LoginForm password field is browser-friendly", () => {
 test("only enabled branch renders the password form", () => {
   const enabledBranch = sliceBetween(
     formSource,
-    'status.status === "enabled"',
-    'status.status === "unconfigured"',
+    'status?.status === "enabled"',
+    'status?.status === "unconfigured"',
   );
   const unconfiguredBranch = sliceBetween(
     formSource,
-    'status.status === "unconfigured"',
-    'status.status === "error"',
+    'status?.status === "unconfigured"',
+    'status?.status === "error"',
   );
   const errorBranch = sliceBetween(
     formSource,
-    'status.status === "error"',
+    'status?.status === "error"',
     ") : (",
   );
 
@@ -103,10 +103,16 @@ test("scroll layout keeps long content reachable without vertical flex center", 
   assert.match(formSource, /margin:\s*"auto"/);
 });
 
+test("login page does not show a loading-config placeholder", () => {
+  assert.doesNotMatch(formSource, /正在读取认证配置/);
+  assert.doesNotMatch(formSource, /正在加载/);
+  assert.match(formSource, /status:\s*"enabled"/);
+});
+
 test("login errors and busy states are announced accessibly", () => {
-  assert.match(formSource, /role="alert"|aria-live="polite"/);
-  assert.match(formSource, /正在读取认证配置…|aria-busy|aria-live/);
+  assert.match(formSource, /role="alert"/);
   assert.match(formSource, /disabled=\{submitting\}/);
+  assert.match(formSource, /aria-busy=\{submitting\}/);
 });
 
 test("LoginForm surfaces config and error guidance safely", () => {

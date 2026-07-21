@@ -104,7 +104,11 @@ export function LoginForm({ nextPath }: LoginFormProps): React.ReactElement {
   const searchParams = useSearchParams();
   const resolvedNextPath = nextPath ?? searchParams.get("next") ?? "/";
 
-  const [status, setStatus] = useState<GateStatusResponse | null>(null);
+  // Optimistic default: show password form immediately while status loads.
+  const [status, setStatus] = useState<GateStatusResponse | null>({
+    status: "enabled",
+    configPath: "",
+  });
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -126,7 +130,8 @@ export function LoginForm({ nextPath }: LoginFormProps): React.ReactElement {
         }
       } catch {
         if (!cancelled) {
-          setStatus(null);
+          // Keep the password form available; surface a soft load error only on failure.
+          setStatus({ status: "enabled", configPath: "" });
           setLoadError("无法读取认证状态");
         }
       }
@@ -193,16 +198,10 @@ export function LoginForm({ nextPath }: LoginFormProps): React.ReactElement {
       <div style={cardStyle}>
         <h1 style={titleStyle}>Pi Agent Web</h1>
 
-        {loadError ? (
-          <>
-            <p style={mutedStyle} role="alert">{loadError}</p>
-            <p style={mutedStyle}>请检查服务是否在运行，然后刷新页面重试。</p>
-          </>
-        ) : !status ? (
-          <p style={mutedStyle} aria-live="polite" aria-busy="true">正在读取认证配置…</p>
-        ) : status.status === "enabled" ? (
+        {status?.status === "enabled" ? (
           <>
             <p style={mutedStyle}>输入访问密码以继续。</p>
+            {loadError ? <p style={errorStyle} role="alert">{loadError}</p> : null}
             <form onSubmit={handleSubmit} aria-busy={submitting}>
               <label htmlFor="pi-web-password" style={{ display: "block", marginBottom: 6, color: "var(--text-muted)" }}>
                 密码
@@ -223,7 +222,7 @@ export function LoginForm({ nextPath }: LoginFormProps): React.ReactElement {
               {error ? <p style={errorStyle} role="alert">{error}</p> : null}
             </form>
           </>
-        ) : status.status === "unconfigured" ? (
+        ) : status?.status === "unconfigured" ? (
           <>
             <p style={mutedStyle}>
               尚未配置访问密码。请先写入配置文件或设置环境变量，然后重启服务。
@@ -246,7 +245,7 @@ export PI_WEB_AUTH_DISABLED=true`}</code>
             <code style={codeBlockStyle}>{`chmod 600 ${status.configPath}`}</code>
             <p style={mutedStyle}>修改后请重启 Pi Agent Web 再访问。</p>
           </>
-        ) : status.status === "error" ? (
+        ) : status?.status === "error" ? (
           <>
             <p style={mutedStyle}>认证配置无法读取</p>
             <p style={mutedStyle}>
@@ -258,12 +257,36 @@ export PI_WEB_AUTH_DISABLED=true`}</code>
             </p>
             <p style={mutedStyle}>具体错误仅写入服务端日志，不会在此页面展示。</p>
           </>
-        ) : (
+        ) : status?.status === "disabled" ? (
           <>
             <div style={warningStyle}>
               认证已关闭。当前服务未启用密码门禁。配置：{status.configPath}
             </div>
             <Link href="/" style={linkStyle}>进入 Pi Agent Web</Link>
+          </>
+        ) : (
+          <>
+            <p style={mutedStyle}>输入访问密码以继续。</p>
+            {loadError ? <p style={errorStyle} role="alert">{loadError}</p> : null}
+            <form onSubmit={handleSubmit} aria-busy={submitting}>
+              <label htmlFor="pi-web-password" style={{ display: "block", marginBottom: 6, color: "var(--text-muted)" }}>
+                密码
+              </label>
+              <input
+                id="pi-web-password"
+                name="password"
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                disabled={submitting}
+                onChange={(event) => setPassword(event.target.value)}
+                style={inputStyle}
+              />
+              <button type="submit" disabled={submitting} aria-busy={submitting} style={{ ...buttonStyle, opacity: submitting ? 0.7 : 1, cursor: submitting ? "not-allowed" : "pointer" }}>
+                {submitting ? "登录中…" : "登录"}
+              </button>
+              {error ? <p style={errorStyle} role="alert">{error}</p> : null}
+            </form>
           </>
         )}
       </div>
