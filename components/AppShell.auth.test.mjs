@@ -34,22 +34,23 @@ test("AuthControls is not placed in the top bar", () => {
   assert.equal(topBarBlock.includes("<AuthControls"), false);
 });
 
-test("session stats remain right-aligned with fixed-button clearance", () => {
+test("session stats remain right-aligned with single explorer-button clearance", () => {
   assert.ok(topBarStart >= 0 && topBarEnd > topBarStart);
   assert.match(topBarBlock, /marginLeft:\s*"auto"/);
   assert.match(
     topBarBlock,
-    /paddingRight:\s*rightPanelMode\s*===\s*"closed"\s*\?\s*84\s*:\s*12/,
+    /paddingRight:\s*rightPanelMode\s*===\s*"closed"\s*\?\s*48\s*:\s*12/,
   );
 });
 
-test("AuthControls is not placed in the fixed Explorer/File group", () => {
-  const explorerGroupStart = source.indexOf("{/* Fixed right-corner controls: explorer then file detail */}");
-  assert.ok(explorerGroupStart >= 0, "explorer/file fixed group marker missing");
+test("fixed right corner keeps only the Explorer entry", () => {
+  const explorerGroupStart = source.indexOf("{/* Fixed right-corner control: file explorer */}");
+  assert.ok(explorerGroupStart >= 0, "explorer fixed group marker missing");
   const explorerGroupEnd = source.indexOf("{modelsConfigOpen &&", explorerGroupStart);
-  assert.ok(explorerGroupEnd > explorerGroupStart, "explorer/file fixed group end missing");
+  assert.ok(explorerGroupEnd > explorerGroupStart, "explorer fixed group end missing");
   const fixedRegion = source.slice(explorerGroupStart, explorerGroupEnd);
   assert.equal(fixedRegion.includes("<AuthControls"), false);
   assert.match(fixedRegion, /rightPanelMode === "explorer"/);
-  assert.match(fixedRegion, /rightPanelMode === "file"/);
+  assert.doesNotMatch(fixedRegion, /rightPanelMode === "file"/);
+  assert.doesNotMatch(fixedRegion, /toggleFilePanel/);
 });
