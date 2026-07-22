@@ -1,7 +1,9 @@
-import { readdirSync } from "fs";
+import { readdirSync, realpathSync } from "fs";
 import { homedir } from "os";
 import path from "path";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { getAdditionalAllowedRoots, normalizeSlashes } from "./allowed-roots";
+import { isPushSecretPath } from "./push-paths";
 import { listAllSessions } from "./session-reader";
 export { allowFileRoot, normalizeSlashes } from "./allowed-roots";
 
@@ -51,7 +53,25 @@ export async function getAllowedFileRoots(): Promise<Set<string>> {
   return roots;
 }
 
-export function isFilePathAllowed(target: string, allowedRoots: Set<string>): boolean {
+export function isFilePathDenied(target: string, agentDir: string = getAgentDir()): boolean {
+  return isPushSecretPath(target, agentDir);
+}
+
+export function isResolvedFilePathDenied(target: string, agentDir: string = getAgentDir()): boolean {
+  if (isFilePathDenied(target, agentDir)) return true;
+  try {
+    return isPushSecretPath(realpathSync(target), agentDir);
+  } catch {
+    return false;
+  }
+}
+
+export function isFilePathAllowed(
+  target: string,
+  allowedRoots: Set<string>,
+  agentDir?: string,
+): boolean {
+  if (isFilePathDenied(target, agentDir)) return false;
   for (const root of allowedRoots) {
     const useWindowsRules = isWindowsAbsolutePath(target) || isWindowsAbsolutePath(root);
     const resolver = useWindowsRules ? path.win32 : path;
