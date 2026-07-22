@@ -173,43 +173,87 @@ function isPublicIPv4(address: string): boolean {
   return true;
 }
 
-function extractMappedIPv4(lowered: string): string | null {
-  if (!lowered.startsWith("::ffff:")) return null;
-  const rest = lowered.slice("::ffff:".length);
-  if (rest.includes(".")) {
-    // Dotted form ::ffff:a.b.c.d
-    return parseIPv4Octets(rest) ? rest : null;
+/**
+ * Expand a syntactically valid IPv6 address (net.isIP === 6) to eight lowercase
+ * hextets so IPv4-mapped forms can be detected regardless of compression.
+ * Handles dotted IPv4 tails (::ffff:a.b.c.d) by converting the final 32 bits.
+ */
+function expandIPv6Hextets(address: string): string[] | null {
+  let addr = address.toLowerCase();
+  const zone = addr.indexOf("%");
+  if (zone !== -1) addr = addr.slice(0, zone);
+
+  // Convert trailing dotted IPv4 (mapped / compatible forms) into two hextets.
+  if (addr.includes(".")) {
+    const lastColon = addr.lastIndexOf(":");
+    if (lastColon === -1) return null;
+    const dotted = addr.slice(lastColon + 1);
+    const octets = parseIPv4Octets(dotted);
+    if (!octets) return null;
+    const hi = ((octets[0] << 8) | octets[1]).toString(16);
+    const lo = ((octets[2] << 8) | octets[3]).toString(16);
+    addr = `${addr.slice(0, lastColon + 1)}${hi}:${lo}`;
   }
-  // Hex form ::ffff:HHHH:HHHH (final 32 bits)
-  const hextets = rest.split(":");
-  if (hextets.length !== 2) return null;
-  if (!/^[0-9a-f]{1,4}$/i.test(hextets[0]) || !/^[0-9a-f]{1,4}$/i.test(hextets[1])) {
+
+  let parts: string[];
+  if (addr.includes("::")) {
+    const sides = addr.split("::");
+    if (sides.length !== 2) return null;
+    const head = sides[0] === "" ? [] : sides[0].split(":");
+    const tail = sides[1] === "" ? [] : sides[1].split(":");
+    const missing = 8 - (head.length + tail.length);
+    if (missing < 0) return null;
+    parts = [...head, ...Array.from({ length: missing }, () => "0"), ...tail];
+  } else {
+    parts = addr.split(":");
+  }
+  if (parts.length !== 8) return null;
+  const full: string[] = [];
+  for (const h of parts) {
+    if (!/^[0-9a-f]{1,4}$/.test(h)) return null;
+    full.push(h.padStart(4, "0"));
+  }
+  return full;
+}
+
+function extractMappedIPv4(address: string): string | null {
+  const hextets = expandIPv6Hextets(address);
+  if (!hextets) return null;
+  // IPv4-mapped: 0000:0000:0000:0000:0000:ffff:XXXX:YYYY
+  if (
+    hextets[0] !== "0000" ||
+    hextets[1] !== "0000" ||
+    hextets[2] !== "0000" ||
+    hextets[3] !== "0000" ||
+    hextets[4] !== "0000" ||
+    hextets[5] !== "ffff"
+  ) {
     return null;
   }
-  const hi = Number.parseInt(hextets[0], 16);
-  const lo = Number.parseInt(hextets[1], 16);
+  const hi = Number.parseInt(hextets[6], 16);
+  const lo = Number.parseInt(hextets[7], 16);
   if (!Number.isFinite(hi) || !Number.isFinite(lo)) return null;
   return `${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`;
 }
 
 function isPublicIPv6(address: string): boolean {
   if (net.isIP(address) !== 6) return false;
-  const lowered = address.toLowerCase();
 
-  // IPv4-mapped: apply IPv4 policy to the embedded address.
-  const mapped = extractMappedIPv4(lowered);
+  // IPv4-mapped (any compression / case): apply IPv4 policy to the embedded address.
+  const mapped = extractMappedIPv4(address);
   if (mapped !== null) {
     return isPublicIPv4(mapped);
   }
 
   // Unspecified / loopback / ULA / link-local / multicast via BlockList ranges.
+  // BlockList normalizes IPv6 forms itself (expanded, uppercase, etc.).
   const list = new net.BlockList();
   list.addAddress("::", "ipv6");
   list.addAddress("::1", "ipv6");
   list.addSubnet("fc00::", 7, "ipv6"); // ULA
   list.addSubnet("fe80::", 10, "ipv6"); // link-local
   list.addSubnet("ff00::", 8, "ipv6"); // multicast
-  if (list.check(lowered, "ipv6")) return false;
+  if (list.check(address, "ipv6")) return false;
 
   return true;
 }
