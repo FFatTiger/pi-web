@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { createJiti } from "jiti";
 
@@ -7,6 +8,25 @@ const statusRoute = await jiti.import("./status/route.ts");
 const keyRoute = await jiti.import("./vapid-public-key/route.ts");
 const subscribeRoute = await jiti.import("./subscribe/route.ts");
 const testRoute = await jiti.import("./test/route.ts");
+const pushHandlers = await jiti.import("../../../lib/push-route-handlers.ts");
+
+const routeContracts = [
+  ["status/route.ts", ["GET", "dynamic", "runtime"]],
+  ["vapid-public-key/route.ts", ["GET", "dynamic", "runtime"]],
+  ["subscribe/route.ts", ["DELETE", "POST", "dynamic", "runtime"]],
+  ["test/route.ts", ["POST", "dynamic", "runtime"]],
+];
+
+test("Push routes expose only Next-supported runtime exports", () => {
+  for (const [path, expected] of routeContracts) {
+    const source = readFileSync(new URL(path, import.meta.url), "utf8");
+    const names = [
+      ...source.matchAll(/export\s+(?:async\s+)?function\s+(\w+)/g),
+      ...source.matchAll(/export\s+const\s+(\w+)/g),
+    ].map((match) => match[1]).sort();
+    assert.deepEqual(names, expected, path);
+  }
+});
 
 const enabled = { status: "enabled", configPath: "/tmp/pi-web.json", password: "secret" };
 const disabledGate = { status: "disabled", configPath: "/tmp/pi-web.json" };
@@ -47,7 +67,7 @@ async function assertError(response, status, code) {
 }
 
 test("status returns safe no-store capability without exposing keys", async () => {
-  const handler = statusRoute.createStatusHandler({
+  const handler = pushHandlers.createStatusHandler({
     readGateConfig: () => enabled,
     readPushConfig: () => pushEnabled,
     store: { getPublicKey: async () => "public-key" },
@@ -71,7 +91,7 @@ test("status exposes only disabled diagnostics and safely maps config/store fail
   console.error = () => {};
   try {
     let keyCalls = 0;
-    const disabled = statusRoute.createStatusHandler({
+    const disabled = pushHandlers.createStatusHandler({
       readGateConfig: () => disabledGate,
       readPushConfig: () => pushEnabled,
       store: { getPublicKey: async () => { keyCalls += 1; return "key"; } },
@@ -86,7 +106,7 @@ test("status exposes only disabled diagnostics and safely maps config/store fail
     });
     assert.equal(keyCalls, 0);
 
-    const unauthorized = statusRoute.createStatusHandler({
+    const unauthorized = pushHandlers.createStatusHandler({
       readGateConfig: () => enabled,
       readPushConfig: () => pushEnabled,
       store: { getPublicKey: async () => "key" },
@@ -97,7 +117,7 @@ test("status exposes only disabled diagnostics and safely maps config/store fail
       "PUSH_UNAUTHORIZED",
     );
 
-    const configError = statusRoute.createStatusHandler({
+    const configError = pushHandlers.createStatusHandler({
       readGateConfig: () => enabled,
       readPushConfig: () => ({
         status: "error",
@@ -118,7 +138,7 @@ test("status exposes only disabled diagnostics and safely maps config/store fail
       code: "PUSH_CONFIG_ERROR",
     });
 
-    const locked = statusRoute.createStatusHandler({
+    const locked = pushHandlers.createStatusHandler({
       readGateConfig: () => enabled,
       readPushConfig: () => pushEnabled,
       store: { getPublicKey: async () => { throw Object.assign(new Error("secret disk"), { code: "PUSH_STORE_LOCKED" }); } },
@@ -139,7 +159,7 @@ test("status exposes only disabled diagnostics and safely maps config/store fail
 });
 
 test("public key requires enabled authenticated gate and enabled Push config", async () => {
-  const getKey = keyRoute.createPublicKeyHandler({
+  const getKey = pushHandlers.createPublicKeyHandler({
     readGateConfig: () => enabled,
     readPushConfig: () => pushEnabled,
     store: { getPublicKey: async () => "public-key" },
@@ -155,7 +175,7 @@ test("public key requires enabled authenticated gate and enabled Push config", a
   assert.deepEqual(await authorized.json(), { publicKey: "public-key" });
   assert.equal(authorized.headers.get("cache-control"), "no-store");
 
-  const disabledPush = keyRoute.createPublicKeyHandler({
+  const disabledPush = pushHandlers.createPublicKeyHandler({
     readGateConfig: () => enabled,
     readPushConfig: () => ({ status: "disabled", configPath: "/tmp/pi-web.json" }),
     store: { getPublicKey: async () => "never" },
@@ -172,7 +192,7 @@ test("public key requires enabled authenticated gate and enabled Push config", a
 test("subscribe validates then creates, updates, and reports the twenty-device limit", async () => {
   const seen = [];
   let result = "created";
-  const handlers = subscribeRoute.createSubscribeHandlers({
+  const handlers = pushHandlers.createSubscribeHandlers({
     readGateConfig: () => enabled,
     store: {
       upsert: async (value, password) => { seen.push([value, password]); return result; },
@@ -202,7 +222,7 @@ test("subscribe validates then creates, updates, and reports the twenty-device l
 
 test("unsubscribe deletes only the current fingerprint endpoint", async () => {
   const calls = [];
-  const handlers = subscribeRoute.createSubscribeHandlers({
+  const handlers = pushHandlers.createSubscribeHandlers({
     readGateConfig: () => enabled,
     store: {
       upsert: async () => "created",
@@ -234,7 +254,7 @@ test("unsubscribe deletes only the current fingerprint endpoint", async () => {
 
 test("test route sends only its fixed payload to the submitted authorized endpoint", async () => {
   const calls = [];
-  const handler = testRoute.createTestHandler({
+  const handler = pushHandlers.createTestHandler({
     readGateConfig: () => enabled,
     service: {
       send: async (...args) => {
@@ -256,7 +276,7 @@ test("test route sends only its fixed payload to the submitted authorized endpoi
     "https://push.example/a",
   ]]);
 
-  const missing = testRoute.createTestHandler({
+  const missing = pushHandlers.createTestHandler({
     readGateConfig: () => enabled,
     service: { send: async () => ({ attempted: 0, sent: 0, results: [] }) },
     createId: () => "id",
@@ -267,7 +287,7 @@ test("test route sends only its fixed payload to the submitted authorized endpoi
     "PUSH_SUBSCRIPTION_NOT_FOUND",
   );
 
-  const failed = testRoute.createTestHandler({
+  const failed = pushHandlers.createTestHandler({
     readGateConfig: () => enabled,
     service: { send: async () => ({ attempted: 1, sent: 0, results: [{ endpointHost: "secret.example", status: "error" }] }) },
     createId: () => "id",
@@ -280,11 +300,11 @@ test("test route sends only its fixed payload to the submitted authorized endpoi
 });
 
 test("mutating handlers share origin, JSON, malformed-body, size, auth, and store-lock boundaries", async () => {
-  const subscribe = subscribeRoute.createSubscribeHandlers({
+  const subscribe = pushHandlers.createSubscribeHandlers({
     readGateConfig: () => enabled,
     store: { upsert: async () => "created", remove: async () => true },
   });
-  const testHandler = testRoute.createTestHandler({
+  const testHandler = pushHandlers.createTestHandler({
     readGateConfig: () => enabled,
     service: { send: async () => ({ attempted: 1, sent: 1, results: [] }) },
     createId: () => "id",
@@ -318,7 +338,7 @@ test("mutating handlers share origin, JSON, malformed-body, size, auth, and stor
     );
   }
 
-  const unauthorized = subscribeRoute.createSubscribeHandlers({
+  const unauthorized = pushHandlers.createSubscribeHandlers({
     readGateConfig: () => enabled,
     store: { upsert: async () => "created", remove: async () => true },
   });
@@ -328,7 +348,7 @@ test("mutating handlers share origin, JSON, malformed-body, size, auth, and stor
   }, { "x-pi-web-auth-status": "disabled" });
   await assertError(await unauthorized.POST(req), 401, "PUSH_UNAUTHORIZED");
 
-  const locked = subscribeRoute.createSubscribeHandlers({
+  const locked = pushHandlers.createSubscribeHandlers({
     readGateConfig: () => enabled,
     store: {
       upsert: async () => { throw Object.assign(new Error("secret file"), { code: "PUSH_STORE_LOCKED" }); },
