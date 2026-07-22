@@ -3176,4 +3176,3 @@ git log --oneline -16
 ```
 
 Expected: no uncommitted implementation files; the recent history shows the incremental commits from this plan. Do not squash before review because each task is an independent verification checkpoint.
-

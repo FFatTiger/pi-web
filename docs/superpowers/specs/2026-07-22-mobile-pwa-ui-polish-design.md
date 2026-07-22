@@ -1,7 +1,7 @@
 # Mobile PWA UI Polish Design
 
-**Date:** 2026-07-22  
-**Branch:** `feat/mobile-pwa-ui-polish`  
+**Date:** 2026-07-22
+**Branch:** `feat/mobile-pwa-ui-polish`
 **Base:** `8fab342`
 
 ## Goal
