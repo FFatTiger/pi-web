@@ -31,6 +31,9 @@ import { PwaUpdateBanner } from "./PwaUpdateBanner";
 
 type SessionCopyField = "file" | "id";
 
+// Task 14 replaces this placeholder with live global running state.
+const EMPTY_RUNNING_SESSION_IDS: Set<string> = new Set();
+
 export function AppShell() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -39,8 +42,7 @@ export function AppShell() {
   const online = useOnlineStatus();
   const pwaInstall = usePwaInstall();
   const pwaUpdate = usePwaUpdate();
-  // Task 14 replaces this placeholder with live global running state.
-  const runningSessionIds = new Set<string>();
+  const runningSessionIds = EMPTY_RUNNING_SESSION_IDS;
   const [selectedSession, setSelectedSession] = useState<SessionInfo | null>(null);
   // When user clicks +, we only store the cwd — no fake session id
   const [newSessionCwd, setNewSessionCwd] = useState<string | null>(null);
