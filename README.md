@@ -8,7 +8,38 @@ Local web UI for the [pi coding agent](https://github.com/badlogic/pi-mono). pi-
 
 The same pi session in CLI and pi-web: structured tool calls, readable Markdown, session browsing, and cleaner results.
 
+## About this fork
+
+This repository is the [`FFatTiger/pi-web`](https://github.com/FFatTiger/pi-web) fork of [`agegr/pi-web`](https://github.com/agegr/pi-web). It keeps pi-web's local browser workspace while adding the security, remote-operation, background-notification, project, and mobile behavior used by this fork.
+
+| Area | This fork adds |
+| --- | --- |
+| Application access | A fail-closed password gate with signed sessions, login throttling, protected business APIs/SSE, and explicit opt-out only. |
+| PWA and completion notifications | An installable PWA, conservative offline/update behavior, and authenticated VAPID Web Push after the final `agent_settled`, with visible-toast ACK suppression while the app is foregrounded. |
+| Server-owned runs | An accepted Agent run continues on the server after the browser or installed PWA is backgrounded or closed; Push is a completion channel, not an execution channel. |
+| Projects and worktrees | Multi-project session grouping, linked-worktree resolution, worktree switching/creation/removal, and a project-scoped Explorer. |
+| Mobile workflow | A session chooser on empty entry, focus-zoom-safe editable controls, compact navigation, complete session/context metrics, and sidebar logout. |
+| Security boundaries | Restricted file roots, unconditional Push-secret denial through aliases and symlinks, streaming request limits, password-bound subscriptions, and actual-socket Push target validation. |
+
+> [!IMPORTANT]
+> The npm package `@agegr/pi-web` is published by the upstream project. The `npx` and global-install commands below install upstream, not the fork-specific changes described above.
+
+**Upstream divergence (observed 2026-07-22):** this fork has not yet integrated upstream's Pi 0.81 dependency update, automatic session naming, Git-aware diff viewer, or `!` / `!!` shell command prefixes. This is a point-in-time note, not a permanent compatibility guarantee; compare [`agegr/pi-web`](https://github.com/agegr/pi-web) before rebasing or releasing.
+
 ## Quick Start
+
+### Run this fork from source
+
+```bash
+git clone https://github.com/FFatTiger/pi-web.git
+cd pi-web
+npm install
+npm run dev
+```
+
+Then open [http://localhost:30141](http://localhost:30141).
+
+### Run the upstream npm release
 
 **Run without installing:**
 
