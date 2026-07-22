@@ -138,12 +138,10 @@ export async function POST(
       if (validationError) {
         return NextResponse.json({ error: validationError }, { status: 400 });
       }
+      // Deny before inspect so secret names never appear in conflict payloads.
       for (const name of fileNames) {
         const destination = path.join(directory, name);
-        if (isFilePathDenied(destination)) {
-          return NextResponse.json({ error: "Access denied" }, { status: 403 });
-        }
-        if (isResolvedFilePathDenied(destination)) {
+        if (isFilePathDenied(destination) || isResolvedFilePathDenied(destination)) {
           return NextResponse.json({ error: "Access denied" }, { status: 403 });
         }
       }
@@ -167,6 +165,14 @@ export async function POST(
       return NextResponse.json({ error: validationError }, { status: 400 });
     }
 
+    // Preflight: deny every destination before inspect/409 so secrets never leak via conflicts.
+    for (const name of fileNames) {
+      const destination = path.join(directory, name);
+      if (isResolvedFilePathDenied(destination)) {
+        return NextResponse.json({ error: "Access denied" }, { status: 403 });
+      }
+    }
+
     const inspection = inspectUploadTargets(directory, fileNames);
     if (strategy === "error" && inspection.conflicts.length > 0) {
       return NextResponse.json({
@@ -184,6 +190,7 @@ export async function POST(
 
     for (const file of files) {
       const destination = path.join(directory, file.name);
+      // Defense in depth after preflight.
       if (isResolvedFilePathDenied(destination)) {
         return NextResponse.json({ error: "Access denied" }, { status: 403 });
       }
