@@ -102,7 +102,7 @@ PI_WEB_PUSH_SUBJECT=mailto:owner@example.com pi-web
 
 - Precedence for Push: environment (`PI_WEB_PUSH_DISABLED`, `PI_WEB_PUSH_SUBJECT`) overrides `push` in `pi-web.json`; missing `push.disabled` defaults to enabled (`false`); missing subject defaults to `https://github.com/agegr/pi-web`. Subject must be a `mailto:` or `https:` URL. Invalid values lock Push only (safe status error)—they do not break the rest of pi-web.
 - Push requires the application password gate to be **enabled** and the user authenticated. With the gate disabled, subscription APIs refuse Push.
-- Browsers need a secure context: **HTTPS**, or **localhost** for local testing. Enable notifications only after an explicit user gesture (settings / bell control). iOS / iPadOS **16.4+** requires Add to Home Screen and enabling Push from the installed standalone PWA.
+- Browsers need a secure context: **HTTPS**, or **localhost** for local testing. Pi Web does **not** show install or notification enable/test/disable guidance UI. After an authenticated Push server check, it makes **one** automatic permission attempt while `Notification.permission` is still `default`, writing the versioned local marker `pi-web:push-auto-prompt-v1` **before** `Notification.requestPermission()` so reloads and remounts do not prompt again. Revoke or change permission later in browser/system settings. Some browsers (notably iOS Safari) may suppress automatic prompts without a user gesture or outside a Home Screen standalone PWA; iOS / iPadOS **16.4+** still requires Add to Home Screen for Push, and Pi Web stays quiet when the browser blocks the auto request. Manifest/Service Worker installability remains—use the browser’s own install affordance if available.
 - Visible page with a live running SSE connection: after settle, AppShell shows an in-app toast and ACKs within about **1500ms** so system Push is suppressed. If ACK is missing (hidden, frozen, closed, or blocked), system Push is sent. Late ACK after timeout is ignored; a rare duplicate toast+Push is accepted.
 - Notification copy is generic only (`Agent run finished` / `Agent run failed` / test text). No prompts, replies, paths, or tool output. Abort does not notify; intermediate retries/compaction do not; exactly one notification at final `agent_settled`.
 - Service Worker caches only public PWA assets (`/offline.html`, `/manifest.webmanifest`, icons). No session, API, HTML app shell, Next chunks, or Background Sync. Offline navigation shows a generic fallback page.
@@ -157,7 +157,7 @@ components/
   SkillsConfig.tsx    # skill management panel
   FileExplorer.tsx    # file tree
   FileViewer.tsx      # source, diff, image, audio, PDF, DOCX preview
-  AppToast.tsx / OfflineBanner.tsx / Pwa* / PushNotificationControl.tsx
+  AppToast.tsx / OfflineBanner.tsx / PwaUpdateBanner.tsx / AuthControls.tsx
 lib/
   rpc-manager.ts      # AgentSessionWrapper lifecycle and global registry
   session-reader.ts   # parses .jsonl session files and branch contexts
@@ -170,7 +170,7 @@ lib/
 hooks/
   useAgentSession.ts  # session loading, command sending, SSE state machine
   useAppPresence.ts   # single running SSE + toast ACK
-  usePwaInstall.ts / usePwaUpdate.ts / useWebPush.ts / useOnlineStatus.ts
+  usePwaUpdate.ts / useWebPush.ts / useOnlineStatus.ts
   useAudio.ts         # completion sound
   useDragDrop.ts      # image drag/drop
   useTheme.ts         # theme switching

@@ -13,6 +13,14 @@ test("documentation names Push configuration and browser constraints", () => {
   ]) assert.match(combined, new RegExp(text.replace(".", "\\."), "i"), text);
 });
 
+test("documentation describes automatic one-time Push permission, not explicit enable UI", () => {
+  const combined = requiredDocs.map((path) => readFileSync(path, "utf8")).join("\n");
+  assert.match(combined, /pi-web:push-auto-prompt-v1/);
+  assert.match(combined, /automatic/i);
+  assert.doesNotMatch(combined, /settings\s*\/\s*bell control|explicit notification control|Enable completion notifications/i);
+  assert.doesNotMatch(combined, /usePwaInstall|PwaInstallPrompt|PushNotificationControl|PwaSettingsControl/);
+});
+
 test("npm package includes every public PWA artifact", () => {
   const result = spawnSync("npm", ["pack", "--dry-run", "--json"], { encoding: "utf8" });
   assert.equal(result.status, 0, result.stderr);
