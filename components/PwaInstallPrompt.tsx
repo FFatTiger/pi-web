@@ -22,7 +22,7 @@ export function PwaInstallPrompt({
 
   return (
     <div
-      role="dialog"
+      role="region"
       aria-label="Install app"
       style={{
         position: "fixed",
@@ -48,7 +48,7 @@ export function PwaInstallPrompt({
           <>Install Pi Agent Web for faster access and offline fallback.</>
         ) : (
           <>
-            On iOS/iPadOS, open Share and choose Share → Add to Home Screen.
+            On iOS/iPadOS, open Share → Add to Home Screen.
           </>
         )}
       </div>
