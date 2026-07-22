@@ -98,7 +98,7 @@ PI_WEB_PUSH_SUBJECT=mailto:owner@example.com pi-web
 
 - Push 优先级：环境变量（`PI_WEB_PUSH_DISABLED`、`PI_WEB_PUSH_SUBJECT`）覆盖 `pi-web.json` 中的 `push`；缺省 `push.disabled` 为开启（`false`）；缺省 subject 为 `https://github.com/agegr/pi-web`。subject 必须是 `mailto:` 或 `https:` URL。非法值只锁定 Push（安全 status 错误），不影响其余功能。
 - Push 要求应用密码门禁处于 **enabled** 且用户已认证。门禁关闭时订阅接口会拒绝 Push。
-- 浏览器需要安全上下文：**HTTPS**，或本地测试用 **localhost**。通知权限只能在明确的用户手势（设置/铃铛控件）后请求。iOS / iPadOS **16.4+** 必须先“添加到主屏幕”，再在已安装的 standalone PWA 中开启 Push。
+- 浏览器需要安全上下文：**HTTPS**，或本地测试用 **localhost**。Pi Web **不再**展示安装引导或通知开启/测试/关闭控件。在通过已认证的 Push 服务端检查后，当 `Notification.permission` 仍为 `default` 时会**自动尝试一次**权限请求，并在调用 `Notification.requestPermission()` **之前**写入版本化本地标记 `pi-web:push-auto-prompt-v1`，避免刷新或重挂载重复弹窗。之后请在浏览器/系统设置中撤销或更改权限。部分浏览器（尤其 iOS Safari）可能在没有用户手势或非主屏幕 standalone PWA 场景下抑制自动弹窗；iOS / iPadOS **16.4+** 仍需先“添加到主屏幕”才能使用 Push，被抑制时 Pi Web 保持静默。manifest/Service Worker 安装能力仍在——请使用浏览器自带的安装入口（若有）。
 - 页面可见且 running SSE 存活：settle 后 AppShell 显示站内 toast，约 **1500ms** 内 ACK 则抑制系统 Push。无 ACK（隐藏、冻结、关闭或 ACK 被阻）则发系统 Push。超时后的迟到 ACK 会被忽略；极少 toast+Push 重复可接受。
 - 通知文案仅为通用文本（`Agent run finished` / `Agent run failed` / 测试文本），不含 prompt、回答、路径或工具输出。Abort 不通知；中途重试/压缩不通知；仅在最终 `agent_settled` 发一次。
 - Service Worker 只缓存公开 PWA 资源（`/offline.html`、`/manifest.webmanifest`、图标）。不缓存 session、API、应用 HTML、Next chunk，也没有 Background Sync。离线导航只显示通用 fallback。
@@ -153,7 +153,7 @@ components/
   SkillsConfig.tsx    # 技能管理面板
   FileExplorer.tsx    # 文件树
   FileViewer.tsx      # 源码、diff、图片、音频、PDF、DOCX 预览
-  AppToast.tsx / OfflineBanner.tsx / Pwa* / PushNotificationControl.tsx
+  AppToast.tsx / OfflineBanner.tsx / PwaUpdateBanner.tsx / AuthControls.tsx
 lib/
   rpc-manager.ts      # AgentSessionWrapper 生命周期和全局 registry
   session-reader.ts   # 解析 .jsonl 会话文件和分支上下文
@@ -166,7 +166,7 @@ lib/
 hooks/
   useAgentSession.ts  # 会话加载、发送命令、SSE 状态机
   useAppPresence.ts   # 单一 running SSE + toast ACK
-  usePwaInstall.ts / usePwaUpdate.ts / useWebPush.ts / useOnlineStatus.ts
+  usePwaUpdate.ts / useWebPush.ts / useOnlineStatus.ts
   useAudio.ts         # 完成提示音
   useDragDrop.ts      # 图片拖拽
   useTheme.ts         # 主题切换
