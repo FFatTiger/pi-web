@@ -3,7 +3,11 @@ import { readPushConfig, type PushConfig } from "./push-config";
 import { getPresenceRegistry } from "./push-presence";
 import { getPushService } from "./push-service";
 import { computeAuthFingerprint, getPushStore } from "./push-store";
-import type { AgentNotificationPayloadV1, AgentNotificationResult } from "./push-types";
+import {
+  isValidNotificationSessionId,
+  type AgentNotificationPayloadV1,
+  type AgentNotificationResult,
+} from "./push-types";
 import { readGateConfig } from "./web-auth-config";
 import type { GateConfig } from "./web-auth-types";
 import type { SettledCycleSnapshot } from "./settled-cycle";
@@ -17,7 +21,7 @@ export type PushNotifierOptions = {
   presence?: { deliver: (notification: AgentNotificationPayloadV1, fingerprint: string) => Promise<boolean> };
   service?: { send: (payload: AgentNotificationPayloadV1, password: string) => Promise<unknown> };
   createId?: () => string;
-  logError?: (message: string, error?: unknown) => void;
+  logError?: (message: string) => void;
 };
 
 /**
@@ -53,7 +57,7 @@ export class PushNotifier {
   private readonly presence: { deliver: (notification: AgentNotificationPayloadV1, fingerprint: string) => Promise<boolean> };
   private readonly service: { send: (payload: AgentNotificationPayloadV1, password: string) => Promise<unknown> };
   private readonly createId: () => string;
-  private readonly logError: (message: string, error?: unknown) => void;
+  private readonly logError: (message: string) => void;
 
   constructor(options: PushNotifierOptions = {}) {
     this.readGateConfig = options.readGateConfig ?? readGateConfig;
@@ -62,30 +66,22 @@ export class PushNotifier {
     this.presence = options.presence ?? getPresenceRegistry();
     this.service = options.service ?? getPushService();
     this.createId = options.createId ?? (() => randomUUID());
-    this.logError =
-      options.logError ??
-      ((message, error) => {
-        const detail = error === undefined
-          ? ""
-          : ` ${error instanceof Error ? error.message : String(error)}`;
-        console.error(message + detail);
-      });
+    this.logError = options.logError ?? ((message) => console.error(message));
   }
 
   async handleSettled(snapshot: SettledCycleSnapshot): Promise<void> {
     try {
       await this.handleSettledInner(snapshot);
-    } catch (error) {
+    } catch {
       this.logError(
-        `[pi-web] settled notification failed for ${snapshot.sessionId} cycle ${snapshot.cycleId}:`,
-        error,
+        `[pi-web] settled notification failed for ${snapshot.sessionId} cycle ${snapshot.cycleId}`,
       );
     }
   }
 
   private async handleSettledInner(snapshot: SettledCycleSnapshot): Promise<void> {
     const result = classifySettledMessages(snapshot.messages);
-    if (result === null) return;
+    if (result === null || !isValidNotificationSessionId(snapshot.sessionId)) return;
 
     const gate = this.readGateConfig();
     if (gate.status !== "enabled") return;
@@ -109,11 +105,11 @@ export class PushNotifier {
     let acked = false;
     try {
       acked = await this.presence.deliver(payload, fingerprint);
-    } catch (error) {
-      // Presence failure cannot block fallback to Push.
+    } catch {
+      // Presence failure cannot block fallback to Push. Keep logs generic: a
+      // provider error may contain an endpoint or other sensitive details.
       this.logError(
-        `[pi-web] presence deliver failed for ${snapshot.sessionId} cycle ${snapshot.cycleId}:`,
-        error,
+        `[pi-web] presence deliver failed for ${snapshot.sessionId} cycle ${snapshot.cycleId}`,
       );
       acked = false;
     }
@@ -122,11 +118,11 @@ export class PushNotifier {
 
     try {
       await this.service.send(payload, gate.password);
-    } catch (error) {
-      // Push failure must never reject into Agent flow; outer catch also covers this.
+    } catch {
+      // Push failure must never reject into Agent flow. Keep the provider's
+      // exception details out of logs because they can include target data.
       this.logError(
-        `[pi-web] push send failed for ${snapshot.sessionId} cycle ${snapshot.cycleId}:`,
-        error,
+        `[pi-web] push send failed for ${snapshot.sessionId} cycle ${snapshot.cycleId}`,
       );
     }
   }
