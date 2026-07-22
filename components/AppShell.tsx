@@ -351,12 +351,6 @@ export function AppShell() {
     setRightPanelMode((mode) => mode === "explorer" ? "closed" : "explorer");
   }, [activeCwd, isMobile]);
 
-  const toggleFilePanel = useCallback(() => {
-    if (fileTabs.length === 0) return;
-    if (isMobile) setSidebarOpen(false);
-    setRightPanelMode((mode) => mode === "file" ? "closed" : "file");
-  }, [fileTabs.length, isMobile]);
-
   const handleViewFullHistory = useCallback(() => {
     if (!selectedSession) return;
     window.open(
@@ -615,65 +609,67 @@ export function AppShell() {
             )}
           </button>
           {showChat && (
-            <div style={{ display: "flex", alignItems: "stretch", height: "100%" }}>
+            <div style={{ display: "flex", alignItems: "stretch", height: "100%", minWidth: 0, overflow: "hidden" }}>
               <WorktreeSwitcher
                 projectRoot={activeProjectRoot}
                 cwd={activeCwd}
                 onCwdChange={(cwd, projectRoot) => activateWorkspace(cwd, projectRoot)}
               />
-              <button
-                onClick={handleViewFullHistory}
-                disabled={!selectedSession}
-                title={selectedSession ? "View full history" : "Full history is available after the session is saved"}
-                aria-label="View full history"
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                  height: "100%",
-                  padding: "0 12px",
-                  background: "none",
-                  border: "none",
-                  borderTop: "2px solid transparent",
-                  borderRight: "1px solid var(--border)",
-                  color: selectedSession ? "var(--text-muted)" : "var(--text-dim)",
-                  cursor: selectedSession ? "pointer" : "not-allowed",
-                  opacity: selectedSession ? 1 : 0.45,
-                  flexShrink: 0,
-                  fontSize: 11,
-                  whiteSpace: "nowrap",
-                  transition: "color 0.1s, background 0.1s, opacity 0.1s",
-                }}
-                onMouseEnter={(e) => {
-                  if (!selectedSession) return;
-                  e.currentTarget.style.color = "var(--text)";
-                  e.currentTarget.style.background = "var(--bg-hover)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.color = selectedSession ? "var(--text-muted)" : "var(--text-dim)";
-                  e.currentTarget.style.background = "none";
-                }}
-              >
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
+              {!isMobile && (
+                <button
+                  onClick={handleViewFullHistory}
+                  disabled={!selectedSession}
+                  title={selectedSession ? "View full history" : "Full history is available after the session is saved"}
+                  aria-label="View full history"
                   style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    height: "100%",
+                    padding: "0 12px",
+                    background: "none",
+                    border: "none",
+                    borderTop: "2px solid transparent",
+                    borderRight: "1px solid var(--border)",
                     color: selectedSession ? "var(--text-muted)" : "var(--text-dim)",
+                    cursor: selectedSession ? "pointer" : "not-allowed",
+                    opacity: selectedSession ? 1 : 0.45,
                     flexShrink: 0,
+                    fontSize: 11,
+                    whiteSpace: "nowrap",
+                    transition: "color 0.1s, background 0.1s, opacity 0.1s",
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!selectedSession) return;
+                    e.currentTarget.style.color = "var(--text)";
+                    e.currentTarget.style.background = "var(--bg-hover)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.color = selectedSession ? "var(--text-muted)" : "var(--text-dim)";
+                    e.currentTarget.style.background = "none";
                   }}
                 >
-                  <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
-                  <path d="M3 3v5h5" />
-                  <path d="M12 7v5l3 2" />
-                </svg>
-                {!isMobile && <span>Full history</span>}
-              </button>
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    style={{
+                      color: selectedSession ? "var(--text-muted)" : "var(--text-dim)",
+                      flexShrink: 0,
+                    }}
+                  >
+                    <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+                    <path d="M3 3v5h5" />
+                    <path d="M12 7v5l3 2" />
+                  </svg>
+                  <span>Full history</span>
+                </button>
+              )}
               <BranchNavigator
                 tree={branchTree}
                 activeLeafId={branchActiveLeafId}
@@ -685,34 +681,36 @@ export function AppShell() {
                 onToggle={() => toggleTopPanel("branches")}
                 hasSession
               />
-              <button
-                ref={systemBtnRef}
-                onClick={() => toggleTopPanel("system")}
-                title="System prompt"
-                aria-label="System prompt"
-                aria-pressed={activeTopPanel === "system"}
-                style={{
-                  display: "flex", alignItems: "center", gap: 6,
-                  height: "100%", padding: "0 12px",
-                  background: activeTopPanel === "system" ? "var(--bg-selected)" : "none",
-                  border: "none",
-                  borderTop: activeTopPanel === "system" ? "2px solid var(--accent)" : "2px solid transparent",
-                  borderRight: "1px solid var(--border)",
-                  cursor: "pointer",
-                  color: activeTopPanel === "system" ? "var(--text)" : "var(--text-muted)",
-                  fontSize: 11, whiteSpace: "nowrap", transition: "color 0.1s, background 0.1s",
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
-                onMouseLeave={(e) => { e.currentTarget.style.color = activeTopPanel === "system" ? "var(--text)" : "var(--text-muted)"; }}
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: systemPrompt ? "var(--accent)" : "var(--text-dim)", flexShrink: 0 }}>
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                  <polyline points="14 2 14 8 20 8" />
-                  <line x1="8" y1="13" x2="16" y2="13" />
-                  <line x1="8" y1="17" x2="13" y2="17" />
-                </svg>
-                {!isMobile && <span>System</span>}
-              </button>
+              {!isMobile && (
+                <button
+                  ref={systemBtnRef}
+                  onClick={() => toggleTopPanel("system")}
+                  title="System prompt"
+                  aria-label="System prompt"
+                  aria-pressed={activeTopPanel === "system"}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 6,
+                    height: "100%", padding: "0 12px",
+                    background: activeTopPanel === "system" ? "var(--bg-selected)" : "none",
+                    border: "none",
+                    borderTop: activeTopPanel === "system" ? "2px solid var(--accent)" : "2px solid transparent",
+                    borderRight: "1px solid var(--border)",
+                    cursor: "pointer",
+                    color: activeTopPanel === "system" ? "var(--text)" : "var(--text-muted)",
+                    fontSize: 11, whiteSpace: "nowrap", transition: "color 0.1s, background 0.1s",
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.color = activeTopPanel === "system" ? "var(--text)" : "var(--text-muted)"; }}
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: systemPrompt ? "var(--accent)" : "var(--text-dim)", flexShrink: 0 }}>
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                    <line x1="8" y1="13" x2="16" y2="13" />
+                    <line x1="8" y1="17" x2="13" y2="17" />
+                  </svg>
+                  <span>System</span>
+                </button>
+              )}
             </div>
           )}
           {/* Session stats — right-aligned in top bar */}
@@ -754,9 +752,10 @@ export function AppShell() {
                 aria-pressed={activeTopPanel === "session"}
                 style={{
                   marginLeft: "auto",
-                  display: "flex", alignItems: "center", gap: 10,
-                  paddingLeft: 12,
-                  paddingRight: rightPanelMode === "closed" ? 84 : 12,
+                  display: "flex", alignItems: "center", gap: isMobile ? 4 : 10,
+                  paddingLeft: isMobile ? 6 : 12,
+                  paddingRight: rightPanelMode === "closed" ? 48 : 12,
+                  flexShrink: 0,
                   height: "100%",
                   background: activeTopPanel === "session" ? "var(--bg-selected)" : "none",
                   border: "none",
@@ -804,7 +803,7 @@ export function AppShell() {
                   </span>
                 )}
                 {ctxStr && (
-                  <span style={{ display: "flex", alignItems: "center", gap: 4, color: ctxColor }}>
+                  <span style={{ display: "flex", alignItems: "center", gap: 4, color: ctxColor, flexShrink: 0 }}>
                     <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M1 9 L1 5 Q1 1 5 1 Q9 1 9 5 L9 9" /><line x1="1" y1="9" x2="9" y2="9" />
                     </svg>
@@ -1100,7 +1099,7 @@ export function AppShell() {
       }}
     />
 
-    {/* Fixed right-corner controls: explorer then file detail */}
+    {/* Fixed right-corner control: file explorer */}
     <div
       style={{
         position: "fixed",
@@ -1135,29 +1134,6 @@ export function AppShell() {
           <path d="M4 14h6v6H4z" />
           <path d="M17 14v6" />
           <path d="M14 17h6" />
-        </svg>
-      </button>
-      <button
-        onClick={toggleFilePanel}
-        disabled={fileTabs.length === 0}
-        title={rightPanelMode === "file" ? "Hide file panel" : "Show file panel"}
-        aria-label={rightPanelMode === "file" ? "Hide file panel" : "Show file panel"}
-        aria-pressed={rightPanelMode === "file"}
-        style={{
-          display: "flex", alignItems: "center", justifyContent: "center",
-          width: 36, height: 36, padding: 0,
-          background: "var(--bg-panel)", border: "none",
-          borderLeft: "1px solid var(--border)", borderBottom: "1px solid var(--border)",
-          color: rightPanelMode === "file" ? "var(--text)" : "var(--text-muted)",
-          cursor: fileTabs.length === 0 ? "not-allowed" : "pointer",
-          opacity: fileTabs.length === 0 ? 0.4 : 1,
-          transition: "color 0.12s, opacity 0.12s",
-        }}
-        onMouseEnter={(e) => { if (fileTabs.length > 0) e.currentTarget.style.color = "var(--text)"; }}
-        onMouseLeave={(e) => { e.currentTarget.style.color = rightPanelMode === "file" ? "var(--text)" : "var(--text-muted)"; }}
-      >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <rect x="3" y="3" width="18" height="18" rx="2" /><line x1="15" y1="3" x2="15" y2="21" />
         </svg>
       </button>
     </div>
