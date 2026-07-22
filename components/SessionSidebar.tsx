@@ -36,6 +36,8 @@ interface Props {
   onInitialRestoreDone?: () => void;
   refreshKey?: number;
   onSessionDeleted?: (sessionId: string) => void;
+  liveRunningSessionIds: ReadonlySet<string>;
+  runningAuthoritative: boolean;
 }
 
 const UNREAD_SESSIONS_STORAGE_KEY = "pi-web:unread-session-ids";
@@ -251,6 +253,8 @@ export function SessionSidebar({
   onInitialRestoreDone,
   refreshKey,
   onSessionDeleted,
+  liveRunningSessionIds,
+  runningAuthoritative,
 }: Props) {
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -273,14 +277,18 @@ export function SessionSidebar({
   const directoryPopoverRef = useRef<HTMLDivElement>(null);
   const initializedExpansionRef = useRef(false);
   const [sessionRefreshDone, setSessionRefreshDone] = useState(false);
-  const [runningSessionIds, setRunningSessionIds] = useState<Set<string>>(() => new Set());
+  // Snapshot from /api/sessions used only until the first live running frame.
+  // After runningAuthoritative is true this remains a dormant reconnect fallback.
+  const [fallbackRunningSessionIds, setFallbackRunningSessionIds] = useState<Set<string>>(() => new Set());
   const [unreadSessionIds, setUnreadSessionIds] = useState<Set<string>>(() => loadUnreadSessionIds());
   const previousRunningSessionIdsRef = useRef<Set<string>>(new Set());
-  // Once the SSE stream has delivered a frame it is the source of truth for
-  // running state; late /api/sessions responses must not overwrite it.
-  const sseAuthoritativeRef = useRef(false);
   const sessionRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const restoredRef = useRef(false);
+
+  const runningSessionIds = useMemo(
+    () => (runningAuthoritative ? new Set(liveRunningSessionIds) : fallbackRunningSessionIds),
+    [runningAuthoritative, liveRunningSessionIds, fallbackRunningSessionIds],
+  );
 
   const loadSessions = useCallback(async (showLoading = false) => {
     try {
@@ -289,11 +297,9 @@ export function SessionSidebar({
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json() as { sessions: SessionInfo[]; runningSessionIds?: string[] };
       setAllSessions(data.sessions);
-      // Treat the fetched running set as an initial fallback only. Once SSE is
-      // live it owns this state, so a slow fetch can't revive a stale snapshot.
-      if (!sseAuthoritativeRef.current) {
-        setRunningSessionIds(new Set(data.runningSessionIds ?? []));
-      }
+      // Always refresh the snapshot fallback. When live SSE is authoritative the
+      // effective running set ignores this state and cannot be overwritten by it.
+      setFallbackRunningSessionIds(new Set(data.runningSessionIds ?? []));
       // Drop unread markers for sessions that no longer exist (e.g. deleted).
       const existingIds = new Set(data.sessions.map((s) => s.id));
       setUnreadSessionIds((prev) => {
@@ -342,27 +348,6 @@ export function SessionSidebar({
       // localStorage may be unavailable in privacy mode.
     }
   }, [expandedProjects]);
-
-  useEffect(() => {
-    // Live running status via SSE — no polling. The server pushes the current
-    // set of running session ids whenever any session starts/stops working.
-    const source = new EventSource("/api/agent/running/events");
-
-    source.onmessage = (e) => {
-      try {
-        const data = JSON.parse(e.data) as { type?: string; runningSessionIds?: string[] };
-        if (data.type === "running") {
-          sseAuthoritativeRef.current = true;
-          setRunningSessionIds(new Set(data.runningSessionIds ?? []));
-        }
-      } catch {
-        // ignore malformed frames
-      }
-    };
-
-    // On error EventSource auto-reconnects; keep the last known state meanwhile.
-    return () => source.close();
-  }, []);
 
   useEffect(() => {
     const previous = previousRunningSessionIdsRef.current;
