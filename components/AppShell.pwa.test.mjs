@@ -5,11 +5,14 @@ import test from "node:test";
 const shell = readFileSync(new URL("./AppShell.tsx", import.meta.url), "utf8");
 const update = readFileSync(new URL("../hooks/usePwaUpdate.ts", import.meta.url), "utf8");
 
-test("AppShell mounts install, update, and offline UI", () => {
-  for (const name of ["OfflineBanner", "PwaInstallPrompt", "PwaSettingsControl", "PwaUpdateBanner"]) {
-    assert.match(shell, new RegExp(`<${name}`));
-  }
-  assert.match(shell, /Install help/);
+test("AppShell mounts headless push, offline, update, and toast UI only", () => {
+  assert.match(shell, /useWebPush\(\)/);
+  assert.doesNotMatch(shell, /PwaInstallPrompt|PwaSettingsControl|PushNotificationControl/);
+  assert.match(shell, /<OfflineBanner/);
+  assert.match(shell, /<PwaUpdateBanner/);
+  assert.match(shell, /<AppToast/);
+  assert.doesNotMatch(shell, /usePwaInstall/);
+  assert.doesNotMatch(shell, /Install help/);
 });
 
 test("update hook registers root sw and reloads only with a tab-local request", () => {

@@ -16,8 +16,8 @@ import { AuthControls } from "./AuthControls";
 import { useTheme } from "@/hooks/useTheme";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
-import { usePwaInstall } from "@/hooks/usePwaInstall";
 import { usePwaUpdate } from "@/hooks/usePwaUpdate";
+import { useWebPush } from "@/hooks/useWebPush";
 import { useAppPresence } from "@/hooks/useAppPresence";
 import { copyText } from "@/lib/clipboard";
 import { getFileName } from "@/lib/file-paths";
@@ -27,10 +27,7 @@ import type { ChatInputHandle } from "./ChatInput";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 import { AppToast } from "./AppToast";
 import { OfflineBanner } from "./OfflineBanner";
-import { PwaInstallPrompt } from "./PwaInstallPrompt";
-import { PwaSettingsControl } from "./PwaSettingsControl";
 import { PwaUpdateBanner } from "./PwaUpdateBanner";
-import { PushNotificationControl } from "./PushNotificationControl";
 
 type SessionCopyField = "file" | "id";
 
@@ -40,8 +37,8 @@ export function AppShell() {
   const { isDark, toggleTheme } = useTheme();
   const isMobile = useIsMobile();
   const online = useOnlineStatus();
-  const pwaInstall = usePwaInstall();
   const pwaUpdate = usePwaUpdate();
+  useWebPush();
   const presence = useAppPresence();
   const runningSessionIds = presence.runningSessionIds as Set<string>;
   const [selectedSession, setSelectedSession] = useState<SessionInfo | null>(null);
@@ -1067,19 +1064,6 @@ export function AppShell() {
       />
     </div>
     <OfflineBanner online={online} />
-    <PwaInstallPrompt
-      canInstall={pwaInstall.canInstall}
-      isIos={pwaInstall.isIos}
-      isStandalone={pwaInstall.isStandalone}
-      dismissed={pwaInstall.dismissed}
-      promptInstall={pwaInstall.promptInstall}
-      dismiss={pwaInstall.dismiss}
-    />
-    <PwaSettingsControl
-      isStandalone={pwaInstall.isStandalone}
-      onShowInstallHelp={pwaInstall.resetDismissed}
-      label="Install help"
-    />
     <PwaUpdateBanner
       updateAvailable={pwaUpdate.updateAvailable}
       activatedElsewhere={pwaUpdate.activatedElsewhere}
@@ -1111,7 +1095,7 @@ export function AppShell() {
       }}
     />
 
-    {/* Fixed bottom-right authentication and notification controls */}
+    {/* Fixed bottom-right authentication controls */}
     <div
       style={{
         position: "fixed",
@@ -1123,10 +1107,6 @@ export function AppShell() {
         gap: 8,
       }}
     >
-      <PushNotificationControl
-        isIos={pwaInstall.isIos}
-        isStandalone={pwaInstall.isStandalone}
-      />
       <AuthControls />
     </div>
 

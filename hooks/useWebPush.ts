@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect } from "react";
 
 const PUSH_ENABLED_KEY = "pi-web:push-enabled";
+export const AUTO_PROMPT_KEY = "pi-web:push-auto-prompt-v1";
 
 type PushStatusResponse = {
   supported: boolean;
@@ -13,17 +14,6 @@ type PushStatusResponse = {
 };
 
 type SafeErrorBody = { code?: unknown; error?: unknown };
-
-export type WebPushState = {
-  supported: boolean;
-  permission: NotificationPermission | "unsupported";
-  subscribed: boolean;
-  busy: boolean;
-  error: string | null;
-  enable(): Promise<void>;
-  disable(): Promise<void>;
-  sendTest(): Promise<void>;
-};
 
 function browserSupportsPush(): boolean {
   return typeof window !== "undefined" &&
@@ -66,6 +56,14 @@ export function serializePushSubscription(subscription: PushSubscription): {
   };
 }
 
+/** Pure policy: auto-prompt only when permission is still default and marker is absent. */
+export function shouldAttemptAutoPrompt(
+  permission: NotificationPermission | "unsupported",
+  markerPresent: boolean,
+): boolean {
+  return permission === "default" && !markerPresent;
+}
+
 async function responseError(response: Response): Promise<Error> {
   let body: SafeErrorBody | null = null;
   try {
@@ -95,20 +93,28 @@ async function sendJson<T>(url: string, method: "POST" | "DELETE", body: unknown
   });
 }
 
-function readEnabledPreference(): boolean {
-  try {
-    return localStorage.getItem(PUSH_ENABLED_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
 function writeEnabledPreference(enabled: boolean): void {
   try {
     if (enabled) localStorage.setItem(PUSH_ENABLED_KEY, "1");
     else localStorage.removeItem(PUSH_ENABLED_KEY);
   } catch {
     // Storage is an enhancement; subscription state remains authoritative.
+  }
+}
+
+function readAutoPromptMarker(): boolean {
+  try {
+    return localStorage.getItem(AUTO_PROMPT_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeAutoPromptMarker(): void {
+  try {
+    localStorage.setItem(AUTO_PROMPT_KEY, "1");
+  } catch {
+    // Marker write failure still allows a best-effort single request.
   }
 }
 
@@ -135,61 +141,57 @@ async function postSubscription(subscription: PushSubscription): Promise<void> {
   await sendJson("/api/push/subscribe", "POST", serializePushSubscription(subscription));
 }
 
-function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : "Push request failed";
+async function reconcileGrantedSubscription(): Promise<void> {
+  const registration = await navigator.serviceWorker.ready;
+  // Once granted, always create/reuse and post so existing granted users stay reconciled.
+  const subscription = await getOrCreateSubscription(registration);
+  await postSubscription(subscription);
+  writeEnabledPreference(true);
 }
 
-export function useWebPush(): WebPushState {
-  const [supported, setSupported] = useState(false);
-  const [permission, setPermission] = useState<NotificationPermission | "unsupported">("unsupported");
-  const [subscribed, setSubscribed] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
+/**
+ * Headless Web Push reconciler.
+ * Attempts permission once when default and marker absent; silent on all failures.
+ * AppShell mounts this exactly once and renders no push UI.
+ */
+export function useWebPush(): void {
   const reconcile = useCallback(async () => {
-    if (!browserSupportsPush()) {
-      setSupported(false);
-      setPermission("unsupported");
-      setSubscribed(false);
-      return;
-    }
+    if (!browserSupportsPush()) return;
 
-    setSupported(true);
-    setPermission(Notification.permission);
+    // Authenticated push server must be available before any permission prompt.
     await requirePushServer();
-    if (Notification.permission !== "granted") {
-      setSubscribed(false);
-      return;
+
+    let permission = Notification.permission;
+    // Keep an explicit Notification.permission === "default" gate in the mount path
+    // (policy helper remains the unit-tested decision source for marker/permission combos).
+    if (
+      Notification.permission === "default" &&
+      shouldAttemptAutoPrompt(permission, readAutoPromptMarker())
+    ) {
+      // Marker MUST be written before requestPermission to survive StrictMode remounts.
+      writeAutoPromptMarker();
+      try {
+        permission = await Notification.requestPermission();
+      } catch {
+        // Browser gesture suppression / request failures stay silent.
+        return;
+      }
     }
 
-    const registration = await navigator.serviceWorker.ready;
-    let subscription = await registration.pushManager.getSubscription();
-    if (!subscription && readEnabledPreference()) {
-      subscription = await getOrCreateSubscription(registration);
-    }
-    if (!subscription) {
-      setSubscribed(false);
-      return;
-    }
+    if (permission !== "granted") return;
 
-    await postSubscription(subscription);
-    setSubscribed(true);
+    await reconcileGrantedSubscription();
   }, []);
 
   useEffect(() => {
     let cancelled = false;
+
     const run = async () => {
-      setBusy(true);
       try {
         await reconcile();
-        if (!cancelled) setError(null);
-      } catch (reason) {
-        if (!cancelled) {
-          setSubscribed(false);
-          setError(errorText(reason));
-        }
-      } finally {
-        if (!cancelled) setBusy(false);
+      } catch {
+        // Unsupported, denied, default, server-unavailable, and network errors stay silent.
+        if (!cancelled) writeEnabledPreference(false);
       }
     };
 
@@ -207,81 +209,4 @@ export function useWebPush(): WebPushState {
       navigator.serviceWorker?.removeEventListener("message", onMessage);
     };
   }, [reconcile]);
-
-  const enable = useCallback(async () => {
-    if (!browserSupportsPush()) {
-      setError("Push notifications are not supported in this browser");
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    try {
-      const nextPermission = await Notification.requestPermission();
-      setPermission(nextPermission);
-      if (nextPermission !== "granted") {
-        throw new Error("Notification permission was not granted");
-      }
-      await requirePushServer();
-      const registration = await navigator.serviceWorker.ready;
-      const subscription = await getOrCreateSubscription(registration);
-      await postSubscription(subscription);
-      writeEnabledPreference(true);
-      setSubscribed(true);
-    } catch (reason) {
-      setError(errorText(reason));
-      throw reason;
-    } finally {
-      setBusy(false);
-    }
-  }, []);
-
-  const disable = useCallback(async () => {
-    if (!browserSupportsPush()) return;
-    setBusy(true);
-    setError(null);
-    let endpoint: string | null = null;
-    let failure: unknown = null;
-    try {
-      const registration = await navigator.serviceWorker.ready;
-      const subscription = await registration.pushManager.getSubscription();
-      endpoint = subscription?.endpoint ?? null;
-      if (subscription) await subscription.unsubscribe();
-    } catch (reason) {
-      failure = reason;
-    } finally {
-      if (endpoint) {
-        try {
-          await sendJson("/api/push/subscribe", "DELETE", { endpoint });
-        } catch (reason) {
-          failure ??= reason;
-        }
-      }
-      writeEnabledPreference(false);
-      setSubscribed(false);
-      setBusy(false);
-    }
-    if (failure) {
-      setError(errorText(failure));
-      throw failure;
-    }
-  }, []);
-
-  const sendTest = useCallback(async () => {
-    if (!browserSupportsPush()) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const registration = await navigator.serviceWorker.ready;
-      const subscription = await registration.pushManager.getSubscription();
-      if (!subscription) throw new Error("Push subscription is not available");
-      await sendJson("/api/push/test", "POST", { endpoint: subscription.endpoint });
-    } catch (reason) {
-      setError(errorText(reason));
-      throw reason;
-    } finally {
-      setBusy(false);
-    }
-  }, []);
-
-  return { supported, permission, subscribed, busy, error, enable, disable, sendTest };
 }
