@@ -720,13 +720,14 @@ export function AppShell() {
             const fmt = (n: number) => n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(0)}k` : String(n);
             const costStr = c > 0 ? (c >= 0.01 ? `$${c.toFixed(2)}` : `<$0.01`) : null;
 
+            const topBarContextUsage = contextUsage ?? sessionStats?.contextUsage ?? null;
             let ctxColor = "var(--text-muted)";
             let ctxStr: string | null = null;
-            if (contextUsage?.contextWindow) {
-              const pct = contextUsage.percent;
+            if (topBarContextUsage?.contextWindow) {
+              const pct = topBarContextUsage.percent;
               if (pct !== null && pct > 90) ctxColor = "#ef4444";
               else if (pct !== null && pct > 70) ctxColor = "rgba(234,179,8,0.95)";
-              ctxStr = pct !== null ? `${pct.toFixed(0)}% / ${fmt(contextUsage.contextWindow)}` : `? / ${fmt(contextUsage.contextWindow)}`;
+              ctxStr = pct !== null ? `${pct.toFixed(0)}% / ${fmt(topBarContextUsage.contextWindow)}` : `? / ${fmt(topBarContextUsage.contextWindow)}`;
             }
 
             const tooltipParts: string[] = [];
@@ -737,9 +738,9 @@ export function AppShell() {
               tooltipParts.push(`cache write: ${t.cacheWrite.toLocaleString()}`);
               if (c > 0) tooltipParts.push(`cost: $${c.toFixed(4)}`);
             }
-            if (contextUsage?.contextWindow) {
-              const pct = contextUsage.percent;
-              tooltipParts.push(`context: ${pct !== null ? pct.toFixed(1) + "%" : "unknown"} of ${contextUsage.contextWindow.toLocaleString()} tokens`);
+            if (topBarContextUsage?.contextWindow) {
+              const pct = topBarContextUsage.percent;
+              tooltipParts.push(`context: ${pct !== null ? pct.toFixed(1) + "%" : "unknown"} of ${topBarContextUsage.contextWindow.toLocaleString()} tokens`);
             }
             const tooltip = tooltipParts.join("  |  ");
 
@@ -768,12 +769,7 @@ export function AppShell() {
                 onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
                 onMouseLeave={(e) => { e.currentTarget.style.color = activeTopPanel === "session" ? "var(--text)" : "var(--text-muted)"; }}
               >
-                {isMobile && (
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" />
-                  </svg>
-                )}
-                {!isMobile && t && t.input > 0 && (
+                {t && t.input > 0 && (
                   <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
                     <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
                       <line x1="5" y1="8.5" x2="5" y2="1.5" /><polyline points="2 4 5 1.5 8 4" />
@@ -781,7 +777,7 @@ export function AppShell() {
                     {fmt(t.input)}
                   </span>
                 )}
-                {!isMobile && t && t.output > 0 && (
+                {t && t.output > 0 && (
                   <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
                     <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
                       <line x1="5" y1="1.5" x2="5" y2="8.5" /><polyline points="2 6 5 8.5 8 6" />
@@ -789,7 +785,7 @@ export function AppShell() {
                     {fmt(t.output)}
                   </span>
                 )}
-                {!isMobile && t && t.cacheRead > 0 && (
+                {t && t.cacheRead > 0 && (
                   <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
                     <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M8.5 5a3.5 3.5 0 1 1-1-2.45" /><polyline points="6.5 1.5 8.5 2.5 7.5 4.5" />
@@ -797,7 +793,7 @@ export function AppShell() {
                     {fmt(t.cacheRead)}
                   </span>
                 )}
-                {!isMobile && costStr && (
+                {costStr && (
                   <span style={{ display: "flex", alignItems: "center", color: "var(--text)", fontWeight: 500 }}>
                     {costStr}
                   </span>
