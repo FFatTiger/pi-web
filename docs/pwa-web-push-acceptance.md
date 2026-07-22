@@ -28,37 +28,40 @@
 ## 1. Desktop Chrome or Edge over HTTPS
 
 - [ ] Open pi-web in desktop Chrome or Edge over HTTPS and authenticate.
-- [ ] Confirm the install UI appears, install the PWA, and launch it in standalone mode.
-- [ ] Use the explicit notification control to enable notifications; confirm no permission request occurred before that click.
-- [ ] Send the fixed test notification.
-- [ ] Click the system notification.
+- [ ] Confirm Pi Web shows **no** install help button, notification bell, or enable/test/disable popover.
+- [ ] Confirm the browser’s own installability still works (address-bar / menu install) when criteria are met; install the PWA and launch it in standalone mode if desired.
+- [ ] With notification permission still `default`, after the authenticated Push status check succeeds, confirm **one** automatic permission prompt may appear. Allow it once.
+- [ ] Reload the page and confirm the versioned marker prevents a second automatic prompt.
+- [ ] Confirm no Pi Web UI can send a fixed test notification (use a real Agent settle or a controlled server-side path if testing delivery).
+- [ ] Click a delivered system notification when available.
 - [ ] Deploy or expose a newer Service Worker and confirm the update banner appears.
 
-**Expected:** installation succeeds; standalone launch remains authenticated according to normal cookie policy; opt-in creates a subscription; the test notification uses the fixed local title/body; clicking focuses or opens the same-origin app; the new worker waits until the user confirms the update.
+**Expected:** no Pi Web install/notification guidance UI; at most one automatic permission attempt while `default` and marker absent; granting creates/reuses and posts a subscription; later permission changes are only via browser/system settings; standalone launch remains authenticated according to normal cookie policy; notification click focuses or opens the same-origin app; the new worker waits until the user confirms the update. Do **not** require the automatic prompt on every browser—if the browser suppresses it without a gesture, Pi Web stays quiet and the marker still prevents repeats.
 
-**Evidence:** installed-app screenshot, notification screenshot, same-origin URL after click, update-banner screenshot.
+**Evidence:** no-guidance-UI screenshot, permission state, installed-app screenshot (optional), notification screenshot if delivered, same-origin URL after click, update-banner screenshot.
 
 ## 2. Android Chromium over HTTPS
 
-- [ ] Install from Android Chromium and launch the installed app.
-- [ ] Enable notifications from the explicit control.
+- [ ] Install via the browser’s install affordance (not a Pi Web button) and launch the installed app.
+- [ ] Authenticate; allow the single automatic notification permission prompt if shown.
+- [ ] Reload and confirm no second automatic prompt.
 - [ ] Start an Agent run, wait until the server accepts it, then close the installed app.
 - [ ] Wait for the run to settle and click the notification.
 
-**Expected:** closing the app does not stop the accepted server-side run; exactly one generic completion Push arrives after final settle; clicking opens/focuses pi-web at the matching session.
+**Expected:** closing the app does not stop the accepted server-side run; exactly one generic completion Push arrives after final settle when permission is granted and a subscription exists; clicking opens/focuses pi-web at the matching session. No Pi Web enable control is required or present.
 
 **Evidence:** device/browser versions, settled time, notification screenshot, opened session screenshot.
 
 ## 3. iOS 16.4+ or iPadOS 16.4+
 
-- [ ] In Safari, add pi-web to the Home Screen before attempting notification opt-in.
+- [ ] In Safari, add pi-web to the Home Screen (browser Share sheet—Pi Web does not show install guidance).
 - [ ] Launch the installed standalone PWA and authenticate.
-- [ ] Enable notifications from the explicit control.
-- [ ] Start an Agent run, close the PWA, wait for settle, and click the notification.
+- [ ] Observe whether the automatic permission attempt appears. iOS may suppress auto prompts; if suppressed, Pi Web stays quiet and does not show guidance.
+- [ ] If permission becomes `granted` (auto or via system settings), start an Agent run, close the PWA, wait for settle, and click the notification.
 
-**Expected:** the ordinary Safari tab only shows installation guidance; permission is requested from the installed standalone PWA after a user gesture; a generic completion Push arrives and opens the matching same-origin session.
+**Expected:** ordinary Safari tab has no Pi Web install/notification guidance UI; Push requires the installed Home Screen PWA on iOS 16.4+; automatic request is best-effort only and may not surface without a gesture; a generic completion Push arrives only when permission/subscription exist and opens the matching same-origin session.
 
-**Evidence:** OS/device version, Home Screen icon, standalone notification control, notification/click screenshots.
+**Evidence:** OS/device version, Home Screen icon, permission state, notification/click screenshots when applicable.
 
 ## 4. Visible foreground ACK suppresses system Push
 
@@ -126,15 +129,15 @@
 
 ## 11. Password change and subscription epoch
 
-- [ ] Enable Push under password A and record only the endpoint hostname.
+- [ ] Under password A, ensure notification permission is granted (via the one-time auto attempt or browser settings) and a subscription exists; record only the endpoint hostname.
 - [ ] Change the application password to B and restart pi-web.
 - [ ] Complete a run before re-authenticating with B.
-- [ ] Log in with B in the same browser and allow normal Push reconciliation without requesting notification permission again.
+- [ ] Log in with B in the same browser and allow normal headless Push reconciliation without another permission prompt (marker already set; permission remains `granted`).
 - [ ] Complete another run.
 
-**Expected:** the password-A subscription is not selected under password B. After login, the browser's existing Push subscription is posted again and rebound to the new password fingerprint without another permission prompt; subsequent delivery works.
+**Expected:** the password-A subscription is not selected under password B. After login, the browser's existing Push subscription is posted again and rebound to the new password fingerprint without another permission prompt; subsequent delivery works. There is no Pi Web enable control or subscription-status UI to click.
 
-**Evidence:** permission state, safe subscription-status UI, notification result before/after rebind.
+**Evidence:** permission state, safe server-side status/logs if needed (no secrets), notification result before/after rebind.
 
 ## 12. Push state invisibility and direct denial
 

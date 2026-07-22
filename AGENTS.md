@@ -125,13 +125,10 @@ components/
   FileViewer.tsx      file content in a tab
   TabBar.tsx          tab bar (Chat + open file tabs)
   LoginForm.tsx       application gate login form
-  AuthControls.tsx    shell gate status + logout control
+  AuthControls.tsx    shell gate status + logout control (compact in sidebar header)
   AppToast.tsx        fixed-copy rendered completion toast
   OfflineBanner.tsx   offline state UI
-  PwaInstallPrompt.tsx explicit install / iOS guidance
-  PwaSettingsControl.tsx installed-mode PWA settings entry
   PwaUpdateBanner.tsx user-confirmed waiting-worker update UI
-  PushNotificationControl.tsx explicit notification opt-in/test/disable
 
 proxy.ts              Next.js 16 request gate (replaces middleware.ts)
 
@@ -142,10 +139,9 @@ hooks/
   useDragDrop.ts      shared drag/drop state
   useIsMobile.ts      responsive breakpoint hook
   useOnlineStatus.ts  browser online/offline state
-  usePwaInstall.ts    install prompt, standalone, and iOS guidance state
   usePwaUpdate.ts     SW registration and user-confirmed update lifecycle
   useTheme.ts         theme state
-  useWebPush.ts       browser subscription reconciliation and controls
+  useWebPush.ts       headless one-time auto permission + subscription reconciliation
 
 public/
   sw.js               conservative offline/update/Push Service Worker
@@ -233,7 +229,7 @@ Newer pi emits `compaction_start` / `compaction_end`; older versions emitted `au
 - Exact public gate bypasses are `/manifest.webmanifest`, `/sw.js`, `/offline.html`, and bounded `/icons/*`. Lookalikes and every `/api/push/*` route remain protected. `/sw.js` has root scope and exact no-cache headers.
 - Register the Service Worker on localhost/development as well as production. Its cache may contain only `/offline.html`, `/manifest.webmanifest`, and the five public icons—never `/api/*`, SSE, auth HTML, app HTML/RSC, Next chunks, sessions, prompts, code, paths, or tool output. There is no Background Sync.
 - Do not call `skipWaiting()` at install time. A waiting worker activates only after user confirmation; only the confirming tab auto-reloads, while other controlled tabs show an activated-version prompt.
-- Notification permission is requested only by the explicit Enable action. iOS/iPadOS 16.4+ requires an installed Home Screen PWA; an ordinary Safari tab shows guidance only.
+- Notification permission is attempted once automatically while state is `default` and the versioned local marker `pi-web:push-auto-prompt-v1` is absent. Write the marker before `Notification.requestPermission()` so StrictMode remounts and reloads do not re-prompt. Denied/default/unsupported/server-unavailable paths stay silent—there is no enable/test/disable/install guidance UI. Revocation is browser/system settings only. iOS/iPadOS 16.4+ still requires an installed Home Screen PWA for Push, and browsers may suppress automatic permission prompts without a user gesture; remain quiet when suppressed. Manifest/SW installability remains without Pi Web install UI.
 - Payloads are the exact v1 `agent`/`test` union in `push-types.ts`; notification title/body/tag/URL are derived locally. Never accept arbitrary presentation or navigation from the server.
 - Push config is independent from the application gate, but delivery/subscription requires the gate enabled. State is atomic `0600`; subscriptions are HMAC-bound to the current password epoch and capped at 20.
 - Every Push request passes application auth, exact same-origin checks, JSON media type, and a true streaming 16 KiB limit. Do not replace it with a post-read length check.
