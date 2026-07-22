@@ -23,8 +23,6 @@ test("update hook registers root sw and reloads only with a tab-local request", 
 test("update hook ignores first control acquisition and recovers stuck applying", () => {
   assert.match(update, /hadControllerRef/);
   assert.match(update, /action === "ignore"|action !== "ignore"|case "ignore"|if \(action === "reload"\)/);
-  // Production-only registration protects Next dev HMR.
-  assert.match(update, /process\.env\.NODE_ENV\s*!==\s*["']production["']/);
   // updatefound race: inspect current state immediately after attaching statechange.
   assert.match(update, /addEventListener\("statechange"[\s\S]{0,200}onStateChange\(\)/);
   // Bounded applying recovery keeps UI retryable without auto-reload.
@@ -32,6 +30,14 @@ test("update hook ignores first control acquisition and recovers stuck applying"
   assert.match(update, /setApplying\(false\)/);
   assert.doesNotMatch(update, /localStorage.*reloadRequested/);
   assert.doesNotMatch(update, /BroadcastChannel/);
+});
+
+test("update hook registers SW on localhost/dev, not production-only", () => {
+  // Approved design requires SW registration in development so install/Push can be
+  // tested; conservative SW intentionally does not touch HMR assets.
+  assert.match(update, /serviceWorker\.register\("\/sw\.js", \{ scope: "\/" \}\)/);
+  assert.doesNotMatch(update, /process\.env\.NODE_ENV\s*!==\s*["']production["']/);
+  assert.doesNotMatch(update, /process\.env\.NODE_ENV\s*===\s*["']production["']/);
 });
 
 test("AppShell reuses a stable empty running set placeholder", () => {
