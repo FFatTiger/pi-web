@@ -64,6 +64,28 @@ export function shouldAttemptAutoPrompt(
   return permission === "default" && !markerPresent;
 }
 
+/**
+ * Synchronously claims the one automatic permission attempt. The in-memory
+ * flag is set before persistence so StrictMode/re-entrant callers cannot issue
+ * a duplicate prompt even when localStorage is unavailable.
+ */
+export function createAutoPromptClaim(
+  readMarker: () => boolean,
+  writeMarker: () => void,
+): (permission: NotificationPermission | "unsupported") => boolean {
+  let claimed = false;
+  return (permission) => {
+    if (claimed || !shouldAttemptAutoPrompt(permission, readMarker())) return false;
+    claimed = true;
+    try {
+      writeMarker();
+    } catch {
+      // The in-memory claim still prevents another attempt in this page.
+    }
+    return true;
+  };
+}
+
 async function responseError(response: Response): Promise<Error> {
   let body: SafeErrorBody | null = null;
   try {
@@ -111,12 +133,13 @@ function readAutoPromptMarker(): boolean {
 }
 
 function writeAutoPromptMarker(): void {
-  try {
-    localStorage.setItem(AUTO_PROMPT_KEY, "1");
-  } catch {
-    // Marker write failure still allows a best-effort single request.
-  }
+  localStorage.setItem(AUTO_PROMPT_KEY, "1");
 }
+
+const claimAutoPrompt = createAutoPromptClaim(
+  readAutoPromptMarker,
+  writeAutoPromptMarker,
+);
 
 async function requirePushServer(): Promise<void> {
   const status = await fetchJson<PushStatusResponse>("/api/push/status");
@@ -166,10 +189,8 @@ export function useWebPush(): void {
     // (policy helper remains the unit-tested decision source for marker/permission combos).
     if (
       Notification.permission === "default" &&
-      shouldAttemptAutoPrompt(permission, readAutoPromptMarker())
+      claimAutoPrompt(permission)
     ) {
-      // Marker MUST be written before requestPermission to survive StrictMode remounts.
-      writeAutoPromptMarker();
       try {
         permission = await Notification.requestPermission();
       } catch {
