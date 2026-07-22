@@ -82,6 +82,36 @@ PI_WEB_AUTH_DISABLED=true pi-web
 - After changing the config file or auth-related environment variables, restart pi-web so the new settings take effect.
 - For LAN or public exposure, use a strong password, serve over HTTPS, and restrict access with a firewall or reverse proxy. Prefer binding to localhost when you do not need remote access.
 
+### PWA and Web Push
+
+pi-web can be installed as a Progressive Web App and optionally send system notifications when an Agent run settles. Closing the browser or PWA does **not** stop an Agent the server already accepted: as long as the pi-web process, host, and model network stay up, the run continues. Foreground traffic stays HTTP + SSE; Web Push starts only after server-side `agent_settled`.
+
+Config lives in the same file as the application gate: `$PI_CODING_AGENT_DIR/pi-web.json` (default `~/.pi/agent/pi-web.json`). There are **no** VAPID environment variables—keys are generated and stored by pi-web.
+
+```json
+{
+  "auth": { "password": "replace-me", "disabled": false },
+  "push": { "disabled": false, "subject": "mailto:owner@example.com" }
+}
+```
+
+```bash
+PI_WEB_PUSH_DISABLED=true pi-web
+PI_WEB_PUSH_SUBJECT=mailto:owner@example.com pi-web
+```
+
+- Precedence for Push: environment (`PI_WEB_PUSH_DISABLED`, `PI_WEB_PUSH_SUBJECT`) overrides `push` in `pi-web.json`; missing `push.disabled` defaults to enabled (`false`); missing subject defaults to `https://github.com/agegr/pi-web`. Subject must be a `mailto:` or `https:` URL. Invalid values lock Push only (safe status error)—they do not break the rest of pi-web.
+- Push requires the application password gate to be **enabled** and the user authenticated. With the gate disabled, subscription APIs refuse Push.
+- Browsers need a secure context: **HTTPS**, or **localhost** for local testing. Enable notifications only after an explicit user gesture (settings / bell control). iOS / iPadOS **16.4+** requires Add to Home Screen and enabling Push from the installed standalone PWA.
+- Visible page with a live running SSE connection: after settle, AppShell shows an in-app toast and ACKs within about **1500ms** so system Push is suppressed. If ACK is missing (hidden, frozen, closed, or blocked), system Push is sent. Late ACK after timeout is ignored; a rare duplicate toast+Push is accepted.
+- Notification copy is generic only (`Agent run finished` / `Agent run failed` / test text). No prompts, replies, paths, or tool output. Abort does not notify; intermediate retries/compaction do not; exactly one notification at final `agent_settled`.
+- Service Worker caches only public PWA assets (`/offline.html`, `/manifest.webmanifest`, icons). No session, API, HTML app shell, Next chunks, or Background Sync. Offline navigation shows a generic fallback page.
+- Private state file: `$PI_CODING_AGENT_DIR/pi-web-push.json` (default `~/.pi/agent/pi-web-push.json`), mode **0600**. Treat it like a secret in backups. Corruption locks Push until fixed (no silent key regeneration). Password change invalidates old subscription fingerprints; re-login with the new password rebinds the existing browser subscription without another permission prompt.
+- Reverse proxy: terminate HTTPS correctly, do **not** buffer SSE, and keep long-lived connections open for `/api/agent/*/events` and `/api/agent/running/events`.
+- Updates: a banner offers reload; automatic reload is disabled so an open session is not replaced mid-run. Confirming reload applies only in that tab; other tabs prompt for the activated version.
+
+Manual platform matrix (not automated): [docs/pwa-web-push-acceptance.md](./docs/pwa-web-push-acceptance.md).
+
 ## Development
 
 ```bash
@@ -113,10 +143,12 @@ app/
     home/           # current user home directory
     models/         # available models, default model, thinking levels
     models-config/  # read/write models.json and test models
+    push/           # status, VAPID public key, subscribe, presence, test
     sessions/       # session reads, rename, delete, context, HTML export
     skills/         # skill listing, search, install, enable/disable
+  manifest.ts         # Web App Manifest
 components/
-  AppShell.tsx        # main layout, URL state, top panels, file tabs
+  AppShell.tsx        # main layout, URL state, top panels, file tabs, PWA/Push shell
   SessionSidebar.tsx  # project selector, session tree, Explorer
   ChatWindow.tsx      # messages, SSE, image drag/drop, minimap
   ChatInput.tsx       # input bar, model/tools/thinking/compact/slash controls
@@ -125,19 +157,25 @@ components/
   SkillsConfig.tsx    # skill management panel
   FileExplorer.tsx    # file tree
   FileViewer.tsx      # source, diff, image, audio, PDF, DOCX preview
+  AppToast.tsx / OfflineBanner.tsx / Pwa* / PushNotificationControl.tsx
 lib/
   rpc-manager.ts      # AgentSessionWrapper lifecycle and global registry
   session-reader.ts   # parses .jsonl session files and branch contexts
   normalize.ts        # normalizes toolCall field names
-  file-access.ts      # file read safety boundary
+  file-access.ts      # file read safety boundary (+ Push secret deny)
   file-paths.ts       # path encoding and relative path helpers
   markdown.ts         # Markdown/Mermaid/KaTeX plugin configuration
   pi-types.ts         # pi-related types
+  push-*.ts / pwa-lifecycle.ts / settled-cycle.ts
 hooks/
   useAgentSession.ts  # session loading, command sending, SSE state machine
+  useAppPresence.ts   # single running SSE + toast ACK
+  usePwaInstall.ts / usePwaUpdate.ts / useWebPush.ts / useOnlineStatus.ts
   useAudio.ts         # completion sound
   useDragDrop.ts      # image drag/drop
   useTheme.ts         # theme switching
+public/
+  sw.js / offline.html / icons/
 bin/
   pi-web.js           # npm CLI entrypoint
 ```
