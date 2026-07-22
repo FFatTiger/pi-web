@@ -54,3 +54,113 @@ self.addEventListener("fetch", (event) => {
 self.addEventListener("message", (event) => {
   if (event.data?.type === "SKIP_WAITING") self.skipWaiting();
 });
+
+function ownKeysEqual(value, keys) {
+  const actual = Object.keys(value).sort();
+  const expected = [...keys].sort();
+  return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
+}
+
+function boundedText(value, max) {
+  return typeof value === "string" && value.length > 0 && value.length <= max;
+}
+
+function parseNotificationPayload(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  if (value.version !== 1 || !boundedText(value.id, 128)) return null;
+  if (value.kind === "test") {
+    return ownKeysEqual(value, ["version", "id", "kind"])
+      ? { version: 1, id: value.id, kind: "test" }
+      : null;
+  }
+  if (value.kind === "agent") {
+    if (!ownKeysEqual(value, ["version", "id", "kind", "sessionId", "result"])) return null;
+    if (!boundedText(value.sessionId, 256)) return null;
+    if (value.result !== "success" && value.result !== "error") return null;
+    return {
+      version: 1,
+      id: value.id,
+      kind: "agent",
+      sessionId: value.sessionId,
+      result: value.result,
+    };
+  }
+  return null;
+}
+
+function getNotificationPresentation(payload) {
+  if (payload.kind === "test") {
+    return {
+      title: "Pi Agent Web",
+      body: "Test notification delivered",
+      tag: "pi-web-test",
+      url: "/",
+    };
+  }
+  const encoded = encodeURIComponent(payload.sessionId);
+  return {
+    title: "Pi Agent Web",
+    body: payload.result === "success" ? "Agent run finished" : "Agent run failed",
+    tag: `pi-web-agent-${encoded}-${payload.result}`,
+    url: `/?session=${encoded}`,
+  };
+}
+
+self.addEventListener("push", (event) => {
+  event.waitUntil((async () => {
+    let raw;
+    try {
+      raw = event.data?.json();
+    } catch {
+      return;
+    }
+    const payload = parseNotificationPayload(raw);
+    if (!payload) return;
+    const view = getNotificationPresentation(payload);
+    await self.registration.showNotification(view.title, {
+      body: view.body,
+      tag: view.tag,
+      icon: "/icons/icon-192.png",
+      badge: "/icons/badge-96.png",
+      data: payload,
+    });
+  })());
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  event.waitUntil((async () => {
+    const payload = parseNotificationPayload(event.notification.data);
+    const relative = payload ? getNotificationPresentation(payload).url : "/";
+    const target = new URL(relative, self.location.origin).href;
+    const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    const existing = windows.find((client) => {
+      try {
+        return new URL(client.url).origin === self.location.origin;
+      } catch {
+        return false;
+      }
+    });
+    if (existing) {
+      await existing.navigate(target);
+      await existing.focus();
+      return;
+    }
+    await self.clients.openWindow(target);
+  })());
+});
+
+self.addEventListener("pushsubscriptionchange", (event) => {
+  event.waitUntil((async () => {
+    const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    for (const client of windows) {
+      try {
+        if (new URL(client.url).origin === self.location.origin) {
+          client.postMessage({ type: "PUSH_SUBSCRIPTION_CHANGED" });
+        }
+      } catch {
+        // Ignore malformed or opaque client URLs.
+      }
+    }
+  })());
+});
