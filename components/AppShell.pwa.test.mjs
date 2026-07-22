@@ -40,8 +40,9 @@ test("update hook registers SW on localhost/dev, not production-only", () => {
   assert.doesNotMatch(update, /process\.env\.NODE_ENV\s*===\s*["']production["']/);
 });
 
-test("AppShell reuses a stable empty running set placeholder", () => {
-  assert.match(shell, /EMPTY_RUNNING|EMPTY_RUNNING_SESSION_IDS|useMemo\(\(\) => new Set/);
+test("AppShell uses presence running set without recreating an empty set each render", () => {
+  assert.match(shell, /const presence = useAppPresence\(\)/);
+  assert.match(shell, /runningSessionIds = presence\.runningSessionIds/);
   assert.doesNotMatch(
     shell,
     /const runningSessionIds = new Set<string>\(\);/,

@@ -18,12 +18,14 @@ import { useIsMobile } from "@/hooks/useIsMobile";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import { usePwaInstall } from "@/hooks/usePwaInstall";
 import { usePwaUpdate } from "@/hooks/usePwaUpdate";
+import { useAppPresence } from "@/hooks/useAppPresence";
 import { copyText } from "@/lib/clipboard";
 import { getFileName } from "@/lib/file-paths";
 import { buildAtMentionText, buildFileAtMentionsText } from "@/lib/file-fuzzy";
 import type { SessionInfo, SessionTreeNode } from "@/lib/types";
 import type { ChatInputHandle } from "./ChatInput";
 import type { SessionStatsInfo } from "@/lib/pi-types";
+import { AppToast } from "./AppToast";
 import { OfflineBanner } from "./OfflineBanner";
 import { PwaInstallPrompt } from "./PwaInstallPrompt";
 import { PwaSettingsControl } from "./PwaSettingsControl";
@@ -31,9 +33,6 @@ import { PwaUpdateBanner } from "./PwaUpdateBanner";
 import { PushNotificationControl } from "./PushNotificationControl";
 
 type SessionCopyField = "file" | "id";
-
-// Task 14 replaces this placeholder with live global running state.
-const EMPTY_RUNNING_SESSION_IDS: Set<string> = new Set();
 
 export function AppShell() {
   const router = useRouter();
@@ -43,7 +42,8 @@ export function AppShell() {
   const online = useOnlineStatus();
   const pwaInstall = usePwaInstall();
   const pwaUpdate = usePwaUpdate();
-  const runningSessionIds = EMPTY_RUNNING_SESSION_IDS;
+  const presence = useAppPresence();
+  const runningSessionIds = presence.runningSessionIds as Set<string>;
   const [selectedSession, setSelectedSession] = useState<SessionInfo | null>(null);
   // When user clicks +, we only store the cwd — no fake session id
   const [newSessionCwd, setNewSessionCwd] = useState<string | null>(null);
@@ -382,6 +382,8 @@ export function AppShell() {
         onInitialRestoreDone={handleInitialRestoreDone}
         refreshKey={refreshKey}
         onSessionDeleted={handleSessionDeleted}
+        liveRunningSessionIds={presence.runningSessionIds}
+        runningAuthoritative={presence.runningAuthoritative}
       />
       <div style={{ padding: "8px", flexShrink: 0, display: "flex", justifyContent: "space-between", gap: 4 }}>
         {([
@@ -1084,6 +1086,29 @@ export function AppShell() {
       applying={pwaUpdate.applying}
       applyUpdate={pwaUpdate.applyUpdate}
       runningSessionIds={runningSessionIds}
+    />
+    <AppToast
+      toast={presence.toast}
+      onShown={(id) => { void presence.acknowledgeToast(id); }}
+      onDismiss={presence.dismissToast}
+      onOpenSession={(sessionId) => {
+        void (async () => {
+          try {
+            const res = await fetch("/api/sessions");
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json() as { sessions?: SessionInfo[] };
+            const sessions = Array.isArray(data.sessions) ? data.sessions : [];
+            const full = sessions.find((item) => item.id === sessionId);
+            if (full) {
+              handleSelectSession(full);
+              return;
+            }
+          } catch {
+            // Fall through to full navigation so ?session= restore can run.
+          }
+          window.location.assign(`/?session=${encodeURIComponent(sessionId)}`);
+        })();
+      }}
     />
 
     {/* Fixed bottom-right authentication and notification controls */}
