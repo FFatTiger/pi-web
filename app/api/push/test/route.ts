@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { parseBasicPushEndpoint } from "@/lib/push-endpoint";
 import {
   isResponse,
   pushError,
@@ -21,28 +22,6 @@ export type TestDeps = {
   createId(): string;
 };
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const proto = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null;
-}
-
-function parseBasicEndpoint(value: unknown): string | null {
-  if (!isPlainObject(value)) return null;
-  const keys = Object.keys(value);
-  if (keys.length !== 1 || keys[0] !== "endpoint") return null;
-  const endpoint = value.endpoint;
-  if (typeof endpoint !== "string" || endpoint.length === 0) return null;
-  if (Buffer.byteLength(endpoint, "utf8") > 4096) return null;
-  try {
-    const url = new URL(endpoint);
-    if (url.protocol !== "https:" || !url.hostname || url.username || url.password) return null;
-  } catch {
-    return null;
-  }
-  return endpoint;
-}
-
 function codeOf(error: unknown): string | undefined {
   if (!error || typeof error !== "object" || !("code" in error)) return undefined;
   const code = (error as { code?: unknown }).code;
@@ -55,7 +34,7 @@ export function createTestHandler(deps: TestDeps): (request: Request) => Promise
     if (isResponse(authenticated)) return authenticated;
     const body = await readPushJsonBody(request);
     if (isResponse(body)) return body;
-    const endpoint = parseBasicEndpoint(body);
+    const endpoint = parseBasicPushEndpoint(body);
     if (!endpoint) {
       return pushError(400, "PUSH_INVALID_SUBSCRIPTION", "Push subscription is invalid");
     }
