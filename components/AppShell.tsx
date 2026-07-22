@@ -50,13 +50,22 @@ export function AppShell() {
   const [modelsRefreshKey, setModelsRefreshKey] = useState(0);
   const [skillsConfigOpen, setSkillsConfigOpen] = useState(false);
   const [pluginsConfigOpen, setPluginsConfigOpen] = useState(false);
+  const [initialSessionId] = useState<string | null>(() => searchParams.get("session"));
+  // True once the initial ?session= URL param has been resolved (or confirmed absent)
+  const [initialSessionRestored, setInitialSessionRestored] = useState<boolean>(() => !searchParams.get("session"));
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileSidebarReady, setMobileSidebarReady] = useState(false);
-  // On mobile the sidebar is an overlay drawer; hide it by default so the chat
-  // is visible on load. Runs once the breakpoint resolves after hydration.
+  // On mobile, an empty entry starts in the session chooser. A direct session
+  // URL keeps the drawer closed while restoration is pending; if the target is
+  // missing, the chooser reopens once resolution completes.
   useEffect(() => {
-    if (isMobile) setSidebarOpen(false);
-  }, [isMobile]);
+    if (!isMobile) return;
+    if (initialSessionId && !initialSessionRestored) {
+      setSidebarOpen(false);
+    } else if (!selectedSession && !newSessionCwd) {
+      setSidebarOpen(true);
+    }
+  }, [initialSessionId, initialSessionRestored, isMobile, newSessionCwd, selectedSession]);
   useEffect(() => {
     setMobileSidebarReady(true);
   }, []);
@@ -162,13 +171,10 @@ export function AppShell() {
     if (mentions) chatInputRef.current?.insertText(mentions);
   }, []);
 
-  const [initialSessionId] = useState<string | null>(() => searchParams.get("session"));
   const [activeCwd, setActiveCwd] = useState<string | null>(null);
   const [activeProjectRoot, setActiveProjectRoot] = useState<string | null>(null);
   // Per-project remembered worktree/cwd for this page lifetime only.
   const [projectCwds, setProjectCwds] = useState<Map<string, string>>(() => new Map());
-  // True once the initial ?session= URL param has been resolved (or confirmed absent)
-  const [initialSessionRestored, setInitialSessionRestored] = useState<boolean>(() => !searchParams.get("session"));
   // Ref mirror so handleSelectProject can resolve remembered cwds without
   // depending on projectCwds identity (avoids URL-restore effect loops).
   const projectCwdsRef = useRef(projectCwds);
