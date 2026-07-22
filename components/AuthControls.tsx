@@ -4,8 +4,15 @@ import { useEffect, useState } from "react";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import type { GateStatusResponse } from "@/lib/web-auth-types";
 
-export function AuthControls(): React.ReactElement | null {
+export type AuthControlsProps = { compact?: boolean };
+
+export function AuthControls({ compact = false }: AuthControlsProps): React.ReactElement | null {
   const isMobile = useIsMobile();
+  const iconOnly = compact || isMobile;
+  const controlSize = compact ? 32 : 36;
+  const controlRadius = compact ? 7 : 10;
+  const controlShadow = compact ? "none" : "0 6px 18px rgba(0,0,0,0.12)";
+  const controlPadding = compact || isMobile ? 0 : "0 12px";
   const [status, setStatus] = useState<GateStatusResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [loggingOut, setLoggingOut] = useState(false);
@@ -74,13 +81,14 @@ export function AuthControls(): React.ReactElement | null {
           alignItems: "center",
           justifyContent: "center",
           gap: 6,
-          height: 36,
-          minWidth: 36,
-          padding: isMobile ? 0 : "0 12px",
+          width: compact ? controlSize : undefined,
+          height: controlSize,
+          minWidth: controlSize,
+          padding: controlPadding,
           background: "var(--bg-panel)",
           border: "1px solid var(--border)",
-          borderRadius: 10,
-          boxShadow: "0 6px 18px rgba(0,0,0,0.12)",
+          borderRadius: controlRadius,
+          boxShadow: controlShadow,
           color: "var(--text-muted)",
           cursor: loggingOut ? "wait" : "pointer",
           flexShrink: 0,
@@ -112,7 +120,7 @@ export function AuthControls(): React.ReactElement | null {
           <polyline points="16 17 21 12 16 7" />
           <line x1="21" y1="12" x2="9" y2="12" />
         </svg>
-        {!isMobile && <span>{loggingOut ? "退出中…" : "退出"}</span>}
+        {!iconOnly && <span>{loggingOut ? "退出中…" : "退出"}</span>}
       </button>
     );
   }
@@ -130,19 +138,20 @@ export function AuthControls(): React.ReactElement | null {
           alignItems: "center",
           justifyContent: "center",
           gap: 6,
-          height: 36,
-          minWidth: 36,
-          padding: isMobile ? 0 : "0 12px",
-          borderRadius: 10,
+          width: compact ? controlSize : undefined,
+          height: controlSize,
+          minWidth: controlSize,
+          padding: controlPadding,
+          borderRadius: controlRadius,
           border: "1px solid color-mix(in srgb, #f59e0b 45%, var(--border))",
           color: "#f59e0b",
           background: "color-mix(in srgb, #f59e0b 12%, var(--bg-panel))",
-          boxShadow: "0 6px 18px rgba(0,0,0,0.12)",
+          boxShadow: controlShadow,
           flexShrink: 0,
           overflow: "hidden",
           fontSize: 12,
           whiteSpace: "nowrap",
-          maxWidth: isMobile ? 40 : 240,
+          maxWidth: iconOnly ? 40 : 240,
         }}
       >
         <svg
@@ -161,7 +170,7 @@ export function AuthControls(): React.ReactElement | null {
           <line x1="12" y1="9" x2="12" y2="13" />
           <line x1="12" y1="17" x2="12.01" y2="17" />
         </svg>
-        {!isMobile && (
+        {!iconOnly && (
           <span style={{ display: "flex", flexDirection: "column", minWidth: 0, lineHeight: 1.2 }}>
             <span style={{ fontWeight: 600, color: "#f59e0b" }}>认证已关闭</span>
             <span

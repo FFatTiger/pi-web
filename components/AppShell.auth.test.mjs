@@ -4,36 +4,26 @@ import test from "node:test";
 
 const source = readFileSync(new URL("./AppShell.tsx", import.meta.url), "utf8");
 
-const authImport = source.indexOf('import { AuthControls } from "./AuthControls"');
-const authUsage = source.indexOf("<AuthControls");
 const sidebarContentStart = source.indexOf("const sidebarContent = (");
 const sidebarContentEnd = source.indexOf("return (", sidebarContentStart + 1);
 const sidebarBlock = source.slice(sidebarContentStart, sidebarContentEnd);
-const topBarStart = source.indexOf('{/* Top bar with sidebar toggle */}');
-const topBarEnd = source.indexOf('{/* Top panel dropdown — shared, only one active at a time */}');
+const topBarStart = source.indexOf("{/* Top bar with sidebar toggle */}");
+const topBarEnd = source.indexOf("{/* Top panel dropdown — shared, only one active at a time */}");
 const topBarBlock = source.slice(topBarStart, topBarEnd);
-const bottomRightStart = source.indexOf('{/* Fixed bottom-right authentication and notification controls */}');
-const bottomRightEnd = source.indexOf('{/* Fixed right-corner controls: explorer then file detail */}');
-const bottomRightBlock = source.slice(bottomRightStart, bottomRightEnd);
 
-test("AppShell imports AuthControls", () => {
-  assert.ok(authImport >= 0, "missing AuthControls import");
-  assert.match(source, /import\s*\{\s*AuthControls\s*\}\s*from\s*"\.\/AuthControls"/);
+test("AppShell does not import or render AuthControls", () => {
+  assert.doesNotMatch(source, /import\s*\{\s*AuthControls\s*\}\s*from\s*"\.\/AuthControls"/);
+  assert.doesNotMatch(source, /<AuthControls/);
+  assert.doesNotMatch(source, /Fixed bottom-right authentication/);
 });
 
-test("AuthControls and PushNotificationControl share the fixed bottom-right group", () => {
-  assert.ok(bottomRightStart >= 0 && bottomRightEnd > bottomRightStart, "bottom-right control markers missing");
-  assert.ok(authUsage > bottomRightStart && authUsage < bottomRightEnd, "AuthControls must be in bottom-right fixed control");
-  assert.match(bottomRightBlock, /position:\s*"fixed"/);
-  assert.match(bottomRightBlock, /right:\s*12/);
-  assert.match(bottomRightBlock, /bottom:\s*12/);
-  assert.match(bottomRightBlock, /<PushNotificationControl/);
-  assert.match(bottomRightBlock, /<AuthControls\s*\/>/);
+test("authentication is delegated to SessionSidebar", () => {
+  assert.match(source, /import\s*\{\s*SessionSidebar\s*\}\s*from\s*"\.\/SessionSidebar"/);
+  assert.match(source, /<SessionSidebar[\s\S]*?\/>/);
 });
 
-test("AuthControls is not placed in the sidebar footer", () => {
+test("sidebar content still hosts Models/Skills/Plugins labels", () => {
   assert.ok(sidebarContentStart >= 0 && sidebarContentEnd > sidebarContentStart, "sidebarContent block missing");
-  assert.equal(sidebarBlock.includes("<AuthControls"), false);
   assert.match(sidebarBlock, /label:\s*"Models"/);
   assert.match(sidebarBlock, /label:\s*"Skills"/);
   assert.match(sidebarBlock, /label:\s*"Plugins"/);
@@ -54,7 +44,7 @@ test("session stats remain right-aligned with fixed-button clearance", () => {
 });
 
 test("AuthControls is not placed in the fixed Explorer/File group", () => {
-  const explorerGroupStart = source.indexOf('{/* Fixed right-corner controls: explorer then file detail */}');
+  const explorerGroupStart = source.indexOf("{/* Fixed right-corner controls: explorer then file detail */}");
   assert.ok(explorerGroupStart >= 0, "explorer/file fixed group marker missing");
   const explorerGroupEnd = source.indexOf("{modelsConfigOpen &&", explorerGroupStart);
   assert.ok(explorerGroupEnd > explorerGroupStart, "explorer/file fixed group end missing");
