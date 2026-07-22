@@ -2,6 +2,8 @@ import { createAgentSessionFromServices, createAgentSessionServices, getAgentDir
 import { KeybindingsManager as TuiKeybindingsManager, TUI_KEYBINDINGS } from "@earendil-works/pi-tui";
 import { randomUUID } from "crypto";
 import { invalidateModelsCache } from "./models-cache";
+import { getPushNotifier } from "./push-notifier";
+import { SettledCycleTracker, type SettledCycleSnapshot } from "./settled-cycle";
 import { cacheSessionPath, invalidateSessionListCache } from "./session-reader";
 import type { SlashCommandInfo } from "@earendil-works/pi-coding-agent";
 import type { AgentSessionLike, ExtensionUiContextLike, ToolInfo } from "./pi-types";
@@ -119,8 +121,20 @@ export class AgentSessionWrapper {
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private onDestroyCallback: (() => void) | null = null;
   private _alive = true;
+  private readonly settledCycles: SettledCycleTracker;
+  private readonly settledNotifier: (snapshot: SettledCycleSnapshot) => void | Promise<void>;
 
-  constructor(public readonly inner: AgentSessionLike) {}
+  constructor(
+    public readonly inner: AgentSessionLike,
+    options: { settledNotifier?: (snapshot: SettledCycleSnapshot) => void | Promise<void> } = {},
+  ) {
+    // Capture sessionId at construction for cycle identity; fork/reload must not
+    // retarget an in-flight settled notification to a different session.
+    this.settledCycles = new SettledCycleTracker(this.inner.sessionId);
+    this.settledNotifier =
+      options.settledNotifier ??
+      ((snapshot) => getPushNotifier().handleSettled(snapshot));
+  }
 
   get sessionId(): string {
     return this.inner.sessionId;
@@ -141,6 +155,9 @@ export class AgentSessionWrapper {
   start(): void {
     this.unsubscribe = this.inner.subscribe((event: AgentEvent) => {
       this.resetIdleTimer();
+      // Consume settled cycle before emit so the active cycle is cleared before
+      // any async notification work. Never notify on agent_end alone.
+      const settled = this.settledCycles.accept(event);
       if (event.type === "agent_end") {
         invalidateSessionListCache();
       }
@@ -148,6 +165,17 @@ export class AgentSessionWrapper {
       // Streaming / compaction / tool events flow through here; re-broadcast
       // the running-status snapshot so the sidebar can update live.
       notifyRunningChange();
+      if (settled) {
+        const snapshot = settled;
+        queueMicrotask(() => {
+          void Promise.resolve(this.settledNotifier(snapshot)).catch((error) => {
+            console.error(
+              `[pi-web] settled notification failed for ${snapshot.sessionId} cycle ${snapshot.cycleId}:`,
+              error instanceof Error ? error.message : String(error),
+            );
+          });
+        });
+      }
     });
     this.resetIdleTimer();
     notifyRunningChange();

@@ -6,6 +6,12 @@ import type {
   Theme,
 } from "@earendil-works/pi-coding-agent";
 
+/** Local event shape for runtime willRetry / settled cycle handling. */
+export type PiWebAgentEvent = Omit<AgentSessionEvent, "willRetry"> & {
+  willRetry?: boolean;
+  messages?: unknown[];
+};
+
 export interface ContextUsage {
   percent: number | null;
   contextWindow: number;
