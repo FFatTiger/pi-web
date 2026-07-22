@@ -15,12 +15,19 @@ import { WorkspaceFilePanel, type RightPanelMode } from "./WorkspaceFilePanel";
 import { AuthControls } from "./AuthControls";
 import { useTheme } from "@/hooks/useTheme";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { useOnlineStatus } from "@/hooks/useOnlineStatus";
+import { usePwaInstall } from "@/hooks/usePwaInstall";
+import { usePwaUpdate } from "@/hooks/usePwaUpdate";
 import { copyText } from "@/lib/clipboard";
 import { getFileName } from "@/lib/file-paths";
 import { buildAtMentionText, buildFileAtMentionsText } from "@/lib/file-fuzzy";
 import type { SessionInfo, SessionTreeNode } from "@/lib/types";
 import type { ChatInputHandle } from "./ChatInput";
 import type { SessionStatsInfo } from "@/lib/pi-types";
+import { OfflineBanner } from "./OfflineBanner";
+import { PwaInstallPrompt } from "./PwaInstallPrompt";
+import { PwaSettingsControl } from "./PwaSettingsControl";
+import { PwaUpdateBanner } from "./PwaUpdateBanner";
 
 type SessionCopyField = "file" | "id";
 
@@ -29,6 +36,11 @@ export function AppShell() {
   const searchParams = useSearchParams();
   const { isDark, toggleTheme } = useTheme();
   const isMobile = useIsMobile();
+  const online = useOnlineStatus();
+  const pwaInstall = usePwaInstall();
+  const pwaUpdate = usePwaUpdate();
+  // Task 14 replaces this placeholder with live global running state.
+  const runningSessionIds = new Set<string>();
   const [selectedSession, setSelectedSession] = useState<SessionInfo | null>(null);
   // When user clicks +, we only store the cwd — no fake session id
   const [newSessionCwd, setNewSessionCwd] = useState<string | null>(null);
@@ -1049,6 +1061,28 @@ export function AppShell() {
         onAtMentions={handleAtMentions}
       />
     </div>
+    <OfflineBanner online={online} />
+    <PwaInstallPrompt
+      canInstall={pwaInstall.canInstall}
+      isIos={pwaInstall.isIos}
+      isStandalone={pwaInstall.isStandalone}
+      dismissed={pwaInstall.dismissed}
+      promptInstall={pwaInstall.promptInstall}
+      dismiss={pwaInstall.dismiss}
+    />
+    <PwaSettingsControl
+      isStandalone={pwaInstall.isStandalone}
+      onShowInstallHelp={pwaInstall.resetDismissed}
+      label="Install help"
+    />
+    <PwaUpdateBanner
+      updateAvailable={pwaUpdate.updateAvailable}
+      activatedElsewhere={pwaUpdate.activatedElsewhere}
+      applying={pwaUpdate.applying}
+      applyUpdate={pwaUpdate.applyUpdate}
+      runningSessionIds={runningSessionIds}
+    />
+
     {/* Fixed bottom-right auth control */}
     <div
       style={{
