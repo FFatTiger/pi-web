@@ -852,6 +852,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         // A late agent_end can arrive over SSE after reconcileAgentState
         // already finished this run — don't re-trigger completion.
         if (!agentRunningRef.current) break;
+        // Automatic retries keep the foreground streaming UI active until the
+        // non-retrying agent_end (or prompt_done / server reconciliation).
+        // This is UI-only; Push is triggered solely by server agent_settled.
+        if (event.willRetry === true) {
+          break;
+        }
         agentRunningRef.current = false;
         setAgentRunning(false);
         setAgentPhase(null);

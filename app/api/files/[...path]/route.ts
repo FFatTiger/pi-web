@@ -4,6 +4,8 @@ import path from "path";
 import {
   getAllowedFileRoots,
   isFilePathAllowed,
+  isFilePathDenied,
+  isResolvedFilePathDenied,
   isWindowsAbsolutePath,
   normalizeSlashes,
 } from "@/lib/file-access";
@@ -136,6 +138,13 @@ export async function POST(
       if (validationError) {
         return NextResponse.json({ error: validationError }, { status: 400 });
       }
+      // Deny before inspect so secret names never appear in conflict payloads.
+      for (const name of fileNames) {
+        const destination = path.join(directory, name);
+        if (isFilePathDenied(destination) || isResolvedFilePathDenied(destination)) {
+          return NextResponse.json({ error: "Access denied" }, { status: 403 });
+        }
+      }
       return NextResponse.json(inspectUploadTargets(directory, fileNames));
     }
 
@@ -156,6 +165,14 @@ export async function POST(
       return NextResponse.json({ error: validationError }, { status: 400 });
     }
 
+    // Preflight: deny every destination before inspect/409 so secrets never leak via conflicts.
+    for (const name of fileNames) {
+      const destination = path.join(directory, name);
+      if (isResolvedFilePathDenied(destination)) {
+        return NextResponse.json({ error: "Access denied" }, { status: 403 });
+      }
+    }
+
     const inspection = inspectUploadTargets(directory, fileNames);
     if (strategy === "error" && inspection.conflicts.length > 0) {
       return NextResponse.json({
@@ -173,6 +190,10 @@ export async function POST(
 
     for (const file of files) {
       const destination = path.join(directory, file.name);
+      // Defense in depth after preflight.
+      if (isResolvedFilePathDenied(destination)) {
+        return NextResponse.json({ error: "Access denied" }, { status: 403 });
+      }
       if (conflictSet.has(file.name) && strategy === "skip") {
         skipped.push(file.name);
         continue;
@@ -400,6 +421,10 @@ export async function GET(
     }
     const sessionId = request.nextUrl.searchParams.get("sessionId");
 
+    if (isResolvedFilePathDenied(filePath)) {
+      return NextResponse.json({ error: "Access denied" }, { status: 403 });
+    }
+
     const allowedRoots = await getAllowedFileRoots();
     const allowedByRoot = isFilePathAllowed(filePath, allowedRoots);
     const allowedBySessionReference =
@@ -555,7 +580,11 @@ export async function GET(
     // filesystems without directory type information use the stat fallback.
     const dirents = fs.readdirSync(filePath, { withFileTypes: true });
     const entries = dirents
-      .filter((d) => !IGNORED_NAMES.has(d.name) && !IGNORED_SUFFIXES.some((s) => d.name.endsWith(s)))
+      .filter((d) =>
+        !IGNORED_NAMES.has(d.name) &&
+        !IGNORED_SUFFIXES.some((s) => d.name.endsWith(s)) &&
+        !isResolvedFilePathDenied(path.join(filePath, d.name))
+      )
       .flatMap((d) => {
         const isDir = resolveDirentIsDirectory(d, path.join(filePath, d.name));
         return isDir === null

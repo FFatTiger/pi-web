@@ -645,3 +645,11 @@ span.linenumber {
     transition: none !important;
   }
 }
+
+@media (max-width: 768px) {
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}

@@ -12,15 +12,21 @@ import { PluginsConfig } from "./PluginsConfig";
 import { BranchNavigator } from "./BranchNavigator";
 import { WorktreeSwitcher } from "./WorktreeSwitcher";
 import { WorkspaceFilePanel, type RightPanelMode } from "./WorkspaceFilePanel";
-import { AuthControls } from "./AuthControls";
 import { useTheme } from "@/hooks/useTheme";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { useOnlineStatus } from "@/hooks/useOnlineStatus";
+import { usePwaUpdate } from "@/hooks/usePwaUpdate";
+import { useWebPush } from "@/hooks/useWebPush";
+import { useAppPresence } from "@/hooks/useAppPresence";
 import { copyText } from "@/lib/clipboard";
 import { getFileName } from "@/lib/file-paths";
 import { buildAtMentionText, buildFileAtMentionsText } from "@/lib/file-fuzzy";
 import type { SessionInfo, SessionTreeNode } from "@/lib/types";
 import type { ChatInputHandle } from "./ChatInput";
 import type { SessionStatsInfo } from "@/lib/pi-types";
+import { AppToast } from "./AppToast";
+import { OfflineBanner } from "./OfflineBanner";
+import { PwaUpdateBanner } from "./PwaUpdateBanner";
 
 type SessionCopyField = "file" | "id";
 
@@ -29,6 +35,11 @@ export function AppShell() {
   const searchParams = useSearchParams();
   const { isDark, toggleTheme } = useTheme();
   const isMobile = useIsMobile();
+  const online = useOnlineStatus();
+  const pwaUpdate = usePwaUpdate();
+  useWebPush();
+  const presence = useAppPresence();
+  const runningSessionIds = presence.runningSessionIds as Set<string>;
   const [selectedSession, setSelectedSession] = useState<SessionInfo | null>(null);
   // When user clicks +, we only store the cwd — no fake session id
   const [newSessionCwd, setNewSessionCwd] = useState<string | null>(null);
@@ -39,13 +50,22 @@ export function AppShell() {
   const [modelsRefreshKey, setModelsRefreshKey] = useState(0);
   const [skillsConfigOpen, setSkillsConfigOpen] = useState(false);
   const [pluginsConfigOpen, setPluginsConfigOpen] = useState(false);
+  const [initialSessionId] = useState<string | null>(() => searchParams.get("session"));
+  // True once the initial ?session= URL param has been resolved (or confirmed absent)
+  const [initialSessionRestored, setInitialSessionRestored] = useState<boolean>(() => !searchParams.get("session"));
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileSidebarReady, setMobileSidebarReady] = useState(false);
-  // On mobile the sidebar is an overlay drawer; hide it by default so the chat
-  // is visible on load. Runs once the breakpoint resolves after hydration.
+  // On mobile, an empty entry starts in the session chooser. A direct session
+  // URL keeps the drawer closed while restoration is pending; if the target is
+  // missing, the chooser reopens once resolution completes.
   useEffect(() => {
-    if (isMobile) setSidebarOpen(false);
-  }, [isMobile]);
+    if (!isMobile) return;
+    if (initialSessionId && !initialSessionRestored) {
+      setSidebarOpen(false);
+    } else if (!selectedSession && !newSessionCwd) {
+      setSidebarOpen(true);
+    }
+  }, [initialSessionId, initialSessionRestored, isMobile, newSessionCwd, selectedSession]);
   useEffect(() => {
     setMobileSidebarReady(true);
   }, []);
@@ -151,13 +171,10 @@ export function AppShell() {
     if (mentions) chatInputRef.current?.insertText(mentions);
   }, []);
 
-  const [initialSessionId] = useState<string | null>(() => searchParams.get("session"));
   const [activeCwd, setActiveCwd] = useState<string | null>(null);
   const [activeProjectRoot, setActiveProjectRoot] = useState<string | null>(null);
   // Per-project remembered worktree/cwd for this page lifetime only.
   const [projectCwds, setProjectCwds] = useState<Map<string, string>>(() => new Map());
-  // True once the initial ?session= URL param has been resolved (or confirmed absent)
-  const [initialSessionRestored, setInitialSessionRestored] = useState<boolean>(() => !searchParams.get("session"));
   // Ref mirror so handleSelectProject can resolve remembered cwds without
   // depending on projectCwds identity (avoids URL-restore effect loops).
   const projectCwdsRef = useRef(projectCwds);
@@ -334,12 +351,6 @@ export function AppShell() {
     setRightPanelMode((mode) => mode === "explorer" ? "closed" : "explorer");
   }, [activeCwd, isMobile]);
 
-  const toggleFilePanel = useCallback(() => {
-    if (fileTabs.length === 0) return;
-    if (isMobile) setSidebarOpen(false);
-    setRightPanelMode((mode) => mode === "file" ? "closed" : "file");
-  }, [fileTabs.length, isMobile]);
-
   const handleViewFullHistory = useCallback(() => {
     if (!selectedSession) return;
     window.open(
@@ -367,6 +378,8 @@ export function AppShell() {
         onInitialRestoreDone={handleInitialRestoreDone}
         refreshKey={refreshKey}
         onSessionDeleted={handleSessionDeleted}
+        liveRunningSessionIds={presence.runningSessionIds}
+        runningAuthoritative={presence.runningAuthoritative}
       />
       <div style={{ padding: "8px", flexShrink: 0, display: "flex", justifyContent: "space-between", gap: 4 }}>
         {([
@@ -596,65 +609,67 @@ export function AppShell() {
             )}
           </button>
           {showChat && (
-            <div style={{ display: "flex", alignItems: "stretch", height: "100%" }}>
+            <div style={{ display: "flex", alignItems: "stretch", height: "100%", minWidth: 0, overflow: "hidden" }}>
               <WorktreeSwitcher
                 projectRoot={activeProjectRoot}
                 cwd={activeCwd}
                 onCwdChange={(cwd, projectRoot) => activateWorkspace(cwd, projectRoot)}
               />
-              <button
-                onClick={handleViewFullHistory}
-                disabled={!selectedSession}
-                title={selectedSession ? "View full history" : "Full history is available after the session is saved"}
-                aria-label="View full history"
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                  height: "100%",
-                  padding: "0 12px",
-                  background: "none",
-                  border: "none",
-                  borderTop: "2px solid transparent",
-                  borderRight: "1px solid var(--border)",
-                  color: selectedSession ? "var(--text-muted)" : "var(--text-dim)",
-                  cursor: selectedSession ? "pointer" : "not-allowed",
-                  opacity: selectedSession ? 1 : 0.45,
-                  flexShrink: 0,
-                  fontSize: 11,
-                  whiteSpace: "nowrap",
-                  transition: "color 0.1s, background 0.1s, opacity 0.1s",
-                }}
-                onMouseEnter={(e) => {
-                  if (!selectedSession) return;
-                  e.currentTarget.style.color = "var(--text)";
-                  e.currentTarget.style.background = "var(--bg-hover)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.color = selectedSession ? "var(--text-muted)" : "var(--text-dim)";
-                  e.currentTarget.style.background = "none";
-                }}
-              >
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
+              {!isMobile && (
+                <button
+                  onClick={handleViewFullHistory}
+                  disabled={!selectedSession}
+                  title={selectedSession ? "View full history" : "Full history is available after the session is saved"}
+                  aria-label="View full history"
                   style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    height: "100%",
+                    padding: "0 12px",
+                    background: "none",
+                    border: "none",
+                    borderTop: "2px solid transparent",
+                    borderRight: "1px solid var(--border)",
                     color: selectedSession ? "var(--text-muted)" : "var(--text-dim)",
+                    cursor: selectedSession ? "pointer" : "not-allowed",
+                    opacity: selectedSession ? 1 : 0.45,
                     flexShrink: 0,
+                    fontSize: 11,
+                    whiteSpace: "nowrap",
+                    transition: "color 0.1s, background 0.1s, opacity 0.1s",
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!selectedSession) return;
+                    e.currentTarget.style.color = "var(--text)";
+                    e.currentTarget.style.background = "var(--bg-hover)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.color = selectedSession ? "var(--text-muted)" : "var(--text-dim)";
+                    e.currentTarget.style.background = "none";
                   }}
                 >
-                  <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
-                  <path d="M3 3v5h5" />
-                  <path d="M12 7v5l3 2" />
-                </svg>
-                {!isMobile && <span>Full history</span>}
-              </button>
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    style={{
+                      color: selectedSession ? "var(--text-muted)" : "var(--text-dim)",
+                      flexShrink: 0,
+                    }}
+                  >
+                    <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+                    <path d="M3 3v5h5" />
+                    <path d="M12 7v5l3 2" />
+                  </svg>
+                  <span>Full history</span>
+                </button>
+              )}
               <BranchNavigator
                 tree={branchTree}
                 activeLeafId={branchActiveLeafId}
@@ -666,34 +681,36 @@ export function AppShell() {
                 onToggle={() => toggleTopPanel("branches")}
                 hasSession
               />
-              <button
-                ref={systemBtnRef}
-                onClick={() => toggleTopPanel("system")}
-                title="System prompt"
-                aria-label="System prompt"
-                aria-pressed={activeTopPanel === "system"}
-                style={{
-                  display: "flex", alignItems: "center", gap: 6,
-                  height: "100%", padding: "0 12px",
-                  background: activeTopPanel === "system" ? "var(--bg-selected)" : "none",
-                  border: "none",
-                  borderTop: activeTopPanel === "system" ? "2px solid var(--accent)" : "2px solid transparent",
-                  borderRight: "1px solid var(--border)",
-                  cursor: "pointer",
-                  color: activeTopPanel === "system" ? "var(--text)" : "var(--text-muted)",
-                  fontSize: 11, whiteSpace: "nowrap", transition: "color 0.1s, background 0.1s",
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
-                onMouseLeave={(e) => { e.currentTarget.style.color = activeTopPanel === "system" ? "var(--text)" : "var(--text-muted)"; }}
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: systemPrompt ? "var(--accent)" : "var(--text-dim)", flexShrink: 0 }}>
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                  <polyline points="14 2 14 8 20 8" />
-                  <line x1="8" y1="13" x2="16" y2="13" />
-                  <line x1="8" y1="17" x2="13" y2="17" />
-                </svg>
-                {!isMobile && <span>System</span>}
-              </button>
+              {!isMobile && (
+                <button
+                  ref={systemBtnRef}
+                  onClick={() => toggleTopPanel("system")}
+                  title="System prompt"
+                  aria-label="System prompt"
+                  aria-pressed={activeTopPanel === "system"}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 6,
+                    height: "100%", padding: "0 12px",
+                    background: activeTopPanel === "system" ? "var(--bg-selected)" : "none",
+                    border: "none",
+                    borderTop: activeTopPanel === "system" ? "2px solid var(--accent)" : "2px solid transparent",
+                    borderRight: "1px solid var(--border)",
+                    cursor: "pointer",
+                    color: activeTopPanel === "system" ? "var(--text)" : "var(--text-muted)",
+                    fontSize: 11, whiteSpace: "nowrap", transition: "color 0.1s, background 0.1s",
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.color = activeTopPanel === "system" ? "var(--text)" : "var(--text-muted)"; }}
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: systemPrompt ? "var(--accent)" : "var(--text-dim)", flexShrink: 0 }}>
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                    <line x1="8" y1="13" x2="16" y2="13" />
+                    <line x1="8" y1="17" x2="13" y2="17" />
+                  </svg>
+                  <span>System</span>
+                </button>
+              )}
             </div>
           )}
           {/* Session stats — right-aligned in top bar */}
@@ -703,13 +720,14 @@ export function AppShell() {
             const fmt = (n: number) => n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(0)}k` : String(n);
             const costStr = c > 0 ? (c >= 0.01 ? `$${c.toFixed(2)}` : `<$0.01`) : null;
 
+            const topBarContextUsage = contextUsage ?? sessionStats?.contextUsage ?? null;
             let ctxColor = "var(--text-muted)";
             let ctxStr: string | null = null;
-            if (contextUsage?.contextWindow) {
-              const pct = contextUsage.percent;
+            if (topBarContextUsage?.contextWindow) {
+              const pct = topBarContextUsage.percent;
               if (pct !== null && pct > 90) ctxColor = "#ef4444";
               else if (pct !== null && pct > 70) ctxColor = "rgba(234,179,8,0.95)";
-              ctxStr = pct !== null ? `${pct.toFixed(0)}% / ${fmt(contextUsage.contextWindow)}` : `? / ${fmt(contextUsage.contextWindow)}`;
+              ctxStr = pct !== null ? `${pct.toFixed(0)}% / ${fmt(topBarContextUsage.contextWindow)}` : `? / ${fmt(topBarContextUsage.contextWindow)}`;
             }
 
             const tooltipParts: string[] = [];
@@ -720,9 +738,9 @@ export function AppShell() {
               tooltipParts.push(`cache write: ${t.cacheWrite.toLocaleString()}`);
               if (c > 0) tooltipParts.push(`cost: $${c.toFixed(4)}`);
             }
-            if (contextUsage?.contextWindow) {
-              const pct = contextUsage.percent;
-              tooltipParts.push(`context: ${pct !== null ? pct.toFixed(1) + "%" : "unknown"} of ${contextUsage.contextWindow.toLocaleString()} tokens`);
+            if (topBarContextUsage?.contextWindow) {
+              const pct = topBarContextUsage.percent;
+              tooltipParts.push(`context: ${pct !== null ? pct.toFixed(1) + "%" : "unknown"} of ${topBarContextUsage.contextWindow.toLocaleString()} tokens`);
             }
             const tooltip = tooltipParts.join("  |  ");
 
@@ -735,9 +753,10 @@ export function AppShell() {
                 aria-pressed={activeTopPanel === "session"}
                 style={{
                   marginLeft: "auto",
-                  display: "flex", alignItems: "center", gap: 10,
-                  paddingLeft: 12,
-                  paddingRight: rightPanelMode === "closed" ? 84 : 12,
+                  display: "flex", alignItems: "center", gap: isMobile ? 4 : 10,
+                  paddingLeft: isMobile ? 6 : 12,
+                  paddingRight: rightPanelMode === "closed" ? 48 : 12,
+                  flexShrink: 0,
                   height: "100%",
                   background: activeTopPanel === "session" ? "var(--bg-selected)" : "none",
                   border: "none",
@@ -750,12 +769,7 @@ export function AppShell() {
                 onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
                 onMouseLeave={(e) => { e.currentTarget.style.color = activeTopPanel === "session" ? "var(--text)" : "var(--text-muted)"; }}
               >
-                {isMobile && (
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" />
-                  </svg>
-                )}
-                {!isMobile && t && t.input > 0 && (
+                {t && t.input > 0 && (
                   <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
                     <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
                       <line x1="5" y1="8.5" x2="5" y2="1.5" /><polyline points="2 4 5 1.5 8 4" />
@@ -763,7 +777,7 @@ export function AppShell() {
                     {fmt(t.input)}
                   </span>
                 )}
-                {!isMobile && t && t.output > 0 && (
+                {t && t.output > 0 && (
                   <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
                     <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
                       <line x1="5" y1="1.5" x2="5" y2="8.5" /><polyline points="2 6 5 8.5 8 6" />
@@ -771,7 +785,7 @@ export function AppShell() {
                     {fmt(t.output)}
                   </span>
                 )}
-                {!isMobile && t && t.cacheRead > 0 && (
+                {t && t.cacheRead > 0 && (
                   <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
                     <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M8.5 5a3.5 3.5 0 1 1-1-2.45" /><polyline points="6.5 1.5 8.5 2.5 7.5 4.5" />
@@ -779,13 +793,13 @@ export function AppShell() {
                     {fmt(t.cacheRead)}
                   </span>
                 )}
-                {!isMobile && costStr && (
+                {costStr && (
                   <span style={{ display: "flex", alignItems: "center", color: "var(--text)", fontWeight: 500 }}>
                     {costStr}
                   </span>
                 )}
                 {ctxStr && (
-                  <span style={{ display: "flex", alignItems: "center", gap: 4, color: ctxColor }}>
+                  <span style={{ display: "flex", alignItems: "center", gap: 4, color: ctxColor, flexShrink: 0 }}>
                     <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M1 9 L1 5 Q1 1 5 1 Q9 1 9 5 L9 9" /><line x1="1" y1="9" x2="9" y2="9" />
                     </svg>
@@ -1049,19 +1063,39 @@ export function AppShell() {
         onAtMentions={handleAtMentions}
       />
     </div>
-    {/* Fixed bottom-right auth control */}
-    <div
-      style={{
-        position: "fixed",
-        right: 12,
-        bottom: 12,
-        zIndex: 300,
+    <OfflineBanner online={online} />
+    <PwaUpdateBanner
+      updateAvailable={pwaUpdate.updateAvailable}
+      activatedElsewhere={pwaUpdate.activatedElsewhere}
+      applying={pwaUpdate.applying}
+      applyUpdate={pwaUpdate.applyUpdate}
+      runningSessionIds={runningSessionIds}
+    />
+    <AppToast
+      toast={presence.toast}
+      onShown={(id) => { void presence.acknowledgeToast(id); }}
+      onDismiss={presence.dismissToast}
+      onOpenSession={(sessionId) => {
+        void (async () => {
+          try {
+            const res = await fetch("/api/sessions");
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json() as { sessions?: SessionInfo[] };
+            const sessions = Array.isArray(data.sessions) ? data.sessions : [];
+            const full = sessions.find((item) => item.id === sessionId);
+            if (full) {
+              handleSelectSession(full);
+              return;
+            }
+          } catch {
+            // Fall through to full navigation so ?session= restore can run.
+          }
+          window.location.assign(`/?session=${encodeURIComponent(sessionId)}`);
+        })();
       }}
-    >
-      <AuthControls />
-    </div>
+    />
 
-    {/* Fixed right-corner controls: explorer then file detail */}
+    {/* Fixed right-corner control: file explorer */}
     <div
       style={{
         position: "fixed",
@@ -1096,29 +1130,6 @@ export function AppShell() {
           <path d="M4 14h6v6H4z" />
           <path d="M17 14v6" />
           <path d="M14 17h6" />
-        </svg>
-      </button>
-      <button
-        onClick={toggleFilePanel}
-        disabled={fileTabs.length === 0}
-        title={rightPanelMode === "file" ? "Hide file panel" : "Show file panel"}
-        aria-label={rightPanelMode === "file" ? "Hide file panel" : "Show file panel"}
-        aria-pressed={rightPanelMode === "file"}
-        style={{
-          display: "flex", alignItems: "center", justifyContent: "center",
-          width: 36, height: 36, padding: 0,
-          background: "var(--bg-panel)", border: "none",
-          borderLeft: "1px solid var(--border)", borderBottom: "1px solid var(--border)",
-          color: rightPanelMode === "file" ? "var(--text)" : "var(--text-muted)",
-          cursor: fileTabs.length === 0 ? "not-allowed" : "pointer",
-          opacity: fileTabs.length === 0 ? 0.4 : 1,
-          transition: "color 0.12s, opacity 0.12s",
-        }}
-        onMouseEnter={(e) => { if (fileTabs.length > 0) e.currentTarget.style.color = "var(--text)"; }}
-        onMouseLeave={(e) => { e.currentTarget.style.color = rightPanelMode === "file" ? "var(--text)" : "var(--text-muted)"; }}
-      >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <rect x="3" y="3" width="18" height="18" rx="2" /><line x1="15" y1="3" x2="15" y2="21" />
         </svg>
       </button>
     </div>
