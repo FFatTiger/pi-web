@@ -1,13 +1,26 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { createJiti } from "jiti";
 const jiti = createJiti(import.meta.url, { alias: { "@": process.cwd() } });
 const route = await jiti.import("./route.ts");
+const runningEvents = await jiti.import("../../../../../lib/running-events.ts");
+
+const routeSource = readFileSync(new URL("./route.ts", import.meta.url), "utf8");
+
+test("route exposes only Next-supported runtime exports", () => {
+  const names = [
+    ...routeSource.matchAll(/export\s+(?:async\s+)?function\s+(\w+)/g),
+    ...routeSource.matchAll(/export\s+const\s+(\w+)/g),
+  ].map((match) => match[1]).sort();
+  assert.deepEqual(names, ["GET", "dynamic", "runtime"]);
+  assert.equal(typeof route.GET, "function");
+});
 
 test("running stream sends connected then running and unregisters on abort", async () => {
   const calls = [];
   const controller = new AbortController();
-  const handler = route.createRunningEventsHandler({
+  const handler = runningEvents.createRunningEventsHandler({
     createConnectionId: () => "c1",
     getAuthFingerprint: async () => "fp",
     registry: {
@@ -34,7 +47,7 @@ test("running stream sends connected then running and unregisters on abort", asy
 test("running stream continues without presence when fingerprint unavailable", async () => {
   const calls = [];
   const controller = new AbortController();
-  const handler = route.createRunningEventsHandler({
+  const handler = runningEvents.createRunningEventsHandler({
     createConnectionId: () => "c1",
     getAuthFingerprint: async () => null,
     registry: {
