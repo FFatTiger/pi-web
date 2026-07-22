@@ -4,7 +4,38 @@
 
 [pi 编程智能体](https://github.com/badlogic/pi-mono) 的本地网页界面。它会读取本机的 pi 会话文件，在浏览器里提供会话管理、实时对话、模型配置、技能管理和项目文件预览。
 
+## 关于此 Fork
+
+本仓库是 [`FFatTiger/pi-web`](https://github.com/FFatTiger/pi-web) 对 [`agegr/pi-web`](https://github.com/agegr/pi-web) 的 Fork。它保留了 pi-web 的本地浏览器工作区，并加入本 Fork 实际使用的安全访问、远程运行、后台通知、项目管理和移动端体验。
+
+| 领域 | 本 Fork 增加的能力 |
+| --- | --- |
+| 应用访问 | 默认锁定的密码门禁、签名会话、登录限速、业务 API/SSE 保护，以及只能明确配置才可关闭的门禁。 |
+| PWA 与完成通知 | 可安装 PWA、保守的离线/更新策略，以及仅在最终 `agent_settled` 后发送的认证 VAPID Web Push；应用在前台时由可见 toast ACK 抑制系统 Push。 |
+| 服务端持有任务 | Agent 任务被服务端接受后，即使浏览器或已安装 PWA 进入后台或被关闭，任务仍继续；Push 只是完成通知通道，不负责执行任务。 |
+| 项目与 worktree | 多项目会话分组、关联 worktree 识别、worktree 切换/创建/删除，以及限定于项目范围的 Explorer。 |
+| 移动端工作流 | 空状态自动打开会话选择器、防聚焦放大的编辑控件、紧凑顶部导航、完整会话/上下文指标，以及侧边栏退出按钮。 |
+| 安全边界 | 受限文件根目录、Push 私密文件及其别名/软链接的无条件拒绝、流式请求大小限制、密码绑定订阅，以及基于实际连接 socket 的 Push 目标校验。 |
+
+> [!IMPORTANT]
+> npm 包 `@agegr/pi-web` 由上游项目发布。下方的 `npx` 和全局安装命令安装的是上游版本，不包含上述 Fork 独有改动。
+
+**上游差异（核对时间：2026-07-22）：** 本 Fork 尚未合入上游的 Pi 0.81 依赖更新、自动会话命名、Git-aware diff viewer，以及 `!` / `!!` shell 命令前缀。这只是当前时间点的信息，不是长期兼容承诺；rebase 或发布前请重新比较 [`agegr/pi-web`](https://github.com/agegr/pi-web)。
+
 ## 快速开始
+
+### 从源码运行本 Fork
+
+```bash
+git clone https://github.com/FFatTiger/pi-web.git
+cd pi-web
+npm install
+npm run dev
+```
+
+启动后打开 [http://localhost:30141](http://localhost:30141)。
+
+### 运行上游 npm 版本
 
 **无需安装，直接运行：**
 
