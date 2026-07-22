@@ -4,6 +4,8 @@ import path from "path";
 import {
   getAllowedFileRoots,
   isFilePathAllowed,
+  isFilePathDenied,
+  isResolvedFilePathDenied,
   isWindowsAbsolutePath,
   normalizeSlashes,
 } from "@/lib/file-access";
@@ -136,6 +138,15 @@ export async function POST(
       if (validationError) {
         return NextResponse.json({ error: validationError }, { status: 400 });
       }
+      for (const name of fileNames) {
+        const destination = path.join(directory, name);
+        if (isFilePathDenied(destination)) {
+          return NextResponse.json({ error: "Access denied" }, { status: 403 });
+        }
+        if (isResolvedFilePathDenied(destination)) {
+          return NextResponse.json({ error: "Access denied" }, { status: 403 });
+        }
+      }
       return NextResponse.json(inspectUploadTargets(directory, fileNames));
     }
 
@@ -173,6 +184,9 @@ export async function POST(
 
     for (const file of files) {
       const destination = path.join(directory, file.name);
+      if (isResolvedFilePathDenied(destination)) {
+        return NextResponse.json({ error: "Access denied" }, { status: 403 });
+      }
       if (conflictSet.has(file.name) && strategy === "skip") {
         skipped.push(file.name);
         continue;
@@ -400,6 +414,10 @@ export async function GET(
     }
     const sessionId = request.nextUrl.searchParams.get("sessionId");
 
+    if (isResolvedFilePathDenied(filePath)) {
+      return NextResponse.json({ error: "Access denied" }, { status: 403 });
+    }
+
     const allowedRoots = await getAllowedFileRoots();
     const allowedByRoot = isFilePathAllowed(filePath, allowedRoots);
     const allowedBySessionReference =
@@ -555,7 +573,11 @@ export async function GET(
     // filesystems without directory type information use the stat fallback.
     const dirents = fs.readdirSync(filePath, { withFileTypes: true });
     const entries = dirents
-      .filter((d) => !IGNORED_NAMES.has(d.name) && !IGNORED_SUFFIXES.some((s) => d.name.endsWith(s)))
+      .filter((d) =>
+        !IGNORED_NAMES.has(d.name) &&
+        !IGNORED_SUFFIXES.some((s) => d.name.endsWith(s)) &&
+        !isResolvedFilePathDenied(path.join(filePath, d.name))
+      )
       .flatMap((d) => {
         const isDir = resolveDirentIsDirectory(d, path.join(filePath, d.name));
         return isDir === null
