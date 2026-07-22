@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef, useMemo, type CSSProperties, type ReactNode } from "react";
 import type { SessionInfo } from "@/lib/types";
+import { AuthControls } from "./AuthControls";
 import {
   buildSidebarSessionTree,
   getProjectActivity,
@@ -612,6 +613,7 @@ export function SessionSidebar({
                 <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
               </svg>
             </button>
+            <AuthControls compact />
 
             <AnimatedDropdown
               open={directoryOpen}
