@@ -42,10 +42,8 @@ export function usePwaUpdate(): {
     if (typeof window === "undefined" || !("serviceWorker" in navigator)) {
       return;
     }
-    // Keep Next dev / HMR free of a controlling SW.
-    if (process.env.NODE_ENV !== "production") {
-      return;
-    }
+    // Register in development too (approved design): localhost install/Push testing
+    // is required, and the conservative SW never caches Next HMR chunks/HTML/API/SSE.
 
     let cancelled = false;
     let updateTimer: ReturnType<typeof setInterval> | null = null;
