@@ -4,11 +4,42 @@
 
 Local web UI for the [pi coding agent](https://github.com/badlogic/pi-mono). pi-web reads your local pi session files and gives you a browser workspace for session browsing, real-time chat, model configuration, skill management, and project file preview.
 
-![Pi Web shows the same pi session with structured Markdown, tool calls, and project navigation beside the CLI](https://raw.githubusercontent.com/agegr/pi-web/main/docs/screenshot2.png)
+![Pi Web shows the same pi session with structured Markdown, tool calls, and project navigation beside the CLI](./docs/screenshot2.png)
 
 The same pi session in CLI and pi-web: structured tool calls, readable Markdown, session browsing, and cleaner results.
 
+## About this fork
+
+This repository is the [`FFatTiger/pi-web`](https://github.com/FFatTiger/pi-web) fork of [`agegr/pi-web`](https://github.com/agegr/pi-web). It keeps pi-web's local browser workspace while adding the security, remote-operation, background-notification, project, and mobile behavior used by this fork.
+
+| Area | This fork adds |
+| --- | --- |
+| Application access | A fail-closed password gate with signed sessions, login throttling, protected business APIs/SSE, and explicit opt-out only. |
+| PWA and completion notifications | An installable PWA, conservative offline/update behavior, and authenticated VAPID Web Push after the final `agent_settled`, with visible-toast ACK suppression while the app is foregrounded. |
+| Server-owned runs | An accepted Agent run continues on the server after the browser or installed PWA is backgrounded or closed; Push is a completion channel, not an execution channel. |
+| Projects and worktrees | Multi-project session grouping, linked-worktree resolution, worktree switching/creation/removal, and a project-scoped Explorer. |
+| Mobile workflow | A session chooser on empty entry, focus-zoom-safe editable controls, compact navigation, complete session/context metrics, and sidebar logout. |
+| Security boundaries | Restricted file roots, unconditional Push-secret denial through aliases and symlinks, streaming request limits, password-bound subscriptions, and actual-socket Push target validation. |
+
+> [!IMPORTANT]
+> The npm package `@agegr/pi-web` is published by the upstream project. The `npx` and global-install commands below install upstream, not the fork-specific changes described above.
+
+**Upstream divergence (observed 2026-07-22):** this fork has not yet integrated upstream's Pi 0.81 dependency update, automatic session naming, Git-aware diff viewer, or `!` / `!!` shell command prefixes. This is a point-in-time note, not a permanent compatibility guarantee; compare [`agegr/pi-web`](https://github.com/agegr/pi-web) before rebasing or releasing.
+
 ## Quick Start
+
+### Run this fork from source
+
+```bash
+git clone https://github.com/FFatTiger/pi-web.git
+cd pi-web
+npm install
+npm run dev
+```
+
+Then open [http://localhost:30141](http://localhost:30141).
+
+### Run the upstream npm release
 
 **Run without installing:**
 
@@ -82,6 +113,36 @@ PI_WEB_AUTH_DISABLED=true pi-web
 - After changing the config file or auth-related environment variables, restart pi-web so the new settings take effect.
 - For LAN or public exposure, use a strong password, serve over HTTPS, and restrict access with a firewall or reverse proxy. Prefer binding to localhost when you do not need remote access.
 
+### PWA and Web Push
+
+pi-web can be installed as a Progressive Web App and optionally send system notifications when an Agent run settles. Closing the browser or PWA does **not** stop an Agent the server already accepted: as long as the pi-web process, host, and model network stay up, the run continues. Foreground traffic stays HTTP + SSE; Web Push starts only after server-side `agent_settled`.
+
+Config lives in the same file as the application gate: `$PI_CODING_AGENT_DIR/pi-web.json` (default `~/.pi/agent/pi-web.json`). There are **no** VAPID environment variables—keys are generated and stored by pi-web.
+
+```json
+{
+  "auth": { "password": "replace-me", "disabled": false },
+  "push": { "disabled": false, "subject": "mailto:owner@example.com" }
+}
+```
+
+```bash
+PI_WEB_PUSH_DISABLED=true pi-web
+PI_WEB_PUSH_SUBJECT=mailto:owner@example.com pi-web
+```
+
+- Precedence for Push: environment (`PI_WEB_PUSH_DISABLED`, `PI_WEB_PUSH_SUBJECT`) overrides `push` in `pi-web.json`; missing `push.disabled` defaults to enabled (`false`); missing subject defaults to `https://github.com/agegr/pi-web`. Subject must be a `mailto:` or `https:` URL. Invalid values lock Push only (safe status error)—they do not break the rest of pi-web.
+- Push requires the application password gate to be **enabled** and the user authenticated. With the gate disabled, subscription APIs refuse Push.
+- Browsers need a secure context: **HTTPS**, or **localhost** for local testing. Pi Web does **not** show install or notification enable/test/disable guidance UI. After an authenticated Push server check, it makes **one** automatic permission attempt while `Notification.permission` is still `default`, writing the versioned local marker `pi-web:push-auto-prompt-v1` **before** `Notification.requestPermission()` so reloads and remounts do not prompt again. Revoke or change permission later in browser/system settings. Some browsers (notably iOS Safari) may suppress automatic prompts without a user gesture or outside a Home Screen standalone PWA; iOS / iPadOS **16.4+** still requires Add to Home Screen for Push, and Pi Web stays quiet when the browser blocks the auto request. Manifest/Service Worker installability remains—use the browser’s own install affordance if available.
+- Visible page with a live running SSE connection: after settle, AppShell shows an in-app toast and ACKs within about **1500ms** so system Push is suppressed. If ACK is missing (hidden, frozen, closed, or blocked), system Push is sent. Late ACK after timeout is ignored; a rare duplicate toast+Push is accepted.
+- Notification copy is generic only (`Agent run finished` / `Agent run failed` / test text). No prompts, replies, paths, or tool output. Abort does not notify; intermediate retries/compaction do not; exactly one notification at final `agent_settled`.
+- Service Worker caches only public PWA assets (`/offline.html`, `/manifest.webmanifest`, icons). No session, API, HTML app shell, Next chunks, or Background Sync. Offline navigation shows a generic fallback page.
+- Private state file: `$PI_CODING_AGENT_DIR/pi-web-push.json` (default `~/.pi/agent/pi-web-push.json`), mode **0600**. Treat it like a secret in backups. Corruption locks Push until fixed (no silent key regeneration). Password change invalidates old subscription fingerprints; re-login with the new password rebinds the existing browser subscription without another permission prompt.
+- Reverse proxy: terminate HTTPS correctly, do **not** buffer SSE, and keep long-lived connections open for `/api/agent/*/events` and `/api/agent/running/events`.
+- Updates: a banner offers reload; automatic reload is disabled so an open session is not replaced mid-run. Confirming reload applies only in that tab; other tabs prompt for the activated version.
+
+Manual platform matrix (not automated): [docs/pwa-web-push-acceptance.md](./docs/pwa-web-push-acceptance.md).
+
 ## Development
 
 ```bash
@@ -113,10 +174,12 @@ app/
     home/           # current user home directory
     models/         # available models, default model, thinking levels
     models-config/  # read/write models.json and test models
+    push/           # status, VAPID public key, subscribe, presence, test
     sessions/       # session reads, rename, delete, context, HTML export
     skills/         # skill listing, search, install, enable/disable
+  manifest.ts         # Web App Manifest
 components/
-  AppShell.tsx        # main layout, URL state, top panels, file tabs
+  AppShell.tsx        # main layout, URL state, top panels, file tabs, PWA/Push shell
   SessionSidebar.tsx  # project selector, session tree, Explorer
   ChatWindow.tsx      # messages, SSE, image drag/drop, minimap
   ChatInput.tsx       # input bar, model/tools/thinking/compact/slash controls
@@ -125,19 +188,25 @@ components/
   SkillsConfig.tsx    # skill management panel
   FileExplorer.tsx    # file tree
   FileViewer.tsx      # source, diff, image, audio, PDF, DOCX preview
+  AppToast.tsx / OfflineBanner.tsx / PwaUpdateBanner.tsx / AuthControls.tsx
 lib/
   rpc-manager.ts      # AgentSessionWrapper lifecycle and global registry
   session-reader.ts   # parses .jsonl session files and branch contexts
   normalize.ts        # normalizes toolCall field names
-  file-access.ts      # file read safety boundary
+  file-access.ts      # file read safety boundary (+ Push secret deny)
   file-paths.ts       # path encoding and relative path helpers
   markdown.ts         # Markdown/Mermaid/KaTeX plugin configuration
   pi-types.ts         # pi-related types
+  push-*.ts / pwa-lifecycle.ts / settled-cycle.ts
 hooks/
   useAgentSession.ts  # session loading, command sending, SSE state machine
+  useAppPresence.ts   # single running SSE + toast ACK
+  usePwaUpdate.ts / useWebPush.ts / useOnlineStatus.ts
   useAudio.ts         # completion sound
   useDragDrop.ts      # image drag/drop
   useTheme.ts         # theme switching
+public/
+  sw.js / offline.html / icons/
 bin/
   pi-web.js           # npm CLI entrypoint
 ```

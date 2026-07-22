@@ -234,7 +234,7 @@ export function WorktreeSwitcher({ projectRoot, cwd, onCwdChange }: WorktreeSwit
   const worktrees = data?.worktrees ?? [];
 
   return (
-    <div ref={rootRef} style={{ position: "relative", height: "100%", display: "flex", alignItems: "stretch" }}>
+    <div ref={rootRef} style={{ position: "relative", height: "100%", display: "flex", alignItems: "stretch", minWidth: 0, flexShrink: 1 }}>
       <button
         type="button"
         disabled={!enabled}

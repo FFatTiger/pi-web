@@ -14,6 +14,7 @@ const nextConfig: NextConfig = {
     "@earendil-works/pi-coding-agent",
     "@earendil-works/pi-ai",
     "@earendil-works/pi-tui",
+    "web-push",
   ],
   allowedDevOrigins: ['192.168.*.*', 'pi.huu.im', '*.huu.im'],
   async headers() {
@@ -22,6 +23,19 @@ const nextConfig: NextConfig = {
         source: "/",
         headers: [
           { key: "Cache-Control", value: "private, no-cache, max-age=0, must-revalidate" },
+        ],
+      },
+      {
+        source: "/sw.js",
+        headers: [
+          { key: "Cache-Control", value: "no-cache, max-age=0, must-revalidate" },
+          { key: "Service-Worker-Allowed", value: "/" },
+        ],
+      },
+      {
+        source: "/offline.html",
+        headers: [
+          { key: "Cache-Control", value: "public, no-cache, max-age=0, must-revalidate" },
         ],
       },
     ];
