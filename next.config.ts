@@ -14,6 +14,7 @@ const nextConfig: NextConfig = {
     "@earendil-works/pi-coding-agent",
     "@earendil-works/pi-ai",
     "@earendil-works/pi-tui",
+    "web-push",
   ],
   allowedDevOrigins: ['192.168.*.*', 'pi.huu.im', '*.huu.im'],
   async headers() {
