@@ -34,6 +34,12 @@ export type PushServiceOptions = {
   client?: PushWebPushClient;
   agent?: Agent;
   readConfig?: () => PushConfig;
+  /**
+   * Test-only seam for the service-level per-device delivery deadline.
+   * Defaults to 10_000ms in production. Does not change the options object
+   * passed to web-push (`timeout` remains 10_000).
+   */
+  sendTimeoutMs?: number;
 };
 
 export class PushConfigError extends Error {
@@ -47,6 +53,15 @@ export class PushConfigError extends Error {
 
 const SEND_TTL_SECONDS = 300;
 const SEND_TIMEOUT_MS = 10_000;
+
+class PushDeliveryTimeoutError extends Error {
+  readonly code = "PUSH_DELIVERY_TIMEOUT";
+
+  constructor() {
+    super("Push delivery deadline exceeded");
+    this.name = "PushDeliveryTimeoutError";
+  }
+}
 
 type GlobalPushService = typeof globalThis & {
   __piPushService?: PushService;
@@ -82,17 +97,62 @@ function classifyStatusCode(statusCode: number): PushDeliveryStatus {
   return "error";
 }
 
+function isDeliveryTimeout(error: unknown): boolean {
+  return error instanceof PushDeliveryTimeoutError;
+}
+
+/**
+ * Race a source promise against a service-level deadline.
+ * Late source settle is always attached and consumed so it cannot become an
+ * unhandled rejection or affect the already-returned summary.
+ */
+function withDeadline<T>(source: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new PushDeliveryTimeoutError());
+    }, timeoutMs);
+
+    source.then(
+      (value) => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          resolve(value);
+        }
+        // late resolve: consumed; no summary mutation
+      },
+      (error: unknown) => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          reject(error);
+        }
+        // late reject: consumed; no unhandledRejection / no summary mutation
+      },
+    );
+  });
+}
+
 export class PushService {
   private readonly store: Pick<PushStore, "getVapidKeys" | "listAuthorized" | "removeEndpoint">;
   private readonly client: PushWebPushClient;
   private readonly agent: Agent;
   private readonly readConfig: () => PushConfig;
+  private readonly sendTimeoutMs: number;
 
   constructor(options?: PushServiceOptions) {
     this.store = options?.store ?? getPushStore();
     this.client = options?.client ?? (webpush as unknown as PushWebPushClient);
     this.agent = options?.agent ?? getDefaultAgent();
     this.readConfig = options?.readConfig ?? readPushConfig;
+    this.sendTimeoutMs =
+      typeof options?.sendTimeoutMs === "number" && Number.isFinite(options.sendTimeoutMs)
+        ? options.sendTimeoutMs
+        : SEND_TIMEOUT_MS;
   }
 
   async send(
@@ -132,12 +192,13 @@ export class PushService {
             return { endpointHost: host, status: "invalid_target" };
           }
 
+          // web-push options stay fixed; service deadline is independent.
           const options = {
             TTL: SEND_TTL_SECONDS,
             timeout: SEND_TIMEOUT_MS,
             agent: this.agent,
           };
-          await this.client.sendNotification(
+          const sendPromise = this.client.sendNotification(
             {
               endpoint: validated.endpoint,
               keys: { p256dh: validated.p256dh, auth: validated.auth },
@@ -145,9 +206,15 @@ export class PushService {
             JSON.stringify(payload),
             options,
           );
+          await withDeadline(sendPromise, this.sendTimeoutMs);
           console.error(`push delivery sent host=${host}`);
           return { endpointHost: host, status: "sent" };
         } catch (error) {
+          if (isDeliveryTimeout(error)) {
+            console.error(`push delivery temporary host=${host}`);
+            return { endpointHost: host, status: "temporary" };
+          }
+
           const statusCode = statusCodeOf(error);
           const status =
             statusCode === undefined ? "error" : classifyStatusCode(statusCode);
