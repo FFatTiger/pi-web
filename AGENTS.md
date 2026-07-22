@@ -19,7 +19,8 @@ Browser                Next.js Server              AgentSession (in-process)
   │                        │                               │
   ├─ GET /api/sessions ────▶ reads ~/.pi/agent/sessions/   │
   ├─ GET /api/sessions/[id] reads .jsonl file directly     │
-  ├─ GET /api/agent/running/events ───▶ running id SSE     │
+  ├─ GET /api/agent/running/events ───▶ running ids + presence/notification SSE
+  ├─ POST /api/push/presence ────────▶ visibility heartbeat / toast ACK
   │                        │                               │
   ├─ send message ─────────▶ POST /api/agent/[id]          │
   │                        │   startRpcSession() ─────────▶│ createAgentSession()
@@ -39,7 +40,8 @@ Browser                Next.js Server              AgentSession (in-process)
 
 ```
 app/
-  login/page.tsx                  application gate login page
+  manifest.ts                         Web App Manifest
+  login/page.tsx                      application gate login page
   api/
     sessions/route.ts               GET  list all sessions
     sessions/[id]/route.ts          GET/PATCH/DELETE session
@@ -65,6 +67,11 @@ app/
     models-config/route.ts          GET/PUT — read/write ~/.pi/agent/models.json
     models-config/test/route.ts     POST test a configured model/provider
     plugins/route.ts                GET/POST package plugin management
+    push/status/route.ts             GET safe Push/browser/config status
+    push/vapid-public-key/route.ts   GET VAPID public key
+    push/subscribe/route.ts          POST/DELETE authenticated subscription
+    push/test/route.ts               POST fixed test notification
+    push/presence/route.ts           POST visibility heartbeat / toast ACK
     skills/route.ts                 GET/PATCH loaded skills and disable-model-invocation
     skills/install/route.ts         POST install skills through npx skills add
     skills/search/route.ts          GET/POST skills.sh search
@@ -83,6 +90,18 @@ lib/
   tool-presets.ts     PRESET_NONE/DEFAULT/FULL + getPresetFromTools()
   types.ts            shared TypeScript types
   normalize.ts        normalizeToolCalls() — field name mismatch between file format and our types
+  pwa-lifecycle.ts    pure install/update lifecycle decisions
+  push-config.ts      independent Push config and status taxonomy
+  push-endpoint.ts    subscription body parsing and route helpers
+  push-notifier.ts    settled result → visible ACK or Web Push fallback
+  push-paths.ts       unconditional Push state/temp-name denial
+  push-presence.ts    process-local visible connection and 1500 ms ACK registry
+  push-request.ts     authenticated same-origin JSON + streaming 16 KiB boundary
+  push-service.ts     bounded parallel Web Push delivery and cleanup
+  push-store.ts       atomic VAPID/subscription persistence + password epochs
+  push-target.ts      endpoint validation and actual-socket DNS policy
+  push-types.ts       fixed notification payload/presentation protocol
+  settled-cycle.ts    server-owned agent_start/end/settled cycle tracker
   worktree.ts         project/worktree resolution and git worktree operations
   web-auth-config.ts  pi-web.json + PI_WEB_* env → GateConfig
   web-auth-session.ts signed cookie issue/verify for the application gate
@@ -107,15 +126,31 @@ components/
   TabBar.tsx          tab bar (Chat + open file tabs)
   LoginForm.tsx       application gate login form
   AuthControls.tsx    shell gate status + logout control
+  AppToast.tsx        fixed-copy rendered completion toast
+  OfflineBanner.tsx   offline state UI
+  PwaInstallPrompt.tsx explicit install / iOS guidance
+  PwaSettingsControl.tsx installed-mode PWA settings entry
+  PwaUpdateBanner.tsx user-confirmed waiting-worker update UI
+  PushNotificationControl.tsx explicit notification opt-in/test/disable
 
 proxy.ts              Next.js 16 request gate (replaces middleware.ts)
 
 hooks/
-  useAgentSession.ts  messages + streaming + SSE + fork/navigate/reconciliation logic
+  useAgentSession.ts  messages + streaming + per-session SSE + fork/navigate/reconciliation logic
+  useAppPresence.ts   sole global running SSE owner + 15s visibility heartbeat
   useAudio.ts         completion sound + browser AudioContext unlock
   useDragDrop.ts      shared drag/drop state
   useIsMobile.ts      responsive breakpoint hook
+  useOnlineStatus.ts  browser online/offline state
+  usePwaInstall.ts    install prompt, standalone, and iOS guidance state
+  usePwaUpdate.ts     SW registration and user-confirmed update lifecycle
   useTheme.ts         theme state
+  useWebPush.ts       browser subscription reconciliation and controls
+
+public/
+  sw.js               conservative offline/update/Push Service Worker
+  offline.html        generic offline fallback
+  icons/              bounded public normal/Apple/maskable/badge icons
 ```
 
 ---
@@ -155,9 +190,11 @@ On `ChatWindow` mount, `GET /api/agent/[id]` is called. If `state.isStreaming ==
 Newer pi emits `compaction_start` / `compaction_end`; older versions emitted `auto_compaction_start` / `auto_compaction_end`. `handleAgentEvent` accepts both sets to keep `isCompacting` in sync. Manual compact is a blocking POST — the button stays disabled until the response returns.
 
 ### Running state SSE + reconciliation
-- The sidebar listens to `/api/agent/running/events`, backed by `subscribeRunningSessions()` in `lib/rpc-manager.ts`, so running badges update without polling.
-- `useAgentSession` still treats per-session SSE as primary for chat events, but while a run is active it periodically calls `GET /api/agent/[id]` and also reconciles on `visibilitychange`/`online`. This fixes missed `agent_end` events from background tabs or half-open connections.
-- Prompt runs use a monotonic run id; late SSE or slow reconciliation responses from an old run must be ignored so they cannot resurrect stale streaming bubbles.
+- `useAppPresence` in `AppShell` is the **sole global owner** of `/api/agent/running/events`; `SessionSidebar` only receives the live running-id set as props. Do not add a second owner. Per-session SSE in `useAgentSession` remains separate and unchanged.
+- The global stream sends `connected` (opaque presence id), `running`, and fixed-schema `notification` frames. Visible tabs POST a heartbeat every 15 seconds; server presence becomes stale after 35 seconds.
+- A foreground notification suppresses Web Push only after `AppToast` visibly commits and authenticated presence ACKs the matching notification within 1500 ms. Receiving/enqueuing the SSE frame is not an ACK. Hidden, stale, disconnected, failed, or timed-out clients fall back to Push; a rare late-ACK duplicate is safer than a missed completion.
+- `useAgentSession` still treats per-session SSE as primary for chat events, but while a run is active it periodically calls `GET /api/agent/[id]` and also reconciles on `visibilitychange`/`online`. This fixes missed final events from background tabs or half-open connections.
+- Prompt runs use a monotonic run id; late SSE or slow reconciliation responses from an old run must be ignored so they cannot resurrect stale streaming bubbles. `agent_end` with `willRetry: true` must not finish foreground streaming state.
 
 ### Worktrees and project grouping
 - `lib/worktree.ts` resolves linked worktree top-levels back to the main repo `projectRoot`; `listAllSessions()` attaches that to each `SessionInfo` so all worktrees for one repo are grouped together in the sidebar.
@@ -169,6 +206,7 @@ Newer pi emits `compaction_start` / `compaction_end`; older versions emitted `au
 ### File access allow-list
 - `/api/files` is intentionally not a general filesystem browser. Allowed roots come from session cwds, their resolved project roots, `~/pi-cwd-*`, and roots explicitly added with `allowFileRoot()`.
 - `/api/cwd/validate`, `/api/default-cwd`, and `/api/worktrees` call `allowFileRoot()` when they make a new location browsable.
+- `$PI_CODING_AGENT_DIR/pi-web-push.json` and its temp forms are unconditionally secret. Deny them before existence/conflict checks across `/api/files`, `/api/file-index`, File Explorer, uploads, listings, session references, case aliases, and symlink aliases.
 
 ### Plugins and skills
 - `/api/plugins` uses pi's `SettingsManager` + `DefaultPackageManager` for global/project package install, remove, update, enable, and disable. Disabling writes empty `extensions/skills/prompts/themes` arrays for that package entry.
@@ -190,6 +228,17 @@ Newer pi emits `compaction_start` / `compaction_end`; older versions emitted `au
 - All business APIs, including SSE and provider auth, stay inside the `proxy.ts` matcher. Public gate routes and `/login` are allow-listed by `decideGateRequest`.
 - Password changes invalidate cookies because the signing key derives from the current password.
 - Never return config `logMessage` to the browser; log server-side only on `status: "error"`.
+
+### PWA, Service Worker, and Web Push
+- Exact public gate bypasses are `/manifest.webmanifest`, `/sw.js`, `/offline.html`, and bounded `/icons/*`. Lookalikes and every `/api/push/*` route remain protected. `/sw.js` has root scope and exact no-cache headers.
+- Register the Service Worker on localhost/development as well as production. Its cache may contain only `/offline.html`, `/manifest.webmanifest`, and the five public icons—never `/api/*`, SSE, auth HTML, app HTML/RSC, Next chunks, sessions, prompts, code, paths, or tool output. There is no Background Sync.
+- Do not call `skipWaiting()` at install time. A waiting worker activates only after user confirmation; only the confirming tab auto-reloads, while other controlled tabs show an activated-version prompt.
+- Notification permission is requested only by the explicit Enable action. iOS/iPadOS 16.4+ requires an installed Home Screen PWA; an ordinary Safari tab shows guidance only.
+- Payloads are the exact v1 `agent`/`test` union in `push-types.ts`; notification title/body/tag/URL are derived locally. Never accept arbitrary presentation or navigation from the server.
+- Push config is independent from the application gate, but delivery/subscription requires the gate enabled. State is atomic `0600`; subscriptions are HMAC-bound to the current password epoch and capped at 20.
+- Every Push request passes application auth, exact same-origin checks, JSON media type, and a true streaming 16 KiB limit. Do not replace it with a post-read length check.
+- `push-target.ts` rejects IP literals and private/local/mixed DNS results through the actual `https.Agent.lookup` used by `web-push`; do not add a DNS preflight or proxy path. Each device has a service-level 10-second deadline in addition to the library socket timeout.
+- `SettledCycleTracker` in `rpc-manager.ts` owns notification cycles. Only final `agent_settled` consumes a cycle and schedules a notification; `agent_end`, retry, compaction, steer/follow-up, queued continuation, prompt errors, and aborted results do not independently notify. Notification work is fire-and-catch and must never reject Agent HTTP/SSE flow.
 
 ### Completion sound
 - `hooks/useAudio.ts` stores the toggle in `localStorage` as `pi-sound-enabled` and reuses one `AudioContext`.
