@@ -12,7 +12,7 @@ const sidebarBlock = source.slice(sidebarContentStart, sidebarContentEnd);
 const topBarStart = source.indexOf('{/* Top bar with sidebar toggle */}');
 const topBarEnd = source.indexOf('{/* Top panel dropdown — shared, only one active at a time */}');
 const topBarBlock = source.slice(topBarStart, topBarEnd);
-const bottomRightStart = source.indexOf('{/* Fixed bottom-right auth control */}');
+const bottomRightStart = source.indexOf('{/* Fixed bottom-right authentication and notification controls */}');
 const bottomRightEnd = source.indexOf('{/* Fixed right-corner controls: explorer then file detail */}');
 const bottomRightBlock = source.slice(bottomRightStart, bottomRightEnd);
 
@@ -21,12 +21,13 @@ test("AppShell imports AuthControls", () => {
   assert.match(source, /import\s*\{\s*AuthControls\s*\}\s*from\s*"\.\/AuthControls"/);
 });
 
-test("AuthControls is mounted in the fixed bottom-right corner", () => {
-  assert.ok(bottomRightStart >= 0 && bottomRightEnd > bottomRightStart, "bottom-right auth markers missing");
+test("AuthControls and PushNotificationControl share the fixed bottom-right group", () => {
+  assert.ok(bottomRightStart >= 0 && bottomRightEnd > bottomRightStart, "bottom-right control markers missing");
   assert.ok(authUsage > bottomRightStart && authUsage < bottomRightEnd, "AuthControls must be in bottom-right fixed control");
   assert.match(bottomRightBlock, /position:\s*"fixed"/);
   assert.match(bottomRightBlock, /right:\s*12/);
   assert.match(bottomRightBlock, /bottom:\s*12/);
+  assert.match(bottomRightBlock, /<PushNotificationControl/);
   assert.match(bottomRightBlock, /<AuthControls\s*\/>/);
 });
 

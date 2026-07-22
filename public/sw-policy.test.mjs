@@ -29,3 +29,39 @@ test("waiting workers skip only after an explicit message", () => {
   assert.match(source, /data\?\.type === "SKIP_WAITING"/);
   assert.match(source, /self\.skipWaiting\(\)/);
 });
+
+test("Push rendering accepts only fixed v1 branches and never trusts payload copy or URLs", () => {
+  assert.match(source, /addEventListener\("push"/);
+  assert.match(source, /kind === "agent"/);
+  assert.match(source, /kind === "test"/);
+  assert.match(source, /Agent run finished/);
+  assert.match(source, /Test notification delivered/);
+  assert.match(source, /Object\.keys/);
+  assert.doesNotMatch(source, /payload\.(title|body|tag|url|actions)/);
+  assert.match(source, /showNotification/);
+  assert.match(source, /"\/icons\/icon-192\.png"/);
+  assert.match(source, /"\/icons\/badge-96\.png"/);
+});
+
+test("notification clicks construct local destinations and use only same-origin clients", () => {
+  assert.match(source, /addEventListener\("notificationclick"/);
+  assert.match(source, /encodeURIComponent\(payload\.sessionId\)/);
+  assert.match(source, /clients\.matchAll/);
+  assert.match(source, /includeUncontrolled:\s*true/);
+  assert.match(source, /new URL\(client\.url\)\.origin === self\.location\.origin/);
+  assert.match(source, /existing\.navigate\(target\)/);
+  assert.match(source, /existing\.focus\(\)/);
+  assert.match(source, /clients\.openWindow\(target\)/);
+});
+
+test("subscription change only notifies same-origin windows for authenticated reconciliation", () => {
+  assert.match(source, /addEventListener\("pushsubscriptionchange"/);
+  assert.match(source, /PUSH_SUBSCRIPTION_CHANGED/);
+  assert.match(source, /client\.postMessage/);
+  assert.doesNotMatch(source, /requestPermission/);
+});
+
+test("Push payloads never enter Cache Storage", () => {
+  assert.doesNotMatch(source, /push[\s\S]{0,500}cache\.put|notification[\s\S]{0,500}cache\.put/i);
+  assert.doesNotMatch(source, /PRECACHE_URLS[\s\S]*\/api\/push/);
+});

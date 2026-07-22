@@ -28,6 +28,7 @@ import { OfflineBanner } from "./OfflineBanner";
 import { PwaInstallPrompt } from "./PwaInstallPrompt";
 import { PwaSettingsControl } from "./PwaSettingsControl";
 import { PwaUpdateBanner } from "./PwaUpdateBanner";
+import { PushNotificationControl } from "./PushNotificationControl";
 
 type SessionCopyField = "file" | "id";
 
@@ -1085,15 +1086,22 @@ export function AppShell() {
       runningSessionIds={runningSessionIds}
     />
 
-    {/* Fixed bottom-right auth control */}
+    {/* Fixed bottom-right authentication and notification controls */}
     <div
       style={{
         position: "fixed",
         right: 12,
         bottom: 12,
         zIndex: 300,
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
       }}
     >
+      <PushNotificationControl
+        isIos={pwaInstall.isIos}
+        isStandalone={pwaInstall.isStandalone}
+      />
       <AuthControls />
     </div>
 
