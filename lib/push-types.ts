@@ -37,6 +37,9 @@ const ownKeysEqual = (value: Record<string, unknown>, keys: string[]) => {
 const boundedText = (value: unknown, max: number): value is string =>
   typeof value === "string" && value.length > 0 && value.length <= max;
 
+export const isValidNotificationSessionId = (value: unknown): value is string =>
+  boundedText(value, 256);
+
 export function parseNotificationPayload(value: unknown): NotificationPayloadV1 | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const item = value as Record<string, unknown>;
@@ -48,7 +51,7 @@ export function parseNotificationPayload(value: unknown): NotificationPayloadV1 
   }
   if (item.kind === "agent") {
     if (!ownKeysEqual(item, ["version", "id", "kind", "sessionId", "result"])) return null;
-    if (!boundedText(item.sessionId, 256)) return null;
+    if (!isValidNotificationSessionId(item.sessionId)) return null;
     if (item.result !== "success" && item.result !== "error") return null;
     return {
       version: 1,
