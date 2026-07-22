@@ -4,6 +4,7 @@ import { promisify } from "util";
 import fs from "fs";
 import path from "path";
 import {
+  filterDeniedFileIndexPaths,
   getAllowedFileRoots,
   isFilePathAllowed,
   isWindowsAbsolutePath,
@@ -31,6 +32,8 @@ const MAX_WALK_DEPTH = 8;
 const MAX_QUERY_LENGTH = 500;
 const CACHE_TTL_MS = 10_000;
 const CACHE_MAX_ENTRIES = 20;
+/** Bump when listing sanitization semantics change so hot-reload cannot reuse unsanitized caches. */
+const FILE_INDEX_CACHE_VERSION = 2;
 
 interface FileListing {
   /** Full listing up to the hard cap (not the client cap) */
@@ -51,11 +54,23 @@ interface CacheEntry {
 // not be recomputed within a short window.
 declare global {
   var __piFileIndexCache: Map<string, CacheEntry> | undefined;
+  var __piFileIndexCacheVersion: number | undefined;
 }
 
 function getIndexCache(): Map<string, CacheEntry> {
+  if (globalThis.__piFileIndexCacheVersion !== FILE_INDEX_CACHE_VERSION) {
+    globalThis.__piFileIndexCache = new Map();
+    globalThis.__piFileIndexCacheVersion = FILE_INDEX_CACHE_VERSION;
+  }
   if (!globalThis.__piFileIndexCache) globalThis.__piFileIndexCache = new Map();
   return globalThis.__piFileIndexCache;
+}
+
+function sanitizeListing(listing: FileListing, cwd: string): FileListing {
+  return {
+    files: filterDeniedFileIndexPaths(listing.files, cwd),
+    hardTruncated: listing.hardTruncated,
+  };
 }
 
 async function listWithGit(cwd: string): Promise<FileListing | null> {
@@ -140,13 +155,23 @@ export async function GET(req: NextRequest) {
     const now = Date.now();
     let cached = cache.get(cwd);
     if (!cached || cached.expiresAt <= now) {
-      const listing = (await listWithGit(cwd)) ?? listWithWalk(cwd);
+      // Sanitize both git and walk results before caching/searching/responding so
+      // secret names never enter the @-completion index (ChatInput surface).
+      const listing = sanitizeListing((await listWithGit(cwd)) ?? listWithWalk(cwd), cwd);
       for (const [key, entry] of cache) {
         if (entry.expiresAt <= now) cache.delete(key);
       }
       if (cache.size >= CACHE_MAX_ENTRIES) cache.clear();
       cached = { listing, expiresAt: now + CACHE_TTL_MS };
       cache.set(cwd, cached);
+    } else {
+      // Defense in depth: re-sanitize on load so a stale in-process entry cannot
+      // keep serving pre-sanitization names if versioning ever races.
+      const sanitized = sanitizeListing(cached.listing, cwd);
+      if (sanitized.files.length !== cached.listing.files.length) {
+        cached = { listing: sanitized, expiresAt: cached.expiresAt };
+        cache.set(cwd, cached);
+      }
     }
 
     if (query) {
