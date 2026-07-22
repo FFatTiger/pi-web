@@ -168,10 +168,9 @@ export class AgentSessionWrapper {
       if (settled) {
         const snapshot = settled;
         queueMicrotask(() => {
-          void Promise.resolve(this.settledNotifier(snapshot)).catch((error) => {
+          void Promise.resolve(this.settledNotifier(snapshot)).catch(() => {
             console.error(
-              `[pi-web] settled notification failed for ${snapshot.sessionId} cycle ${snapshot.cycleId}:`,
-              error instanceof Error ? error.message : String(error),
+              `[pi-web] settled notification failed for ${snapshot.sessionId} cycle ${snapshot.cycleId}`,
             );
           });
         });
