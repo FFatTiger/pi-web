@@ -21,6 +21,7 @@
     "!.next/dev",
     "!.next/**/*.js.map",
     "public",
+    "app/manifest.ts",
     "next.config.ts",
     "package.json"
   ],
