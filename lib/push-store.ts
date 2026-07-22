@@ -60,9 +60,33 @@ export class PushStoreLockedError extends Error {
 
 const MAX_SUBSCRIPTIONS = 20;
 
+const STATE_KEYS = new Set(["version", "vapid", "subscriptions"]);
+const VAPID_KEYS = new Set(["publicKey", "privateKey"]);
+const SUBSCRIPTION_KEYS = new Set([
+  "endpoint",
+  "p256dh",
+  "auth",
+  "createdAt",
+  "authFingerprint",
+]);
+
 type GlobalPushStore = typeof globalThis & {
   __piPushStore?: PushStore;
 };
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+function hasExactKeys(record: Record<string, unknown>, allowed: Set<string>): boolean {
+  const keys = Object.keys(record);
+  if (keys.length !== allowed.size) return false;
+  return keys.every((key) => allowed.has(key));
+}
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
@@ -76,47 +100,50 @@ function isValidIsoDate(value: string): boolean {
   return Number.isFinite(parsed) && new Date(parsed).toISOString() === value;
 }
 
+/**
+ * Strict schema for the private, server-owned state file.
+ * Exact own-key sets only — unknown keys are rejected so later mutations cannot
+ * silently normalize corruption. Used for both load and pre-persist validation.
+ */
 function validateState(value: unknown): PushStateFile {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
+  if (!isPlainObject(value) || !hasExactKeys(value, STATE_KEYS)) {
     throw new PushStoreLockedError();
   }
-  const record = value as Record<string, unknown>;
-  if (record.version !== 1) throw new PushStoreLockedError();
-  if (!record.vapid || typeof record.vapid !== "object" || Array.isArray(record.vapid)) {
+  if (value.version !== 1) throw new PushStoreLockedError();
+  if (!isPlainObject(value.vapid) || !hasExactKeys(value.vapid, VAPID_KEYS)) {
     throw new PushStoreLockedError();
   }
-  const vapid = record.vapid as Record<string, unknown>;
+  const vapid = value.vapid;
   if (!isNonEmptyString(vapid.publicKey) || !isNonEmptyString(vapid.privateKey)) {
     throw new PushStoreLockedError();
   }
-  if (!Array.isArray(record.subscriptions)) throw new PushStoreLockedError();
-  if (record.subscriptions.length > MAX_SUBSCRIPTIONS) throw new PushStoreLockedError();
+  if (!Array.isArray(value.subscriptions)) throw new PushStoreLockedError();
+  if (value.subscriptions.length > MAX_SUBSCRIPTIONS) throw new PushStoreLockedError();
 
   const endpoints = new Set<string>();
   const subscriptions: StoredPushSubscription[] = [];
-  for (const item of record.subscriptions) {
-    if (!item || typeof item !== "object" || Array.isArray(item)) {
+  for (const item of value.subscriptions) {
+    if (!isPlainObject(item) || !hasExactKeys(item, SUBSCRIPTION_KEYS)) {
       throw new PushStoreLockedError();
     }
-    const sub = item as Record<string, unknown>;
     if (
-      !isNonEmptyString(sub.endpoint) ||
-      !isNonEmptyString(sub.p256dh) ||
-      !isNonEmptyString(sub.auth) ||
-      !isNonEmptyString(sub.createdAt) ||
-      !isNonEmptyString(sub.authFingerprint)
+      !isNonEmptyString(item.endpoint) ||
+      !isNonEmptyString(item.p256dh) ||
+      !isNonEmptyString(item.auth) ||
+      !isNonEmptyString(item.createdAt) ||
+      !isNonEmptyString(item.authFingerprint)
     ) {
       throw new PushStoreLockedError();
     }
-    if (!isValidIsoDate(sub.createdAt)) throw new PushStoreLockedError();
-    if (endpoints.has(sub.endpoint)) throw new PushStoreLockedError();
-    endpoints.add(sub.endpoint);
+    if (!isValidIsoDate(item.createdAt)) throw new PushStoreLockedError();
+    if (endpoints.has(item.endpoint)) throw new PushStoreLockedError();
+    endpoints.add(item.endpoint);
     subscriptions.push({
-      endpoint: sub.endpoint,
-      p256dh: sub.p256dh,
-      auth: sub.auth,
-      createdAt: sub.createdAt,
-      authFingerprint: sub.authFingerprint,
+      endpoint: item.endpoint,
+      p256dh: item.p256dh,
+      auth: item.auth,
+      createdAt: item.createdAt,
+      authFingerprint: item.authFingerprint,
     });
   }
 
@@ -128,6 +155,22 @@ function validateState(value: unknown): PushStateFile {
     },
     subscriptions,
   };
+}
+
+/** Non-secret caller/input validation error (does not lock an existing store). */
+function invalidInput(): never {
+  throw new TypeError("Invalid push store input");
+}
+
+function assertNonEmptyString(value: unknown): asserts value is string {
+  if (!isNonEmptyString(value)) invalidInput();
+}
+
+function assertBrowserSubscription(subscription: BrowserPushSubscription): void {
+  if (!subscription || typeof subscription !== "object") invalidInput();
+  assertNonEmptyString(subscription.endpoint);
+  assertNonEmptyString(subscription.p256dh);
+  assertNonEmptyString(subscription.auth);
 }
 
 export function computeAuthFingerprint(password: string, vapidPrivateKey: string): string {
@@ -145,6 +188,9 @@ export function computeAuthFingerprint(password: string, vapidPrivateKey: string
  * (including Next.js hot reload via `globalThis.__piPushStore`). There is no
  * cross-process file lock; multiple Node processes must not share one state
  * file for concurrent writes.
+ *
+ * Schema: load and persist both run the same strict exact-key validation.
+ * Unknown top-level / vapid / subscription own keys are rejected (not ignored).
  */
 export class PushStore {
   private readonly statePath: string;
@@ -191,9 +237,17 @@ export class PushStore {
           const se = statError as NodeJS.ErrnoException;
           if (se.code !== "ENOENT") this.lock();
         }
+        const generated = this.generateVapidKeys();
+        // Fail closed before any write when the key source is invalid.
+        if (!isNonEmptyString(generated.publicKey) || !isNonEmptyString(generated.privateKey)) {
+          invalidInput();
+        }
         const empty: PushStateFile = {
           version: 1,
-          vapid: this.generateVapidKeys(),
+          vapid: {
+            publicKey: generated.publicKey,
+            privateKey: generated.privateKey,
+          },
           subscriptions: [],
         };
         await this.persist(empty);
@@ -212,8 +266,9 @@ export class PushStore {
     let state: PushStateFile;
     try {
       state = validateState(parsed);
-    } catch {
-      this.lock();
+    } catch (error) {
+      if (error instanceof PushStoreLockedError) this.lock();
+      throw error;
     }
 
     // Fail closed: do not operate on valid secrets at insecure permissions.
@@ -229,7 +284,10 @@ export class PushStore {
     if (this.locked) throw new PushStoreLockedError();
     if (this.state) return this.state;
     this.loading ??= this.loadOrCreate().catch((error) => {
-      this.locked = true;
+      // Invalid generated keys / caller input must not permanently lock create path.
+      if (!(error instanceof TypeError)) {
+        this.locked = true;
+      }
       this.loading = null;
       throw error;
     });
@@ -238,11 +296,14 @@ export class PushStore {
   }
 
   private async persist(state: PushStateFile): Promise<void> {
+    // Defense in depth: never serialize a draft the load path would reject.
+    const validated = validateState(state);
+
     // Same-directory atomic write: pi-web-push.json.tmp-<pid>-<uuid>
     const temp = `${this.statePath}.tmp-${process.pid}-${randomUUID()}`;
     let renamed = false;
     try {
-      await this.fs.writeFile(temp, `${JSON.stringify(state, null, 2)}\n`, {
+      await this.fs.writeFile(temp, `${JSON.stringify(validated, null, 2)}\n`, {
         encoding: "utf8",
         mode: 0o600,
         flag: "wx",
@@ -306,6 +367,8 @@ export class PushStore {
     subscription: BrowserPushSubscription,
     password: string,
   ): Promise<"created" | "updated" | "limit"> {
+    assertBrowserSubscription(subscription);
+    assertNonEmptyString(password);
     return this.mutate((draft) => {
       const fingerprint = computeAuthFingerprint(password, draft.vapid.privateKey);
       const index = draft.subscriptions.findIndex((item) => item.endpoint === subscription.endpoint);
@@ -329,6 +392,8 @@ export class PushStore {
   }
 
   async remove(endpoint: string, password: string): Promise<boolean> {
+    assertNonEmptyString(endpoint);
+    assertNonEmptyString(password);
     return this.mutate((draft) => {
       const fingerprint = computeAuthFingerprint(password, draft.vapid.privateKey);
       const index = draft.subscriptions.findIndex(
@@ -341,6 +406,8 @@ export class PushStore {
   }
 
   async findAuthorized(endpoint: string, password: string): Promise<StoredPushSubscription | null> {
+    assertNonEmptyString(endpoint);
+    assertNonEmptyString(password);
     const state = await this.load();
     const fingerprint = computeAuthFingerprint(password, state.vapid.privateKey);
     const match = state.subscriptions.find(
@@ -350,6 +417,7 @@ export class PushStore {
   }
 
   async listAuthorized(password: string): Promise<StoredPushSubscription[]> {
+    assertNonEmptyString(password);
     return this.mutate((draft) => {
       const fingerprint = computeAuthFingerprint(password, draft.vapid.privateKey);
       const authorized = draft.subscriptions.filter((item) => item.authFingerprint === fingerprint);
@@ -359,6 +427,7 @@ export class PushStore {
   }
 
   async removeEndpoint(endpoint: string): Promise<void> {
+    assertNonEmptyString(endpoint);
     await this.mutate((draft) => {
       draft.subscriptions = draft.subscriptions.filter((item) => item.endpoint !== endpoint);
     });
