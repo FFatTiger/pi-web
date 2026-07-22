@@ -78,6 +78,36 @@ PI_WEB_AUTH_DISABLED=true pi-web
 - 修改配置文件或认证相关环境变量后，需要重启 pi-web 才会生效。
 - 若要在局域网或公网暴露，请使用强密码、HTTPS，并配合防火墙或反代限制访问。不需要远程访问时建议仅绑定本机。
 
+### PWA 与 Web Push
+
+pi-web 可以安装为 Progressive Web App，并在 Agent 运行 settle 后可选发送系统通知。关闭浏览器或 PWA **不会**停止服务端已接受的 Agent：只要 pi-web 进程、宿主机与模型网络仍可用，任务会继续。前台仍是 HTTP + SSE；Web Push 仅在服务端 `agent_settled` 之后启动。
+
+配置与应用门禁同文件：`$PI_CODING_AGENT_DIR/pi-web.json`（默认 `~/.pi/agent/pi-web.json`）。**没有** VAPID 环境变量——密钥由 pi-web 自动生成并存储。
+
+```json
+{
+  "auth": { "password": "replace-me", "disabled": false },
+  "push": { "disabled": false, "subject": "mailto:owner@example.com" }
+}
+```
+
+```bash
+PI_WEB_PUSH_DISABLED=true pi-web
+PI_WEB_PUSH_SUBJECT=mailto:owner@example.com pi-web
+```
+
+- Push 优先级：环境变量（`PI_WEB_PUSH_DISABLED`、`PI_WEB_PUSH_SUBJECT`）覆盖 `pi-web.json` 中的 `push`；缺省 `push.disabled` 为开启（`false`）；缺省 subject 为 `https://github.com/agegr/pi-web`。subject 必须是 `mailto:` 或 `https:` URL。非法值只锁定 Push（安全 status 错误），不影响其余功能。
+- Push 要求应用密码门禁处于 **enabled** 且用户已认证。门禁关闭时订阅接口会拒绝 Push。
+- 浏览器需要安全上下文：**HTTPS**，或本地测试用 **localhost**。通知权限只能在明确的用户手势（设置/铃铛控件）后请求。iOS / iPadOS **16.4+** 必须先“添加到主屏幕”，再在已安装的 standalone PWA 中开启 Push。
+- 页面可见且 running SSE 存活：settle 后 AppShell 显示站内 toast，约 **1500ms** 内 ACK 则抑制系统 Push。无 ACK（隐藏、冻结、关闭或 ACK 被阻）则发系统 Push。超时后的迟到 ACK 会被忽略；极少 toast+Push 重复可接受。
+- 通知文案仅为通用文本（`Agent run finished` / `Agent run failed` / 测试文本），不含 prompt、回答、路径或工具输出。Abort 不通知；中途重试/压缩不通知；仅在最终 `agent_settled` 发一次。
+- Service Worker 只缓存公开 PWA 资源（`/offline.html`、`/manifest.webmanifest`、图标）。不缓存 session、API、应用 HTML、Next chunk，也没有 Background Sync。离线导航只显示通用 fallback。
+- 私有状态文件：`$PI_CODING_AGENT_DIR/pi-web-push.json`（默认 `~/.pi/agent/pi-web-push.json`），权限 **0600**。备份时当成密钥。文件损坏会锁定 Push（不会静默重生密钥）。密码变更会使旧订阅指纹失效；用新密码登录后会自动重绑当前浏览器订阅，无需再次弹权限。
+- 反代：正确终止 HTTPS，**不要**缓冲 SSE，并保持 `/api/agent/*/events` 与 `/api/agent/running/events` 长连接。
+- 更新：banner 提示用户确认刷新；禁止自动刷新，避免中途替换正在使用的页面。只有确认的标签页会刷新；其他标签页会提示已激活版本。
+
+手动平台验收矩阵（非自动化）：[docs/pwa-web-push-acceptance.md](./docs/pwa-web-push-acceptance.md)。
+
 ## 开发
 
 ```bash
@@ -109,10 +139,12 @@ app/
     home/           # 当前用户 home 目录
     models/         # 可用模型、默认模型、thinking levels
     models-config/  # 读写 models.json、测试模型
+    push/           # status、VAPID public key、subscribe、presence、test
     sessions/       # 会话读取、重命名、删除、上下文、HTML 导出
     skills/         # skills 列表、搜索、安装、启停
+  manifest.ts         # Web App Manifest
 components/
-  AppShell.tsx        # 主布局、URL 状态、顶部面板、文件标签
+  AppShell.tsx        # 主布局、URL 状态、顶部面板、文件标签、PWA/Push shell
   SessionSidebar.tsx  # 项目选择、会话树、Explorer
   ChatWindow.tsx      # 消息区、SSE、拖拽图片、minimap
   ChatInput.tsx       # 输入栏、模型/工具/thinking/compact/slash controls
@@ -121,19 +153,25 @@ components/
   SkillsConfig.tsx    # 技能管理面板
   FileExplorer.tsx    # 文件树
   FileViewer.tsx      # 源码、diff、图片、音频、PDF、DOCX 预览
+  AppToast.tsx / OfflineBanner.tsx / Pwa* / PushNotificationControl.tsx
 lib/
   rpc-manager.ts      # AgentSessionWrapper 生命周期和全局 registry
   session-reader.ts   # 解析 .jsonl 会话文件和分支上下文
   normalize.ts        # 规范化 toolCall 字段名
-  file-access.ts      # 文件读取安全边界
+  file-access.ts      # 文件读取安全边界（含 Push 秘密拒绝）
   file-paths.ts       # 文件路径编码/相对路径工具
   markdown.ts         # Markdown/Mermaid/KaTeX 插件配置
   pi-types.ts         # pi 相关类型
+  push-*.ts / pwa-lifecycle.ts / settled-cycle.ts
 hooks/
   useAgentSession.ts  # 会话加载、发送命令、SSE 状态机
+  useAppPresence.ts   # 单一 running SSE + toast ACK
+  usePwaInstall.ts / usePwaUpdate.ts / useWebPush.ts / useOnlineStatus.ts
   useAudio.ts         # 完成提示音
   useDragDrop.ts      # 图片拖拽
   useTheme.ts         # 主题切换
+public/
+  sw.js / offline.html / icons/
 bin/
   pi-web.js           # npm CLI 入口
 ```
