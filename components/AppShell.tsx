@@ -701,14 +701,14 @@ export function AppShell() {
                 const isSuccess = autoNameStatus.kind === "success";
                 const isError = autoNameStatus.kind === "error";
                 const label = autoNameStatus.kind === "naming"
-                  ? "Naming..."
+                  ? "Generating..."
                   : isSuccess
-                    ? "Named"
+                    ? "Title updated"
                     : isError
-                      ? "Name failed"
-                      : "Auto name";
+                      ? "Generation failed"
+                      : "Generate title";
                 const title = !selectedSession
-                  ? "Auto naming is available after the session is saved"
+                  ? "Title generation is available after the session is saved"
                   : !hasMessages
                     ? "Send a message before naming this session"
                     : isError
