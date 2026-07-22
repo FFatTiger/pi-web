@@ -17,6 +17,9 @@ const PUBLIC_PATHS = new Set([
   "/api/gate/status",
   "/api/gate/login",
   "/api/gate/logout",
+  "/manifest.webmanifest",
+  "/sw.js",
+  "/offline.html",
 ]);
 
 export function sanitizeNextPath(value: string | null | undefined): string {
@@ -32,7 +35,7 @@ export function sanitizeNextPath(value: string | null | undefined): string {
 }
 
 export function isGatePublicPath(pathname: string): boolean {
-  return PUBLIC_PATHS.has(pathname);
+  return PUBLIC_PATHS.has(pathname) || pathname.startsWith("/icons/");
 }
 
 export function isApiPath(pathname: string): boolean {
