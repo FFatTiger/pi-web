@@ -46,15 +46,80 @@ test("auto prompt policy uses versioned marker and only default permission", () 
   assert.equal(hook.shouldAttemptAutoPrompt("unsupported", false), false);
 });
 
+test("createAutoPromptClaim is at-most-once even when marker write throws", () => {
+  let writeCalls = 0;
+  const claim = hook.createAutoPromptClaim(
+    () => false,
+    () => {
+      writeCalls += 1;
+      throw new Error("storage unavailable");
+    },
+  );
+
+  assert.equal(claim("default"), true);
+  assert.equal(claim("default"), false);
+  assert.equal(writeCalls, 1);
+});
+
+test("createAutoPromptClaim rejects existing marker and non-default permission", () => {
+  let writeCalls = 0;
+  const claimWithMarker = hook.createAutoPromptClaim(
+    () => true,
+    () => {
+      writeCalls += 1;
+    },
+  );
+  assert.equal(claimWithMarker("default"), false);
+  assert.equal(writeCalls, 0);
+
+  const claimGranted = hook.createAutoPromptClaim(
+    () => false,
+    () => {
+      writeCalls += 1;
+    },
+  );
+  assert.equal(claimGranted("granted"), false);
+  assert.equal(claimGranted("denied"), false);
+  assert.equal(claimGranted("unsupported"), false);
+  assert.equal(writeCalls, 0);
+});
+
+test("createAutoPromptClaim sets in-memory claimed before marker write", () => {
+  const events = [];
+  const claim = hook.createAutoPromptClaim(
+    () => {
+      events.push("read");
+      return false;
+    },
+    () => {
+      events.push("write");
+      // Re-entrant concurrent claim during write must lose (StrictMode / double effect).
+      assert.equal(claim("default"), false);
+    },
+  );
+
+  assert.equal(claim("default"), true);
+  assert.deepEqual(events, ["read", "write"]);
+});
+
 test("headless auto-permission source contract", () => {
   assert.match(source, /const AUTO_PROMPT_KEY = "pi-web:push-auto-prompt-v1"/);
   assert.match(source, /Notification\.permission === "default"/);
+  assert.match(source, /createAutoPromptClaim/);
+  assert.match(source, /claimAutoPrompt\(/);
   assert.ok(
-    source.indexOf("localStorage.setItem(AUTO_PROMPT_KEY") <
+    source.indexOf("claimAutoPrompt") <
       source.indexOf("Notification.requestPermission()"),
+  );
+  assert.ok(
+    source.indexOf("writeAutoPromptMarker") <
+      source.indexOf("Notification.requestPermission()") ||
+      source.indexOf("writeMarker") <
+        source.indexOf("Notification.requestPermission()"),
   );
   assert.doesNotMatch(source, /requestPermission[\s\S]*const enable = useCallback/);
   assert.doesNotMatch(source, /const enable = useCallback/);
+  assert.doesNotMatch(source, /resetAutoPrompt|__test|forTesting/);
   assert.match(source, /requirePushServer\(\)/);
   assert.match(source, /Notification\.requestPermission\(\)/);
   assert.match(source, /getOrCreateSubscription/);
