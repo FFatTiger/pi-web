@@ -70,6 +70,8 @@ export interface ChatInputHandle {
 const TOOL_PRESETS = ["off", "default", "full"] as const;
 const TOOL_PRESET_MAP: Record<"off" | "default" | "full", "none" | "default" | "full"> = { off: "none", default: "default", full: "full" };
 const COMPOSITION_END_ENTER_GRACE_MS = 100;
+const MAX_ATTACHED_IMAGE_BYTES = 10 * 1024 * 1024;
+const MAX_ATTACHED_IMAGES = 10;
 const MODEL_OPTION_COLLATOR = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
 function compareModelOptions(a: ModelOption, b: ModelOption): number {
@@ -302,7 +304,10 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
 
   const processImageFiles = useCallback(async (files: File[]) => {
     if (isStreaming) return;
-    const imageFiles = files.filter((f) => f.type.startsWith("image/"));
+    const remaining = Math.max(0, MAX_ATTACHED_IMAGES - attachedImagesRef.current.length);
+    const imageFiles = files
+      .filter((f) => f.type.startsWith("image/") && f.size <= MAX_ATTACHED_IMAGE_BYTES)
+      .slice(0, remaining);
     if (!imageFiles.length) return;
     const newImages = await Promise.all(
       imageFiles.map(

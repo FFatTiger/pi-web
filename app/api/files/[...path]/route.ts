@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import {
   getAllowedFileRoots,
+  isExistingFilePathAllowed,
   isFilePathAllowed,
   isWindowsAbsolutePath,
   normalizeSlashes,
@@ -36,6 +37,8 @@ const IGNORED_SUFFIXES = [".pyc"];
 const FILE_REQUEST_TYPES = ["list", "read", "download", "meta", "preview", "watch"] as const;
 type FileRequestType = typeof FILE_REQUEST_TYPES[number];
 const FILE_REQUEST_TYPE_SET = new Set<string>(FILE_REQUEST_TYPES);
+const MAX_UPLOAD_FILE_BYTES = 25 * 1024 * 1024;
+const MAX_UPLOAD_TOTAL_BYTES = 100 * 1024 * 1024;
 
 const EXT_TO_LANGUAGE: Record<string, string> = {
   ts: "typescript", tsx: "typescript", js: "javascript", jsx: "javascript",
@@ -150,6 +153,12 @@ export async function POST(
 
     const formData = await request.formData();
     const files = formData.getAll("files").filter((entry): entry is File => typeof entry !== "string");
+    if (files.some((file) => file.size > MAX_UPLOAD_FILE_BYTES)) {
+      return NextResponse.json({ error: "Each upload must be 25MB or smaller" }, { status: 413 });
+    }
+    if (files.reduce((total, file) => total + file.size, 0) > MAX_UPLOAD_TOTAL_BYTES) {
+      return NextResponse.json({ error: "Uploads must total 100MB or less" }, { status: 413 });
+    }
     const fileNames = files.map((file) => file.name);
     const validationError = validateUploadFileNames(fileNames);
     if (validationError) {
@@ -415,6 +424,10 @@ export async function GET(
       stat = fs.statSync(filePath);
     } catch {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+
+    if (!allowedBySessionReference && !isExistingFilePathAllowed(filePath, allowedRoots)) {
+      return NextResponse.json({ error: "Access denied" }, { status: 403 });
     }
 
     if (type === "read") {
