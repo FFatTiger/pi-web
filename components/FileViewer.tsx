@@ -970,6 +970,18 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, gitRefresh
 
                   return <a href={href} {...props} onClick={handleClick}>{children}</a>;
                 },
+                img({ src, alt, ...props }) {
+                  delete props.node;
+                  const imagePath = typeof src === "string"
+                    ? resolveLocalFileHref(src, markdownDirectory, cwd ?? markdownDirectory)
+                    : null;
+                  const imageSrc = imagePath
+                    ? getFileApiUrl(imagePath, "read", sourceSessionId)
+                    : src;
+                  // Dynamic local paths are served directly by the file API.
+                  // eslint-disable-next-line @next/next/no-img-element
+                  return <img src={imageSrc} alt={alt ?? ""} loading="lazy" {...props} />;
+                },
               }}
             >
               {data.content}
