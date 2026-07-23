@@ -21,6 +21,7 @@ interface Props {
   onInitialRestoreDone?: () => void;
   refreshKey?: number;
   onSessionDeleted?: (sessionId: string) => void;
+  pendingNewSession?: SessionInfo | null;
   selectedCwd?: string | null;
   onCwdChange?: (cwd: string | null, projectRoot?: string | null) => void;
   onOpenFile?: (filePath: string, fileName: string) => void;
@@ -321,7 +322,7 @@ function PiWebTitle() {
   );
 }
 
-export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onExplorerRefresh, onAtMention, onAtMentions }: Props) {
+export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, pendingNewSession, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onExplorerRefresh, onAtMention, onAtMentions }: Props) {
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -717,9 +718,13 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   // works when the prop value won't change — e.g. re-clicking the already
   // open session after manually switching worktrees.
   const handleSelectSessionFromList = useCallback((s: SessionInfo) => {
+    // Don't navigate to a session whose .jsonl file hasn't been written
+    // yet (optimistically displayed while pi is still streaming). It
+    // would show an empty chat because the file isn't readable yet.
+    if (pendingNewSession && s.id === pendingNewSession.id && !allSessions.some((as) => as.id === s.id)) return;
     if (s.cwd) setSelectedCwd(s.cwd);
     onSelectSession(s);
-  }, [onSelectSession]);
+  }, [onSelectSession, pendingNewSession, allSessions]);
 
   const handleNewSession = useCallback(() => {
     if (!selectedCwd) return;
@@ -739,9 +744,29 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
 
   // Sessions of every worktree in the selected project are shown together
   const selectedProject = projectRootFor(selectedCwd);
-  const filteredSessions = selectedProject
-    ? allSessions.filter((s) => (s.projectRoot ?? s.cwd) === selectedProject)
-    : allSessions;
+  const filteredSessions = (() => {
+    const sessions = selectedProject
+      ? allSessions.filter((s) => (s.projectRoot ?? s.cwd) === selectedProject)
+      : allSessions;
+    // A brand-new session may be running but not yet discoverable via the
+    // session list API (pi writes .jsonl files lazily during streaming).
+    // Show it optimistically while it is still running so the user can see
+    // it even if they navigate away before the agent finishes.
+    if (pendingNewSession && !sessions.some((s) => s.id === pendingNewSession.id)) {
+      // Only merge if the pending session belongs to the currently-selected
+      // project (or no project filter is active — all sessions are shown).
+      const pendingProject = pendingNewSession.projectRoot ?? pendingNewSession.cwd;
+      if (!selectedProject || pendingProject === selectedProject) {
+        return [pendingNewSession, ...sessions];
+      }
+    }
+    return sessions;
+  })();
+  // Optimistically-displayed session whose .jsonl file hasn't been written
+  // yet. Clicks are suppressed until the API confirms the file exists.
+  const pendingSessionId = pendingNewSession && !allSessions.some((s) => s.id === pendingNewSession.id)
+    ? pendingNewSession.id
+    : null;
   const showWorktreeSwitcher = Boolean(
     worktreeState?.isGit
     && worktreeState.isTopLevel
@@ -1483,6 +1508,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             selectedSessionId={selectedSessionId}
             runningSessionIds={runningSessionIds}
             unreadSessionIds={unreadSessionIds}
+            pendingSessionId={pendingSessionId}
             onSelectSession={handleSelectSessionFromList}
             onRenamed={loadSessions}
             onSessionDeleted={(id) => {
@@ -1622,6 +1648,7 @@ function SessionTreeItem({
   selectedSessionId,
   runningSessionIds,
   unreadSessionIds,
+  pendingSessionId,
   onSelectSession,
   onRenamed,
   onSessionDeleted,
@@ -1631,6 +1658,7 @@ function SessionTreeItem({
   selectedSessionId: string | null;
   runningSessionIds: Set<string>;
   unreadSessionIds: Set<string>;
+  pendingSessionId: string | null;
   onSelectSession: (s: SessionInfo) => void;
   onRenamed?: () => void;
   onSessionDeleted?: (id: string) => void;
@@ -1658,6 +1686,7 @@ function SessionTreeItem({
           isSelected={node.session.id === selectedSessionId}
           isRunning={runningSessionIds.has(node.session.id)}
           isUnread={unreadSessionIds.has(node.session.id)}
+          isPending={node.session.id === pendingSessionId}
           onClick={() => onSelectSession(node.session)}
           onRenamed={onRenamed}
           onDeleted={(id) => onSessionDeleted?.(id)}
@@ -1670,17 +1699,18 @@ function SessionTreeItem({
       {hasChildren && !collapsed && (
         <div>
           {node.children.map((child) => (
-            <SessionTreeItem
-              key={child.session.id}
-              node={child}
-              selectedSessionId={selectedSessionId}
-              runningSessionIds={runningSessionIds}
-              unreadSessionIds={unreadSessionIds}
-              onSelectSession={onSelectSession}
-              onRenamed={onRenamed}
-              onSessionDeleted={onSessionDeleted}
-              depth={depth + 1}
-            />
+              <SessionTreeItem
+                key={child.session.id}
+                node={child}
+                selectedSessionId={selectedSessionId}
+                runningSessionIds={runningSessionIds}
+                unreadSessionIds={unreadSessionIds}
+                pendingSessionId={pendingSessionId}
+                onSelectSession={onSelectSession}
+                onRenamed={onRenamed}
+                onSessionDeleted={onSessionDeleted}
+                depth={depth + 1}
+              />
           ))}
         </div>
       )}
@@ -1756,6 +1786,7 @@ function SessionItem({
   isSelected,
   isRunning,
   isUnread,
+  isPending,
   onClick,
   onRenamed,
   onDeleted,
@@ -1768,6 +1799,7 @@ function SessionItem({
   isSelected: boolean;
   isRunning?: boolean;
   isUnread?: boolean;
+  isPending?: boolean;
   onClick: () => void;
   onRenamed?: () => void;
   onDeleted?: (id: string) => void;
@@ -1835,7 +1867,7 @@ function SessionItem({
 
   return (
     <div
-      onClick={confirmDelete || renaming ? undefined : onClick}
+      onClick={confirmDelete || renaming || isPending ? undefined : onClick}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => { setHovered(false); }}
       style={{
@@ -1844,7 +1876,7 @@ function SessionItem({
         alignItems: "center",
         paddingLeft: depth > 0 ? depth * 12 + 14 : 14,
         paddingRight: 8,
-        cursor: confirmDelete || renaming ? "default" : "pointer",
+        cursor: confirmDelete || renaming || isPending ? "default" : "pointer",
         background: confirmDelete
           ? "rgba(239,68,68,0.06)"
           : isSelected ? "var(--bg-selected)" : hovered ? "var(--bg-hover)" : "transparent",
@@ -1948,7 +1980,7 @@ function SessionItem({
               }}
               title={title}
             >
-              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0, opacity: isPending ? 0.6 : 1 }}>
                 {title}
               </span>
             </div>

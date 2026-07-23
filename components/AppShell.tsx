@@ -42,6 +42,10 @@ export function AppShell() {
   );
   const [initialCwdError, setInitialCwdError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  // Newly-created session that may not be discoverable via the session list API
+  // yet (pi writes the .jsonl file lazily during streaming). Passed to the
+  // sidebar so it can show the session optimistically while still running.
+  const [pendingNewSession, setPendingNewSession] = useState<SessionInfo | null>(null);
   const [sessionKey, setSessionKey] = useState(0);
   const [explorerRefreshKey, setExplorerRefreshKey] = useState(0);
   const [modelsConfigOpen, setModelsConfigOpen] = useState(false);
@@ -222,6 +226,7 @@ export function AppShell() {
     // Close any session that belongs to a different project — it no longer
     // matches the selected project directory.
     setSelectedSession(null);
+    setPendingNewSession(null);
     setNewSessionCwd((prev) => {
       if (prev && prev !== cwd) return null;
       return prev;
@@ -236,6 +241,7 @@ export function AppShell() {
 
   const handleSelectSession = useCallback((session: SessionInfo, isRestore = false) => {
     setNewSessionCwd(null);
+    setPendingNewSession(null);
     setSelectedSession(session);
     setSessionKey((k) => k + 1);
     setSystemPrompt(null);
@@ -256,6 +262,7 @@ export function AppShell() {
 
   const handleNewSession = useCallback((_sessionId: string, cwd: string) => {
     setSelectedSession(null);
+    setPendingNewSession(null);
     setNewSessionCwd(cwd);
     setSessionKey((k) => k + 1);
     setBranchTree([]);
@@ -291,6 +298,7 @@ export function AppShell() {
   const handleSessionCreated = useCallback((session: SessionInfo) => {
     setNewSessionCwd(null);
     setSelectedSession(session);
+    setPendingNewSession(session);
     setRefreshKey((k) => k + 1);
     hydrateSelectedSession(session.id);
     router.replace(`?session=${encodeURIComponent(session.id)}`, { scroll: false });
@@ -444,6 +452,7 @@ export function AppShell() {
         onInitialRestoreDone={handleInitialRestoreDone}
         refreshKey={refreshKey}
         onSessionDeleted={handleSessionDeleted}
+        pendingNewSession={pendingNewSession}
         selectedCwd={selectedSession?.cwd ?? newSessionCwd ?? null}
         onCwdChange={handleCwdChange}
         onOpenFile={handleOpenFile}
