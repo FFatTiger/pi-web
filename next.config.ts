@@ -2,16 +2,22 @@ import type { NextConfig } from "next";
 import { readFileSync } from "fs";
 import { join } from "path";
 
-const { version } = JSON.parse(readFileSync(join(__dirname, "package.json"), "utf8")) as { version: string };
+const packageRoot = __dirname;
+const { version } = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")) as { version: string };
 let piVersion = "unknown";
 try {
-  const piPkgPath = join(__dirname, "node_modules/@earendil-works/pi-coding-agent/package.json");
+  const piPkgPath = join(packageRoot, "node_modules/@earendil-works/pi-coding-agent/package.json");
   piVersion = (JSON.parse(readFileSync(piPkgPath, "utf8")) as { version: string }).version;
 } catch { /* package not found, use default */ }
 
 const nextConfig: NextConfig = {
+  // Nested git worktrees can sit under a monorepo with another lockfile.
+  // Pin tracing to this package so production output does not follow the parent root.
+  outputFileTracingRoot: packageRoot,
   serverExternalPackages: [
+    "undici",
     "@earendil-works/pi-coding-agent",
+    "@earendil-works/pi-agent-core",
     "@earendil-works/pi-ai",
     "@earendil-works/pi-tui",
     "web-push",

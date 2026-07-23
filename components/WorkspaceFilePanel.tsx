@@ -134,6 +134,7 @@ export function WorkspaceFilePanel(props: WorkspaceFilePanelProps) {
                 cwd={cwd ?? undefined}
                 sourceSessionId={activeTab.sourceSessionId}
                 onOpenFile={(filePath) => onOpenFile(filePath, getFileName(filePath), activeTab.sourceSessionId)}
+                gitRefreshKey={explorerRefreshKey}
               />
             ) : (
               <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-dim)", fontSize: 12 }}>No file open</div>
