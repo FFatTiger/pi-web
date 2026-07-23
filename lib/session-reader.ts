@@ -286,6 +286,11 @@ function entryToUiMessage(
   entry: SessionEntry,
   options: { deferThinking?: boolean; deferToolResultImages?: boolean },
 ): AgentMessage | null {
+  // Supported message roles: user, assistant, toolResult, bashExecution.
+  // bashExecution messages enter the case "message" branch (entry.type === "message").
+  // The early return at line below ("!options.deferThinking || message.role !== "assistant"")
+  // passes non-assistant messages — including bashExecution — through unchanged.
+  // normalizeToolCalls is a secondary guard (returns non-assistant messages as-is).
   switch (entry.type) {
     case "message": {
       const message = options.deferToolResultImages
