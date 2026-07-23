@@ -1,6 +1,7 @@
 import { createAgentSessionFromServices, createAgentSessionServices, getAgentDir, initTheme, SessionManager, Theme } from "@earendil-works/pi-coding-agent";
 import { KeybindingsManager as TuiKeybindingsManager, TUI_KEYBINDINGS } from "@earendil-works/pi-tui";
 import { randomUUID } from "crypto";
+import { existsSync, writeFileSync } from "fs";
 import { invalidateModelsCache } from "./models-cache";
 import { getPushNotifier } from "./push-notifier";
 import { SettledCycleTracker, type SettledCycleSnapshot } from "./settled-cycle";
@@ -8,6 +9,7 @@ import { cacheSessionPath, invalidateSessionListCache } from "./session-reader";
 import type { SlashCommandInfo } from "@earendil-works/pi-coding-agent";
 import type { AgentSessionLike, ExtensionUiContextLike, ToolInfo } from "./pi-types";
 import type { ExtensionUiRequest, ExtensionUiResponse, ExtensionWidgetItem } from "./types";
+import { createHeadlessCustomUiTui, DEFAULT_CUSTOM_UI_COLUMNS } from "./custom-ui-terminal";
 
 // ============================================================================
 // Types
@@ -149,7 +151,7 @@ export class AgentSessionWrapper {
   }
 
   isRunning(): boolean {
-    return this._alive && (this.promptRunning || this.inner.isStreaming || this.inner.isCompacting);
+    return this._alive && (this.promptRunning || this.inner.isStreaming || this.inner.isCompacting || this.inner.isBashRunning);
   }
 
   start(): void {
@@ -191,6 +193,10 @@ export class AgentSessionWrapper {
     });
   }
 
+  async waitUntilReady(): Promise<void> {
+    await this.waitForExtensionsBound();
+  }
+
   private ensureExtensionsBound(options: ExtensionBindingOptions = {}): Promise<void> {
     if (options.forceEmptySystemPrompt) this.forceEmptySystemPrompt = true;
     if (this.extensionsBound) {
@@ -220,7 +226,7 @@ export class AgentSessionWrapper {
             id: randomUUID(),
             method: "notify",
             notifyType: "warning",
-            message: "Extension requested shutdown, but shutdown is not supported in pi-web.",
+            message: "Extension requested shutdown, but shutdown is not supported in Pi Web.",
           } as ExtensionUiRequest as AgentEvent),
           onError: (error) => this.emit({
             type: "extension_error",
@@ -280,7 +286,33 @@ export class AgentSessionWrapper {
 
   private resetIdleTimer(): void {
     if (this.idleTimer) clearTimeout(this.idleTimer);
-    this.idleTimer = setTimeout(() => this.destroy(), 10 * 60 * 1000);
+    this.idleTimer = setTimeout(() => {
+      if (this.isRunning()) {
+        this.resetIdleTimer();
+        return;
+      }
+      this.destroy();
+    }, 10 * 60 * 1000);
+  }
+
+  private persistBashOnlySession(): void {
+    const manager = this.inner.sessionManager;
+    const sessionFile = manager.getSessionFile();
+    if (!sessionFile || existsSync(sessionFile)) return;
+
+    const header = manager.getHeader();
+    if (!header) return;
+
+    const content = [header, ...manager.getEntries()]
+      .map((entry) => JSON.stringify(entry))
+      .join("\n") + "\n";
+    writeFileSync(sessionFile, content, { encoding: "utf8", flag: "wx" });
+
+    // Pi normally delays the first flush until an assistant message exists.
+    // A leading shell command has no assistant message, so mark this SDK
+    // manager as flushed after writing its own generated entries.
+    (manager as unknown as { flushed: boolean }).flushed = true;
+    cacheSessionPath(this.inner.sessionId, sessionFile);
   }
 
   onEvent(listener: EventListener): () => void {
@@ -303,6 +335,9 @@ export class AgentSessionWrapper {
 
     switch (type) {
       case "prompt": {
+        if (this.inner.isBashRunning) {
+          throw new Error("Cannot send a prompt while a shell command is running");
+        }
         // Fire and forget — events come via subscribe
         const promptImages = command.images as Array<{ type: "image"; data: string; mimeType: string }> | undefined;
         const streamingBehavior = command.streamingBehavior as "steer" | "followUp" | undefined;
@@ -341,6 +376,7 @@ export class AgentSessionWrapper {
           sessionFile: this.inner.sessionFile ?? "",
           isStreaming: this.inner.isStreaming,
           isPromptRunning: this.promptRunning,
+          isBashRunning: this.inner.isBashRunning,
           isCompacting: this.inner.isCompacting,
           autoCompactionEnabled: this.inner.autoCompactionEnabled,
           autoRetryEnabled: this.inner.autoRetryEnabled,
@@ -372,6 +408,9 @@ export class AgentSessionWrapper {
       }
 
       case "fork": {
+        if (this.inner.isBashRunning) {
+          throw new Error("Cannot fork while a shell command is running");
+        }
         const entryId = command.entryId as string;
         const sessionManager = this.inner.sessionManager;
         const currentSessionFile = this.inner.sessionFile;
@@ -406,6 +445,9 @@ export class AgentSessionWrapper {
       }
 
       case "navigate_tree": {
+        if (this.inner.isBashRunning) {
+          throw new Error("Cannot navigate while a shell command is running");
+        }
         const result = await this.inner.navigateTree(command.targetId as string, {});
         return { cancelled: result.cancelled };
       }
@@ -554,6 +596,31 @@ export class AgentSessionWrapper {
         return null;
       }
 
+      case "bash": {
+        if (this.promptRunning || this.inner.isStreaming || this.inner.isCompacting || this.inner.isBashRunning) {
+          throw new Error("Cannot run a shell command while the session is busy");
+        }
+        const execution = this.inner.executeBash(
+          command.command as string,
+          undefined,
+          { excludeFromContext: command.excludeFromContext as boolean | undefined },
+        );
+        notifyRunningChange();
+        try {
+          const result = await execution;
+          this.persistBashOnlySession();
+          return result;
+        } finally {
+          invalidateSessionListCache();
+          notifyRunningChange();
+        }
+      }
+
+      case "abort_bash": {
+        this.inner.abortBash();
+        return null;
+      }
+
       default:
         throw new Error(`Unsupported command: ${type}`);
     }
@@ -563,6 +630,7 @@ export class AgentSessionWrapper {
     if (!this._alive) return;
     this._alive = false;
     if (this.idleTimer) clearTimeout(this.idleTimer);
+    if (this.inner.isBashRunning) this.inner.abortBash();
     this.unsubscribe?.();
     for (const pending of this.pendingUiResponses.values()) pending.cancel();
     for (const id of Array.from(this.activeCustomUis.keys())) this.closeCustomUi(id, undefined);
@@ -587,10 +655,10 @@ export class AgentSessionWrapper {
   }
 
   private getCustomUiWidth(options: unknown): number {
-    if (!options || typeof options !== "object") return 92;
+    if (!options || typeof options !== "object") return DEFAULT_CUSTOM_UI_COLUMNS;
     const overlayOptions = (options as { overlayOptions?: unknown }).overlayOptions;
     const resolved = typeof overlayOptions === "function" ? overlayOptions() : overlayOptions;
-    if (!resolved || typeof resolved !== "object") return 92;
+    if (!resolved || typeof resolved !== "object") return DEFAULT_CUSTOM_UI_COLUMNS;
     const width = (resolved as { width?: unknown }).width;
     return typeof width === "number" && Number.isFinite(width)
       ? Math.max(40, Math.min(140, Math.round(width)))
@@ -663,12 +731,13 @@ export class AgentSessionWrapper {
 
     return new Promise<T>((resolve) => {
       let completed = false;
-      const tui = {
-        requestRender: () => {
+      const tui = createHeadlessCustomUiTui(
+        () => {
           const custom = this.activeCustomUis.get(id);
           if (custom) this.emitCustomUiRender(id, custom);
         },
-      };
+        width,
+      );
       const finish = (value: T) => {
         if (completed) return;
         completed = true;
@@ -871,7 +940,7 @@ export class AgentSessionWrapper {
       get theme() { return PLAIN_TEXT_THEME; },
       getAllThemes: () => [],
       getTheme: () => undefined,
-      setTheme: () => ({ success: false, error: "Theme switching is not supported in pi-web extension UI yet" }),
+      setTheme: () => ({ success: false, error: "Theme switching is not supported in Pi Web extension UI yet" }),
       getToolsExpanded: () => false,
       setToolsExpanded: () => {},
     };
@@ -1016,7 +1085,7 @@ export async function startRpcSession(
       // Otherwise DO NOT pass a builtin-only allow-list: passing CODING_TOOL_NAMES
       // set allowedToolNames to coding builtins only, which filtered every
       // extension/package-provided tool (e.g. subagents, web access) out of the
-      // tool registry — so they were unavailable in pi-web sessions even though the
+      // tool registry — so they were unavailable in Pi Web sessions even though the
       // `pi` CLI keeps them. Leaving the allow-list unset lets the SDK register all
       // tools (and activate extension tools); we narrow the ACTIVE set below.
       toolsOption = toolNames.length === 0 ? [] : undefined;
@@ -1033,7 +1102,7 @@ export async function startRpcSession(
 
     // If specific tool names were requested (non-empty), set the active tools to the
     // requested builtin coding tools PLUS all extension/package tools, so installed
-    // extensions stay usable in pi-web just like in the `pi` CLI.
+    // extensions stay usable in Pi Web just like in the `pi` CLI.
     if (toolNames && toolNames.length > 0) {
       inner.setActiveToolsByName(withExtensionTools(inner, toolNames));
     }
