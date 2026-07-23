@@ -21,6 +21,7 @@ import { useAppPresence } from "@/hooks/useAppPresence";
 import { copyText } from "@/lib/clipboard";
 import { getFileName } from "@/lib/file-paths";
 import { buildAtMentionText, buildFileAtMentionsText } from "@/lib/file-fuzzy";
+import { getInitialNavigation } from "@/lib/initial-navigation";
 import type { SessionInfo, SessionTreeNode } from "@/lib/types";
 import type { ChatInputHandle } from "./ChatInput";
 import type { SessionStatsInfo } from "@/lib/pi-types";
@@ -29,10 +30,16 @@ import { OfflineBanner } from "./OfflineBanner";
 import { PwaUpdateBanner } from "./PwaUpdateBanner";
 
 type SessionCopyField = "file" | "id";
+type AutoNameStatus =
+  | { kind: "idle" }
+  | { kind: "naming" }
+  | { kind: "success" }
+  | { kind: "error"; message: string };
 
 export function AppShell() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const [initialNavigation] = useState(() => getInitialNavigation(searchParams));
   const { isDark, toggleTheme } = useTheme();
   const isMobile = useIsMobile();
   const online = useOnlineStatus();
@@ -43,6 +50,10 @@ export function AppShell() {
   const [selectedSession, setSelectedSession] = useState<SessionInfo | null>(null);
   // When user clicks +, we only store the cwd — no fake session id
   const [newSessionCwd, setNewSessionCwd] = useState<string | null>(null);
+  const [initialCwdStatus, setInitialCwdStatus] = useState<"idle" | "validating" | "ready" | "error">(
+    () => initialNavigation.requestedCwd ? "validating" : "idle",
+  );
+  const [initialCwdError, setInitialCwdError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [sessionKey, setSessionKey] = useState(0);
   const [explorerRefreshKey, setExplorerRefreshKey] = useState(0);
@@ -50,9 +61,9 @@ export function AppShell() {
   const [modelsRefreshKey, setModelsRefreshKey] = useState(0);
   const [skillsConfigOpen, setSkillsConfigOpen] = useState(false);
   const [pluginsConfigOpen, setPluginsConfigOpen] = useState(false);
-  const [initialSessionId] = useState<string | null>(() => searchParams.get("session"));
+  const initialSessionId = initialNavigation.sessionId;
   // True once the initial ?session= URL param has been resolved (or confirmed absent)
-  const [initialSessionRestored, setInitialSessionRestored] = useState<boolean>(() => !searchParams.get("session"));
+  const [initialSessionRestored, setInitialSessionRestored] = useState<boolean>(() => !initialSessionId);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileSidebarReady, setMobileSidebarReady] = useState(false);
   // On mobile, an empty entry starts in the session chooser. A direct session
@@ -96,6 +107,10 @@ export function AppShell() {
 
   // Session stats (tokens + cost) — populated by ChatWindow, displayed in top bar
   const [sessionStats, setSessionStats] = useState<SessionStatsInfo | null>(null);
+  const [autoNameStatus, setAutoNameStatus] = useState<AutoNameStatus>({ kind: "idle" });
+  const autoNameTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const activeSessionIdRef = useRef<string | null>(selectedSession?.id ?? null);
+  activeSessionIdRef.current = selectedSession?.id ?? null;
   const handleSessionStatsChange = useCallback((stats: SessionStatsInfo | null) => {
     setSessionStats(stats);
   }, []);
@@ -112,6 +127,7 @@ export function AppShell() {
   useEffect(() => {
     return () => {
       if (sessionCopyTimerRef.current) clearTimeout(sessionCopyTimerRef.current);
+      if (autoNameTimerRef.current) clearTimeout(autoNameTimerRef.current);
     };
   }, []);
 
@@ -199,11 +215,54 @@ export function AppShell() {
     activateWorkspace(projectCwdsRef.current.get(projectRoot) ?? fallbackCwd, projectRoot);
   }, [activateWorkspace]);
 
-  // Update browser tab title when workspace changes
   useEffect(() => {
-    const name = activeCwd ? getFileName(activeCwd) || activeCwd : null;
-    document.title = name ? `${name} — Pi Agent Web` : "Pi Agent Web";
-  }, [activeCwd]);
+    const requestedCwd = initialNavigation.requestedCwd;
+    if (!requestedCwd) return;
+
+    const controller = new AbortController();
+    setInitialCwdStatus("validating");
+    setInitialCwdError(null);
+
+    void fetch("/api/cwd/validate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cwd: requestedCwd }),
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({})) as { cwd?: string; error?: string };
+        if (!response.ok || !data.cwd) {
+          throw new Error(data.error ?? `HTTP ${response.status}`);
+        }
+
+        activateWorkspace(data.cwd, data.cwd);
+        setNewSessionCwd(data.cwd);
+        setInitialSessionRestored(true);
+        setInitialCwdStatus("ready");
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        setInitialCwdError(error instanceof Error ? error.message : String(error));
+        setInitialCwdStatus("error");
+        setInitialSessionRestored(true);
+      });
+
+    return () => controller.abort();
+  }, [activateWorkspace, initialNavigation]);
+
+  // Update browser tab title when workspace changes
+  const activeCwdName = activeCwd ? getFileName(activeCwd) || activeCwd : null;
+  const windowTitle = activeCwdName ? `${activeCwdName} - Pi Web` : "Pi Web";
+  useEffect(() => {
+    const syncWindowTitle = () => {
+      if (document.title !== windowTitle) document.title = windowTitle;
+    };
+
+    syncWindowTitle();
+    const observer = new MutationObserver(syncWindowTitle);
+    observer.observe(document.head, { childList: true, subtree: true, characterData: true });
+    return () => observer.disconnect();
+  }, [windowTitle]);
 
   const handleSelectSession = useCallback((session: SessionInfo, isRestore = false) => {
     const projectRoot = session.projectRoot ?? session.cwd;
@@ -280,6 +339,42 @@ export function AppShell() {
     setRefreshKey((k) => k + 1);
     setExplorerRefreshKey((k) => k + 1);
   }, []);
+
+  const handleAutoName = useCallback(async () => {
+    const sessionId = selectedSession?.id;
+    if (!sessionId || autoNameStatus.kind === "naming") return;
+    if (autoNameTimerRef.current) clearTimeout(autoNameTimerRef.current);
+    setActiveTopPanel(null);
+    setAutoNameStatus({ kind: "naming" });
+
+    try {
+      const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/auto-name`, {
+        method: "POST",
+      });
+      const body = (await response.json().catch(() => ({}))) as { title?: string; error?: string };
+      if (!response.ok || !body.title) {
+        throw new Error(body.error || `HTTP ${response.status}`);
+      }
+
+      const title = body.title.trim();
+      setRefreshKey((key) => key + 1);
+      if (activeSessionIdRef.current !== sessionId) return;
+      setSelectedSession((current) => current?.id === sessionId ? { ...current, name: title } : current);
+      setSessionStats((current) => current?.sessionId === sessionId ? { ...current, sessionName: title } : current);
+      setAutoNameStatus({ kind: "success" });
+      autoNameTimerRef.current = setTimeout(() => setAutoNameStatus({ kind: "idle" }), 1800);
+    } catch (error) {
+      if (activeSessionIdRef.current !== sessionId) return;
+      const message = error instanceof Error ? error.message : String(error);
+      setAutoNameStatus({ kind: "error", message });
+      autoNameTimerRef.current = setTimeout(() => setAutoNameStatus({ kind: "idle" }), 5000);
+    }
+  }, [autoNameStatus.kind, selectedSession?.id]);
+
+  useEffect(() => {
+    if (autoNameTimerRef.current) clearTimeout(autoNameTimerRef.current);
+    setAutoNameStatus({ kind: "idle" });
+  }, [selectedSession?.id]);
 
   const handleSessionForked = useCallback((newSessionId: string) => {
     setRefreshKey((k) => k + 1);
@@ -375,6 +470,7 @@ export function AppShell() {
         onSelectSession={handleSelectSession}
         onNewSession={handleNewSession}
         initialSessionId={initialSessionId}
+        skipInitialProjectSelection={initialNavigation.requestedCwd !== null}
         onInitialRestoreDone={handleInitialRestoreDone}
         refreshKey={refreshKey}
         onSessionDeleted={handleSessionDeleted}
@@ -670,6 +766,78 @@ export function AppShell() {
                   <span>Full history</span>
                 </button>
               )}
+              {!isMobile && (() => {
+                const hasMessages = Boolean(
+                  selectedSession
+                  && (sessionStats?.userMessages ?? selectedSession.messageCount) > 0,
+                );
+                const disabled = !selectedSession || !hasMessages || autoNameStatus.kind === "naming";
+                const isSuccess = autoNameStatus.kind === "success";
+                const isError = autoNameStatus.kind === "error";
+                const label = autoNameStatus.kind === "naming"
+                  ? "Generating..."
+                  : isSuccess
+                    ? "Title updated"
+                    : isError
+                      ? "Generation failed"
+                      : "Generate title";
+                const title = !selectedSession
+                  ? "Title generation is available after the session is saved"
+                  : !hasMessages
+                    ? "Send a message before naming this session"
+                    : isError
+                      ? autoNameStatus.message
+                      : "Generate a session title";
+
+                return (
+                  <button
+                    type="button"
+                    onClick={() => void handleAutoName()}
+                    disabled={disabled}
+                    title={title}
+                    aria-label={label}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 6,
+                      height: "100%", padding: "0 12px",
+                      background: "none", border: "none",
+                      borderTop: "2px solid transparent",
+                      borderRight: "1px solid var(--border)",
+                      color: isError ? "#dc2626" : isSuccess ? "var(--accent)" : disabled ? "var(--text-dim)" : "var(--text-muted)",
+                      cursor: disabled ? "not-allowed" : "pointer",
+                      opacity: disabled && autoNameStatus.kind !== "naming" ? 0.45 : 1,
+                      flexShrink: 0, fontSize: 11, whiteSpace: "nowrap",
+                      transition: "color 0.1s, background 0.1s, opacity 0.1s",
+                    }}
+                    onMouseEnter={(e) => {
+                      if (disabled) return;
+                      e.currentTarget.style.color = isError ? "#dc2626" : "var(--text)";
+                      e.currentTarget.style.background = "var(--bg-hover)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.color = isError ? "#dc2626" : isSuccess ? "var(--accent)" : disabled ? "var(--text-dim)" : "var(--text-muted)";
+                      e.currentTarget.style.background = "none";
+                    }}
+                  >
+                    {autoNameStatus.kind === "naming" ? (
+                      <svg className="animate-spin" width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" opacity="0.25" />
+                        <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                      </svg>
+                    ) : isSuccess ? (
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                    ) : (
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="m15 4 5 5L7 22l-5-5Z" />
+                        <path d="m14 5 5 5" />
+                        <path d="M6 4V2M5 3H3M19 19v3M17.5 20.5h3" />
+                      </svg>
+                    )}
+                    <span>{label}</span>
+                  </button>
+                );
+              })()}
               <BranchNavigator
                 tree={branchTree}
                 activeLeafId={branchActiveLeafId}
@@ -1027,6 +1195,27 @@ export function AppShell() {
               onContextUsageChange={handleContextUsageChange}
               onOpenFile={handleOpenLinkedFile}
             />
+          ) : initialCwdStatus === "validating" ? (
+            <div
+              role="status"
+              style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, padding: 24, color: "var(--text-muted)", textAlign: "center" }}
+            >
+              <div style={{ fontSize: 14, color: "var(--text)" }}>Opening workspace...</div>
+              <div style={{ maxWidth: "min(720px, 100%)", overflowWrap: "anywhere", fontFamily: "var(--font-mono)", fontSize: 12 }}>
+                {initialNavigation.requestedCwd}
+              </div>
+            </div>
+          ) : initialCwdStatus === "error" ? (
+            <div
+              role="alert"
+              style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, padding: 24, color: "var(--text-muted)", textAlign: "center" }}
+            >
+              <div style={{ fontSize: 14, color: "#dc2626" }}>Unable to open workspace</div>
+              <div style={{ maxWidth: "min(720px, 100%)", overflowWrap: "anywhere", fontFamily: "var(--font-mono)", fontSize: 12 }}>
+                {initialNavigation.requestedCwd}
+              </div>
+              <div style={{ maxWidth: 720, fontSize: 12 }}>{initialCwdError}</div>
+            </div>
           ) : showPlaceholder ? (
             activeCwd ? (
               <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 15 }}>
