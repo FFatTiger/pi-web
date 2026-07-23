@@ -2,8 +2,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { createJiti } from "jiti";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const jiti = createJiti(import.meta.url, { alias: { "@": process.cwd() } });
+const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "../../..");
+const jiti = createJiti(import.meta.url, { alias: { "@": packageRoot } });
 const statusRoute = await jiti.import("./status/route.ts");
 const keyRoute = await jiti.import("./vapid-public-key/route.ts");
 const subscribeRoute = await jiti.import("./subscribe/route.ts");

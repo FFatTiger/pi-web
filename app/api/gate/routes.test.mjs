@@ -3,13 +3,17 @@ import test, { afterEach, beforeEach } from "node:test";
 import { createJiti } from "jiti";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
+// Anchor @/ and rate-limit reset to this package root so nested worktree runs
+// do not share modules with a monorepo parent cwd.
+const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "../../..");
 const jiti = createJiti(import.meta.url, {
-  alias: { "@": process.cwd() },
+  alias: { "@": packageRoot },
 });
 
-const limiter = await jiti.import("../../../lib/web-auth-rate-limit.ts");
+const limiter = await jiti.import(join(packageRoot, "lib/web-auth-rate-limit.ts"));
 
 const originalEnv = {
   PI_CODING_AGENT_DIR: process.env.PI_CODING_AGENT_DIR,

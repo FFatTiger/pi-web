@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { createJiti } from "jiti";
-const jiti = createJiti(import.meta.url, { alias: { "@": process.cwd() } });
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "../../..");
+const jiti = createJiti(import.meta.url, { alias: { "@": packageRoot } });
 const route = await jiti.import("./presence/route.ts");
 const pushHandlers = await jiti.import("../../../lib/push-route-handlers.ts");
 const presenceRouteSource = readFileSync(new URL("./presence/route.ts", import.meta.url), "utf8");
