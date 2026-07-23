@@ -55,7 +55,7 @@ export function buildSessionTitleAgentOptions(source: Agent): AgentOptions {
     },
     convertToLlm: source.convertToLlm,
     transformContext: source.transformContext,
-    streamFunction: source.streamFunction,
+    streamFn: source.streamFunction,
     getApiKey: source.getApiKey,
     onPayload: source.onPayload,
     onResponse: source.onResponse,
