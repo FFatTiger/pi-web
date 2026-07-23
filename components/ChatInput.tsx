@@ -209,6 +209,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const [attachedImages, setAttachedImages] = useState<AttachedImage[]>(() => (
     draftKey ? getDraft(draftKey)?.images.map(draftImageToAttachedImage) ?? [] : []
   ));
+  const trimmedValue = value.trimStart();
+  const bashMode = attachedImages.length === 0 && trimmedValue.startsWith("!");
+  const bashExcluded = bashMode && trimmedValue.startsWith("!!");
   const [slashMenuOpen, setSlashMenuOpen] = useState(false);
   const [slashActiveIndex, setSlashActiveIndex] = useState(0);
   const [atQuery, setAtQuery] = useState<AtQueryMatch | null>(null);
@@ -1253,7 +1256,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               gap: 8,
               alignItems: "center",
               background: "var(--bg)",
-              border: `1px solid ${isStreaming && (onSteer || onFollowUp)
+              border: `1px solid ${bashMode ? "var(--tool-bg)" : isStreaming && (onSteer || onFollowUp)
                 ? "rgba(234,179,8,0.4)"
                 : "color-mix(in srgb, var(--border) 70%, transparent)"}`,
               borderRadius: 14,
@@ -1388,6 +1391,13 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           )}
           </div>
         </div>
+
+        {/* Bash mode status label */}
+        {bashMode && (
+          <div className="text-xs px-2 py-1" style={{ color: bashExcluded ? "var(--text-muted)" : "var(--accent)", marginTop: 4 }}>
+            Shell · {bashExcluded ? "output stays local" : "output sent to model"}
+          </div>
+        )}
 
         {/* Bottom bar: left | center (context) | right */}
         <div style={{

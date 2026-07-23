@@ -34,6 +34,7 @@ interface Props {
   onSelectSession: (session: SessionInfo, isRestore?: boolean) => void;
   onNewSession?: (sessionId: string, cwd: string, projectRoot: string) => void;
   initialSessionId?: string | null;
+  skipInitialProjectSelection?: boolean;
   onInitialRestoreDone?: () => void;
   refreshKey?: number;
   onSessionDeleted?: (sessionId: string) => void;
@@ -201,12 +202,12 @@ function useScramble(target: string, running: boolean): string {
   return display;
 }
 
-function PiAgentTitle() {
+function PiWebTitle() {
   const [showVersion, setShowVersion] = useState(false);
   const [scrambling, setScrambling] = useState(false);
   const revertTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const target = showVersion ? `${process.env.NEXT_PUBLIC_APP_VERSION ?? "0.0.0"}p${process.env.NEXT_PUBLIC_PI_VERSION ?? "0.0.0"}` : "Pi Agent Web";
+  const target = showVersion ? `${process.env.NEXT_PUBLIC_APP_VERSION ?? "0.0.0"}p${process.env.NEXT_PUBLIC_PI_VERSION ?? "0.0.0"}` : "Pi Web";
   const display = useScramble(target, scrambling);
 
   const triggerScramble = useCallback((toVersion: boolean) => {
@@ -251,6 +252,7 @@ export function SessionSidebar({
   onSelectSession,
   onNewSession,
   initialSessionId,
+  skipInitialProjectSelection = false,
   onInitialRestoreDone,
   refreshKey,
   onSessionDeleted,
@@ -411,11 +413,12 @@ export function SessionSidebar({
       }
       onInitialRestoreDone?.();
     }
+    if (skipInitialProjectSelection) return;
     if (!activeProjectRoot && projectGroups.length > 0) {
       const first = projectGroups[0];
       onSelectProject(first.root, first.root);
     }
-  }, [activeProjectRoot, allSessions, initialSessionId, onInitialRestoreDone, onSelectProject, onSelectSession, projectGroups]);
+  }, [activeProjectRoot, allSessions, initialSessionId, onInitialRestoreDone, onSelectProject, onSelectSession, projectGroups, skipInitialProjectSelection]);
 
   const activateManualProject = useCallback((root: string) => {
     const openedAt = new Date().toISOString();
@@ -539,7 +542,7 @@ export function SessionSidebar({
         }}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <PiAgentTitle />
+          <PiWebTitle />
           <div style={{ display: "flex", gap: 6, position: "relative" }} ref={directoryPopoverRef}>
             <button
               onClick={() => void loadSessions(false)}
@@ -1340,15 +1343,20 @@ function SessionItem({
                 lineHeight: 1.4,
                 color: "var(--text)",
               }}
-              title={isRunning ? `${title} · Agent running…` : isUnread ? `${title} · New activity` : title}
+              title={title}
             >
-              {isRunning ? <RunningSessionIndicator /> : isUnread ? <UnreadSessionIndicator /> : null}
               <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
                 {title}
               </span>
             </div>
-            <div style={{ marginTop: 2, display: "flex", gap: 8, color: "var(--text-dim)", fontSize: 11, minWidth: 0 }}>
-              <span title={session.modified}>{formatRelativeTime(session.modified)}</span>
+            <div style={{ marginTop: 2, display: "flex", alignItems: "center", gap: 8, color: "var(--text-dim)", fontSize: 11, minWidth: 0 }}>
+              {isRunning ? (
+                <RunningSessionIndicator />
+              ) : isUnread ? (
+                <UnreadSessionIndicator />
+              ) : (
+                <span title={session.modified}>{formatRelativeTime(session.modified)}</span>
+              )}
               <span>{session.messageCount} msgs</span>
               {session.worktreeBranch && (
                 <span
