@@ -3,6 +3,7 @@
 import { useMemo, type MouseEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import { resolveLocalFileHref } from "@/lib/file-links";
+import { encodeFilePathForApi } from "@/lib/file-paths";
 import { markdownRehypePlugins, markdownRemarkPlugins } from "@/lib/markdown";
 import { MermaidBlock, CodeBlock } from "./MermaidBlock";
 
@@ -72,6 +73,16 @@ export function MarkdownBody({ children, className, isStreaming, cwd, onOpenFile
                 {children}
               </a>
             );
+          },
+          img({ src, alt, ...props }) {
+            delete props.node;
+            const filePath = typeof src === "string" ? resolveLocalFileHref(src, cwd) : null;
+            const imageSrc = filePath
+              ? `/api/files/${encodeFilePathForApi(filePath)}?type=read`
+              : src;
+            // Dynamic local paths are served directly by the file API.
+            // eslint-disable-next-line @next/next/no-img-element
+            return <img src={imageSrc} alt={alt ?? ""} loading="lazy" {...props} />;
           },
           table({ children }) {
             return (
