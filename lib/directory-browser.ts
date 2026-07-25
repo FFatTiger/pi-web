@@ -7,10 +7,23 @@ export interface BrowsableDirectory {
   path: string;
 }
 
+export function getBrowseStartDirectory(directory?: string): string {
+  return directory || homedir();
+}
+
 export function normalizeDirectory(directory: string): string {
   if (directory === "~") return homedir();
   if (directory.startsWith("~/")) return path.resolve(homedir(), directory.slice(2));
   return path.resolve(directory);
+}
+
+export function getParentDirectory(directory: string): string | null {
+  const pathApi = /^[a-zA-Z]:[\\/]/.test(directory) || directory.startsWith("\\\\")
+    ? path.win32
+    : path;
+  const normalized = pathApi.normalize(directory);
+  const parent = pathApi.dirname(normalized);
+  return parent === normalized ? null : parent;
 }
 
 export async function resolveDirectory(directory: string): Promise<string> {
