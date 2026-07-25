@@ -74,6 +74,8 @@ export function DirectoryPicker({ onCancel, onSelect, busy = false, error }: Pro
     const candidate = pathInput.trim();
     if (candidate) void navigateTo(candidate);
   };
+  const hasUncommittedPath = pathInput.trim() !== currentPath;
+  const canSelect = Boolean(currentPath) && !hasUncommittedPath && !busy;
 
   if (!portalTarget) return null;
 
@@ -98,7 +100,6 @@ export function DirectoryPicker({ onCancel, onSelect, busy = false, error }: Pro
           </button>
           <div style={{ minWidth: 0, flex: 1 }}>
             <div style={{ color: "var(--text)", fontWeight: 600, fontSize: 13 }}>Select directory</div>
-            <div title={currentPath} style={{ marginTop: 3, color: "var(--text-dim)", fontFamily: "var(--font-mono)", fontSize: 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{currentPath || "Loading…"}</div>
           </div>
         </div>
 
@@ -155,10 +156,18 @@ export function DirectoryPicker({ onCancel, onSelect, busy = false, error }: Pro
           {(loadError || error) && <div style={{ padding: "8px", color: "#dc2626", fontSize: 11 }}>{loadError ?? error}</div>}
         </div>
 
-        <div className="directory-picker-footer" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexShrink: 0, padding: "10px 12px", borderTop: "1px solid var(--border)" }}>
-          <div title={currentPath} style={{ minWidth: 0, flex: 1, color: "var(--text-dim)", fontFamily: "var(--font-mono)", fontSize: 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{currentPath}</div>
+        <div className="directory-picker-footer" style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 8, flexShrink: 0, padding: "10px 12px", borderTop: "1px solid var(--border)" }}>
           <button className="directory-picker-action" type="button" onClick={onCancel} disabled={busy} style={{ padding: "6px 12px", border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg-hover)", color: "var(--text-muted)", cursor: "pointer" }}>Cancel</button>
-          <button className="directory-picker-action" type="button" onClick={() => onSelect(currentPath)} disabled={busy || !currentPath} style={{ padding: "6px 12px", border: 0, borderRadius: 6, background: "var(--accent)", color: "#fff", fontWeight: 600, opacity: busy || !currentPath ? 0.6 : 1, cursor: "pointer" }}>{busy ? "Checking…" : "Select this folder"}</button>
+          <button
+            className="directory-picker-action"
+            type="button"
+            onClick={() => onSelect(currentPath)}
+            disabled={!canSelect}
+            title={hasUncommittedPath ? "Open this path before selecting it" : "Select current directory"}
+            style={{ padding: "6px 12px", border: 0, borderRadius: 6, background: "var(--accent)", color: "#fff", fontWeight: 600, opacity: canSelect ? 1 : 0.6, cursor: canSelect ? "pointer" : "default" }}
+          >
+            {busy ? "Checking…" : "Select this folder"}
+          </button>
         </div>
       </div>
     </div>,
