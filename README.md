@@ -10,6 +10,8 @@ The same pi session in CLI and Pi Web: structured tool calls, readable Markdown,
 
 ## Quick Start
 
+Pi Web requires Node.js 22.19.0 or newer. Check your version with `node --version`.
+
 **Run without installing:**
 
 ```bash
