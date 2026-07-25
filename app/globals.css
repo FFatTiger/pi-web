@@ -929,19 +929,6 @@ span.linenumber {
     border-left: none !important;
     display: none !important;
   }
-  .directory-picker-backdrop {
-    align-items: stretch !important;
-    padding: max(8px, env(safe-area-inset-top)) 0 max(8px, env(safe-area-inset-bottom)) !important;
-  }
-  .directory-picker-panel {
-    width: 100% !important;
-    height: auto !important;
-    max-height: none !important;
-    align-self: stretch;
-    border-radius: 0 !important;
-    border-left: 0 !important;
-    border-right: 0 !important;
-  }
   .directory-picker-back,
   .directory-picker-entry,
   .directory-picker-action {
