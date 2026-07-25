@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef, useCallback, type CSSProperties, type MouseEvent } from "react";
+import { useEffect, useState, useRef, useCallback, useMemo, type CSSProperties, type MouseEvent } from "react";
 import {
   Prism as SyntaxHighlighter,
   createElement as renderSyntaxNode,
@@ -19,7 +19,7 @@ import {
 } from "@/lib/file-types";
 import { encodeFilePathForApi, getFileDirectory, getFileName, getRelativeFilePath } from "@/lib/file-paths";
 import { resolveLocalFileHref } from "@/lib/file-links";
-import { markdownPreviewRehypePlugins, markdownPreviewRemarkPlugins } from "@/lib/markdown";
+import { markdownPreviewRehypePlugins, markdownPreviewRemarkPlugins, normalizeDisplayMath } from "@/lib/markdown";
 import { CodeBlock, MermaidBlock } from "./MermaidBlock";
 import { parseUnifiedPatch } from "@/lib/patch";
 import type { GitFileDiffResponse } from "@/lib/git-types";
@@ -895,6 +895,11 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionL
     if (!hasGitDiff && displayMode === "diff") setDisplayMode("source");
   }, [displayMode, hasGitDiff]);
 
+  const markdownPreview = useMemo(
+    () => (data?.language === "markdown" ? normalizeDisplayMath(data.content) : ""),
+    [data],
+  );
+
   useEffect(() => {
     const updateSelectedLineRange = () => {
       const root = contentRef.current;
@@ -1146,7 +1151,7 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionL
                 },
               }}
             >
-              {data.content}
+              {markdownPreview}
             </ReactMarkdown>
           </div>
         ) : (
