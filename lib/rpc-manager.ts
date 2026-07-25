@@ -380,7 +380,7 @@ export class AgentSessionWrapper {
         const { provider, modelId } = command as { provider: string; modelId: string };
         let model = this.inner.modelRuntime.getModel(provider, modelId);
         if (!model) {
-          await this.inner.modelRuntime.reloadConfig();
+          await this.inner.modelRuntime.refresh({ allowNetwork: false });
           model = this.inner.modelRuntime.getModel(provider, modelId);
         }
         if (!model) throw new Error(`Model not found: ${provider}/${modelId}`);
