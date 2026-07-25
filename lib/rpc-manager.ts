@@ -984,34 +984,6 @@ export function getRunningRpcSessionIds(): string[] {
   return [...ids];
 }
 
-export function getRegistryOnlySessions(): { id: string; cwd: string; messageCount: number; firstMessage: string }[] {
-  const result: { id: string; cwd: string; messageCount: number; firstMessage: string }[] = [];
-  for (const [, wrapper] of getRegistry()) {
-    const id = wrapper.sessionId;
-    const file = wrapper.inner.sessionFile;
-    const cwd = wrapper.inner.sessionManager.getCwd();
-    if (file && existsSync(file)) continue;
-    if (!cwd) continue;
-    let firstMessage = "";
-    let messageCount = 0;
-    for (const entry of wrapper.inner.sessionManager.getEntries()) {
-      if (entry.type === "message") {
-        messageCount += 1;
-        const msg = entry.message as { role?: string; content?: unknown };
-        if (!firstMessage && msg.role === "user") {
-          firstMessage = typeof msg.content === "string"
-            ? msg.content
-            : Array.isArray(msg.content)
-              ? (msg.content.find((b: unknown) => (b as { type?: string })?.type === "text" && typeof (b as { text?: string })?.text === "string") as { text?: string } | undefined)?.text ?? ""
-              : "";
-        }
-      }
-    }
-    result.push({ id, cwd, messageCount, firstMessage });
-  }
-  return result;
-}
-
 // ----------------------------------------------------------------------------
 // Running-status broadcaster
 //
