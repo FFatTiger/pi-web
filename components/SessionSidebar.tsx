@@ -440,9 +440,12 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         return next;
       });
     }
+    if (completedInBackground.length > 0) {
+      loadSessions(false);
+    }
 
     previousRunningSessionIdsRef.current = runningSessionIds;
-  }, [runningSessionIds, selectedSessionId]);
+  }, [runningSessionIds, selectedSessionId, loadSessions]);
 
   useEffect(() => {
     if (!selectedSessionId) return;
