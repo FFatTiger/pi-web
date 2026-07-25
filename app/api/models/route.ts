@@ -3,6 +3,7 @@ import { resolve } from "path";
 import { createAgentSessionServices, getAgentDir, type SettingsManager } from "@earendil-works/pi-coding-agent";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { loadModelsWithCache, type ModelsData } from "@/lib/models-cache";
+import { getAllowedFileRoots, isExistingFilePathAllowed } from "@/lib/file-access";
 
 export const dynamic = "force-dynamic";
 
@@ -92,6 +93,10 @@ export async function GET(req: Request) {
   }
   if (!cwdStat.isDirectory()) {
     return Response.json({ error: `Not a directory: ${cwd}` }, { status: 400 });
+  }
+  const allowedRoots = await getAllowedFileRoots();
+  if (!isExistingFilePathAllowed(cwd, allowedRoots)) {
+    return Response.json({ error: "Access denied" }, { status: 403 });
   }
 
   try {

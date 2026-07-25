@@ -127,5 +127,3 @@ function normalizeDisplayMath(markdown: string): string {
     })
     .join(lineBreak);
 }
-
-
