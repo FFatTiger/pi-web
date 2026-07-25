@@ -620,13 +620,13 @@ pre, code {
   flex-shrink: 0;
 }
 
-.file-viewer-action-slot {
+.file-viewer-actions {
   display: flex;
   align-items: center;
-  justify-content: center;
-  width: 24px;
   height: 24px;
-  flex: 0 0 24px;
+  gap: 4px;
+  flex-shrink: 0;
+  order: -1;
 }
 
 .file-viewer-mode-switch {
@@ -678,6 +678,17 @@ pre, code {
 .file-viewer-icon-button:hover {
   background: var(--bg-hover) !important;
   color: var(--text);
+}
+
+.file-viewer-icon-button:disabled {
+  color: var(--text-dim);
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.file-viewer-icon-button:disabled:hover {
+  background: transparent !important;
+  color: var(--text-dim);
 }
 
 .file-viewer-mode-button:focus-visible,
