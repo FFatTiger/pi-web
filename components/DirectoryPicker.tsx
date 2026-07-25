@@ -1,0 +1,156 @@
+"use client";
+
+import { FormEvent, useCallback, useEffect, useState } from "react";
+
+interface DirectoryEntry {
+  name: string;
+  path: string;
+}
+
+interface BrowseResponse {
+  path?: string;
+  directories?: DirectoryEntry[];
+  error?: string;
+}
+
+async function loadDirectories(directory?: string): Promise<BrowseResponse> {
+  const query = directory ? `?path=${encodeURIComponent(directory)}` : "";
+  const response = await fetch(`/api/cwd/browse${query}`);
+  const data = await response.json() as BrowseResponse;
+  if (!response.ok || data.error) throw new Error(data.error ?? `HTTP ${response.status}`);
+  return data;
+}
+
+function parentPath(directory: string): string {
+  if (!directory || directory === "/") return "/";
+  const normalized = directory.replace(/\/+$/, "");
+  const separator = normalized.lastIndexOf("/");
+  return separator <= 0 ? "/" : normalized.slice(0, separator);
+}
+
+function FolderIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true">
+      <path d="M1.5 3h4l1.5 2h7.5v7.5h-13z" />
+    </svg>
+  );
+}
+
+interface Props {
+  onCancel: () => void;
+  onSelect: (path: string) => void;
+  busy?: boolean;
+  error?: string | null;
+}
+
+export function DirectoryPicker({ onCancel, onSelect, busy = false, error }: Props) {
+  const [currentPath, setCurrentPath] = useState("");
+  const [pathInput, setPathInput] = useState("");
+  const [selectedPath, setSelectedPath] = useState("");
+  const [directories, setDirectories] = useState<DirectoryEntry[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const navigateTo = useCallback(async (directory?: string) => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const data = await loadDirectories(directory);
+      const nextPath = data.path ?? directory ?? "/";
+      setCurrentPath(nextPath);
+      setPathInput(nextPath);
+      setSelectedPath(nextPath);
+      setDirectories(data.directories ?? []);
+    } catch (cause) {
+      setLoadError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void navigateTo();
+  }, [navigateTo]);
+
+  const handlePathSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const candidate = pathInput.trim();
+    if (candidate) void navigateTo(candidate);
+  };
+
+  return (
+    <div className="directory-picker-backdrop" role="dialog" aria-modal="true" aria-label="Select directory" onClick={(event) => event.stopPropagation()} style={{ position: "fixed", inset: 0, zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16, background: "rgba(0,0,0,0.38)" }}>
+      <div className="directory-picker-panel" style={{ width: "min(520px, 100%)", maxHeight: "min(620px, 85vh)", display: "flex", flexDirection: "column", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 8, boxShadow: "0 18px 50px rgba(0,0,0,0.25)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 14px", borderBottom: "1px solid var(--border)" }}>
+          <button className="directory-picker-back" type="button" onClick={() => void navigateTo(parentPath(currentPath))} disabled={loading || currentPath === "/"} title="Back to parent directory" aria-label="Back to parent directory" style={{ width: 28, height: 28, padding: 0, flexShrink: 0, border: "1px solid var(--border)", borderRadius: 5, background: "var(--bg-hover)", color: "var(--text-muted)", cursor: currentPath === "/" ? "default" : "pointer", opacity: currentPath === "/" ? 0.45 : 1, fontSize: 17 }}>
+            ←
+          </button>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ color: "var(--text)", fontWeight: 600, fontSize: 13 }}>Select directory</div>
+            <div title={currentPath} style={{ marginTop: 3, color: "var(--text-dim)", fontFamily: "var(--font-mono)", fontSize: 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{currentPath || "Loading…"}</div>
+          </div>
+        </div>
+
+        <form onSubmit={handlePathSubmit} style={{ display: "flex", gap: 8, padding: "10px 12px", borderBottom: "1px solid var(--border)" }}>
+          <label htmlFor="directory-path" style={{ position: "absolute", width: 1, height: 1, padding: 0, margin: -1, overflow: "hidden", clip: "rect(0, 0, 0, 0)", whiteSpace: "nowrap", border: 0 }}>
+            Directory path
+          </label>
+          <input
+            className="directory-picker-path"
+            id="directory-path"
+            type="text"
+            value={pathInput}
+            placeholder="/path/to/project or ~/project"
+            autoComplete="off"
+            spellCheck={false}
+            onChange={(event) => {
+              setPathInput(event.target.value);
+              setSelectedPath(event.target.value.trim());
+              setLoadError(null);
+            }}
+            style={{ minWidth: 0, flex: 1, height: 36, padding: "0 10px", border: "1px solid var(--border)", borderRadius: 6, outline: "none", background: "var(--bg-panel)", color: "var(--text)", fontFamily: "var(--font-mono)", fontSize: 12 }}
+          />
+          <button
+            className="directory-picker-action"
+            type="submit"
+            disabled={loading || !pathInput.trim()}
+            title="Open directory"
+            style={{ minWidth: 58, height: 36, padding: "0 12px", border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg-hover)", color: "var(--text-muted)", cursor: loading || !pathInput.trim() ? "default" : "pointer", opacity: loading || !pathInput.trim() ? 0.6 : 1 }}
+          >
+            Open
+          </button>
+        </form>
+
+        <div style={{ minHeight: 260, overflow: "auto", padding: "8px 10px" }}>
+          {loading ? (
+            <div style={{ padding: 8, color: "var(--text-dim)", fontSize: 11 }}>Loading directories…</div>
+          ) : directories.length > 0 ? (
+            directories.map((entry) => (
+              <button
+                key={entry.path}
+                className="directory-picker-entry"
+                type="button"
+                onClick={() => setSelectedPath(entry.path)}
+                onDoubleClick={() => void navigateTo(entry.path)}
+                title={`${entry.path} — double-click to open`}
+                style={{ width: "100%", minHeight: 30, display: "flex", alignItems: "center", gap: 7, padding: "5px 8px", border: 0, borderRadius: 5, background: selectedPath === entry.path ? "var(--bg-selected)" : "none", color: selectedPath === entry.path ? "var(--text)" : "var(--text-muted)", cursor: "pointer", textAlign: "left", fontFamily: "var(--font-mono)", fontSize: 11 }}
+              >
+                <FolderIcon />
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{entry.name}</span>
+              </button>
+            ))
+          ) : (
+            <div style={{ padding: 8, color: "var(--text-dim)", fontSize: 11 }}>No subdirectories</div>
+          )}
+          {(loadError || error) && <div style={{ padding: "8px", color: "#dc2626", fontSize: 11 }}>{loadError ?? error}</div>}
+        </div>
+
+        <div className="directory-picker-footer" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "10px 12px", borderTop: "1px solid var(--border)" }}>
+          <div title={selectedPath} style={{ minWidth: 0, flex: 1, color: "var(--text-dim)", fontFamily: "var(--font-mono)", fontSize: 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selectedPath}</div>
+          <button className="directory-picker-action" type="button" onClick={onCancel} disabled={busy} style={{ padding: "6px 12px", border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg-hover)", color: "var(--text-muted)", cursor: "pointer" }}>Cancel</button>
+          <button className="directory-picker-action" type="button" onClick={() => onSelect(selectedPath)} disabled={busy || !selectedPath} style={{ padding: "6px 12px", border: 0, borderRadius: 6, background: "var(--accent)", color: "#fff", fontWeight: 600, opacity: busy || !selectedPath ? 0.6 : 1, cursor: "pointer" }}>{busy ? "Checking…" : "Select"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}

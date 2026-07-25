@@ -524,6 +524,11 @@ pre, code {
   outline-offset: -2px;
 }
 
+.directory-picker-path:focus-visible {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
 @media (max-width: 640px) {
   .file-viewer-meta {
     display: none;
@@ -750,5 +755,28 @@ span.linenumber {
     min-width: 0 !important;
     border-left: none !important;
     display: none !important;
+  }
+  .directory-picker-backdrop {
+    align-items: stretch !important;
+    padding: max(8px, env(safe-area-inset-top)) 0 max(8px, env(safe-area-inset-bottom)) !important;
+  }
+  .directory-picker-panel {
+    width: 100% !important;
+    max-height: none !important;
+    border-radius: 0 !important;
+    border-left: 0 !important;
+    border-right: 0 !important;
+  }
+  .directory-picker-back,
+  .directory-picker-entry,
+  .directory-picker-action {
+    min-height: 44px !important;
+  }
+  .directory-picker-footer {
+    flex-wrap: wrap;
+    padding-bottom: max(10px, env(safe-area-inset-bottom)) !important;
+  }
+  .directory-picker-footer > div {
+    flex-basis: 100%;
   }
 }

@@ -98,6 +98,7 @@ app/
   api/
     agent/          # 创建/驱动 AgentSession，提供 SSE 事件流
     auth/           # OAuth 和 API key 管理
+    cwd/browse/     # 服务端目录浏览
     cwd/validate/   # 自定义工作目录校验
     default-cwd/    # 获取 pi 默认工作目录
     files/          # 文件列表、读取、预览、watch
@@ -109,6 +110,7 @@ app/
 components/
   AppShell.tsx        # 主布局、URL 状态、顶部面板、文件标签
   SessionSidebar.tsx  # 项目选择、会话树、Explorer
+  DirectoryPicker.tsx # 支持浏览和路径输入的工作目录选择器
   ChatWindow.tsx      # 消息区、SSE、拖拽图片、minimap
   ChatInput.tsx       # 输入栏、模型/工具/thinking/compact/slash controls
   MessageView.tsx     # 消息、thinking、tool call/result 渲染
@@ -117,6 +119,7 @@ components/
   FileExplorer.tsx    # 文件树
   FileViewer.tsx      # 源码、diff、图片、音频、PDF、DOCX 预览
 lib/
+  directory-browser.ts # 目录规范化和安全枚举工具
   http-dispatcher.ts  # 服务端 fetch 的 HTTP(S) 代理配置
   rpc-manager.ts      # AgentSessionWrapper 生命周期和全局 registry
   session-reader.ts   # 解析 .jsonl 会话文件和分支上下文
