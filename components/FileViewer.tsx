@@ -79,6 +79,15 @@ interface SelectedLineRange {
   endLine: number;
 }
 
+function MentionIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="4" />
+      <path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8" />
+    </svg>
+  );
+}
+
 function closestSourceLine(node: Node): HTMLElement | null {
   const element = node.nodeType === Node.ELEMENT_NODE
     ? node as Element
@@ -791,6 +800,7 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionL
   const esRef = useRef<EventSource | null>(null);
   const gitDiffRequestRef = useRef(0);
   const contentRef = useRef<HTMLDivElement | null>(null);
+  const [selectedLineRange, setSelectedLineRange] = useState<SelectedLineRange | null>(null);
 
   const fetchContent = useCallback((filePath: string) => {
     return fetch(getFileApiUrl(filePath, "read", sourceSessionId))
@@ -885,6 +895,36 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionL
   }, [displayMode, hasGitDiff]);
 
   useEffect(() => {
+    const updateSelectedLineRange = () => {
+      const root = contentRef.current;
+      setSelectedLineRange(
+        onMentionLines && displayMode === "source" && root
+          ? getSelectedSourceLineRange(root, window.getSelection())
+          : null,
+      );
+    };
+
+    updateSelectedLineRange();
+    if (!onMentionLines || displayMode !== "source") return;
+
+    document.addEventListener("selectionchange", updateSelectedLineRange);
+    return () => document.removeEventListener("selectionchange", updateSelectedLineRange);
+  }, [data?.content, displayMode, onMentionLines]);
+
+  const mentionLineRange = useCallback((lineRange: SelectedLineRange | null) => {
+    if (!onMentionLines || !lineRange) return;
+    onMentionLines(
+      getRelativeFilePath(filePath, cwd),
+      lineRange.startLine,
+      lineRange.endLine,
+    );
+  }, [cwd, filePath, onMentionLines]);
+
+  const handleMentionSelectedLines = useCallback(() => {
+    mentionLineRange(selectedLineRange);
+  }, [mentionLineRange, selectedLineRange]);
+
+  useEffect(() => {
     if (!onMentionLines || displayMode !== "source") return;
 
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -894,21 +934,16 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionL
       if (target instanceof Element && target.closest("input, textarea, [contenteditable='true']")) return;
 
       const root = contentRef.current;
-      if (!root) return;
-      const selectedLines = getSelectedSourceLineRange(root, window.getSelection());
-      if (!selectedLines) return;
+      const lineRange = root ? getSelectedSourceLineRange(root, window.getSelection()) : null;
+      if (!lineRange) return;
 
       event.preventDefault();
-      onMentionLines(
-        getRelativeFilePath(filePath, cwd),
-        selectedLines.startLine,
-        selectedLines.endLine,
-      );
+      mentionLineRange(lineRange);
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [cwd, displayMode, filePath, onMentionLines]);
+  }, [displayMode, mentionLineRange, onMentionLines]);
 
   if (loading) {
     return (
@@ -996,27 +1031,40 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionL
             </div>
           )}
 
-          <div className="file-viewer-action-slot">
+          <div className="file-viewer-actions">
             {displayMode === "source" && (
-              <button
-                type="button"
-                onClick={() => setWrapLines((value) => !value)}
-                title={wrapLines ? "Disable word wrap" : "Enable word wrap"}
-                aria-label={wrapLines ? "Disable word wrap" : "Enable word wrap"}
-                aria-pressed={wrapLines}
-                className="file-viewer-icon-button"
-                style={{
-                  background: wrapLines ? "var(--bg-selected)" : "transparent",
-                  color: wrapLines ? "var(--text)" : "var(--text-muted)",
-                }}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M3 6h18" />
-                  <path d="M3 12h15a3 3 0 1 1 0 6h-4" />
-                  <path d="m16 16-2 2 2 2" />
-                  <path d="M3 18h7" />
-                </svg>
-              </button>
+              <>
+                <button
+                  type="button"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={handleMentionSelectedLines}
+                  title="Mention selected lines"
+                  aria-label="Mention selected lines"
+                  disabled={!selectedLineRange}
+                  className="file-viewer-icon-button"
+                >
+                  <MentionIcon />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setWrapLines((value) => !value)}
+                  title={wrapLines ? "Disable word wrap" : "Enable word wrap"}
+                  aria-label={wrapLines ? "Disable word wrap" : "Enable word wrap"}
+                  aria-pressed={wrapLines}
+                  className="file-viewer-icon-button"
+                  style={{
+                    background: wrapLines ? "var(--bg-selected)" : "transparent",
+                    color: wrapLines ? "var(--text)" : "var(--text-muted)",
+                  }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M3 6h18" />
+                    <path d="M3 12h15a3 3 0 1 1 0 6h-4" />
+                    <path d="m16 16-2 2 2 2" />
+                    <path d="M3 18h7" />
+                  </svg>
+                </button>
+              </>
             )}
           </div>
 
