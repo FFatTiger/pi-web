@@ -959,7 +959,7 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, gitRefresh
                   const isBlock = className?.includes("language-") || raw.includes("\n");
                   if (isBlock) {
                     if (lang === "mermaid") {
-                      return <MermaidBlock code={raw.replace(/\n$/, "")} />;
+                      return <MermaidBlock code={raw.replace(/\n$/, "")} defaultPreview />;
                     }
                     return <CodeBlock code={raw.replace(/\n$/, "")} lang={lang} />;
                   }

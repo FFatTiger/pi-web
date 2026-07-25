@@ -422,70 +422,161 @@ pre, code {
   font-size: 12px;
 }
 
-/* Clickable mermaid preview — opens zoom modal on click */
-.mermaid-block-clickable {
-  transition: opacity 0.15s;
+.mermaid-preview-button {
+  width: 100%;
+  border: 0;
+  color: inherit;
+  cursor: zoom-in;
+  text-align: left;
 }
-.mermaid-block-clickable:hover {
+.mermaid-preview-button:hover {
   opacity: 0.85;
 }
+.mermaid-preview-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
 
-/* ---- Mermaid zoom modal ---- */
-.mermaid-zoom-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 9999;
-  background: rgba(0, 0, 0, 0.75);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: flex-start;
-  overflow: auto;
-  -webkit-overflow-scrolling: touch;
-  padding: 60px 20px 20px;
+.mermaid-zoom-dialog {
+  width: 100vw;
+  max-width: none;
+  height: 100dvh;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+.mermaid-zoom-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.35);
+}
+.mermaid-zoom-layout {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100%;
 }
 .mermaid-zoom-toolbar {
-  position: fixed;
-  top: 12px;
-  right: 16px;
-  z-index: 10000;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 7px 10px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+}
+.mermaid-zoom-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mermaid-zoom-actions {
   display: flex;
   align-items: center;
   gap: 6px;
-  background: rgba(30, 30, 30, 0.85);
-  border-radius: 8px;
-  padding: 6px 10px;
-  color: #eee;
-  font-size: 13px;
-  font-family: var(--font-mono);
+  margin-left: auto;
 }
-.mermaid-zoom-toolbar button {
-  background: rgba(255, 255, 255, 0.12);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  color: #eee;
+.mermaid-zoom-stepper {
+  display: flex;
+  align-items: center;
+  height: 24px;
+  overflow: hidden;
+  border: 1px solid var(--border);
   border-radius: 5px;
-  padding: 3px 10px;
-  font-size: 14px;
+  background: var(--bg);
+}
+.mermaid-zoom-stepper button,
+.mermaid-zoom-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
   cursor: pointer;
-  font-family: var(--font-mono);
-  transition: background 0.15s;
+  touch-action: manipulation;
 }
-.mermaid-zoom-toolbar button:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.22);
+.mermaid-zoom-stepper button {
+  height: 22px;
 }
-.mermaid-zoom-toolbar button:disabled {
+.mermaid-zoom-stepper button + .mermaid-zoom-value,
+.mermaid-zoom-value + button {
+  border-left: 1px solid var(--border);
+}
+.mermaid-zoom-icon-button {
+  flex: 0 0 24px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+.mermaid-zoom-stepper button:hover:not(:disabled),
+.mermaid-zoom-icon-button:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.mermaid-zoom-stepper button:disabled {
   opacity: 0.35;
   cursor: default;
 }
+.mermaid-zoom-stepper button:focus-visible,
+.mermaid-zoom-icon-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.mermaid-zoom-value {
+  min-width: 48px;
+  height: 22px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 22px;
+  text-align: center;
+  user-select: none;
+}
+.mermaid-zoom-viewport {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 24px;
+  background: var(--bg);
+  -webkit-overflow-scrolling: touch;
+}
 .mermaid-zoom-canvas {
-  transform-origin: top center;
-  transition: transform 0.2s ease;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg-panel);
+  margin: 0 auto;
+  transition: width 0.15s ease;
 }
 .mermaid-zoom-canvas svg {
   display: block;
-  max-width: none;
-  background: #fff;
-  border-radius: 4px;
+  width: 100% !important;
+  height: auto;
+  max-width: none !important;
+}
+
+@media (max-width: 480px) {
+  .mermaid-zoom-toolbar {
+    padding-inline: 8px;
+  }
+
+  .mermaid-zoom-title {
+    font-size: 10px;
+  }
+
+  .mermaid-zoom-viewport {
+    padding: 12px;
+  }
+}
+
 /* File viewer toolbar */
 .file-viewer-toolbar {
   min-width: 0;

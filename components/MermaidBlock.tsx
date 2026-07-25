@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type MouseEvent, type ReactNode, type WheelEvent } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vs } from "react-syntax-highlighter/dist/cjs/styles/prism";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/cjs/styles/prism";
@@ -10,74 +10,31 @@ import { copyText } from "@/lib/clipboard";
 interface MermaidBlockProps {
   code: string;
   isStreaming?: boolean;
+  defaultPreview?: boolean;
 }
 
-/**
- * Renders a Mermaid diagram from a fenced code block.
- * Shows source code by default with a "Preview" toggle.
- * When preview is active, dynamically imports mermaid and renders to SVG.
- */
 const ZOOM_STEP = 0.25;
-const ZOOM_MIN = 0.25;
-const FIT_PADDING = 0.9; // 90% of viewport reserved for the diagram when fitting
+const ZOOM_MIN = 0.5;
+const ZOOM_MAX = 3;
 
-export function MermaidBlock({ code, isStreaming }: MermaidBlockProps) {
+type RenderState =
+  | { key: string; status: "loading" }
+  | { key: string; status: "error" }
+  | { key: string; status: "ready"; svg: string };
+
+export function MermaidBlock({ code, isStreaming, defaultPreview = false }: MermaidBlockProps) {
   const { isDark } = useTheme();
-  const [showPreview, setShowPreview] = useState(true);
-  const [svg, setSvg] = useState<string | null>(null);
-  const [renderedKey, setRenderedKey] = useState("");
-  const [failedKey, setFailedKey] = useState<string | null>(null);
+  const [showPreview, setShowPreview] = useState(defaultPreview);
+  const [renderState, setRenderState] = useState<RenderState | null>(null);
   const [zoomOpen, setZoomOpen] = useState(false);
-  const [zoomLevel, setZoomLevel] = useState(1);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
-  const dragRef = useRef({ active: false, startX: 0, startY: 0, panStartX: 0, panStartY: 0 });
-  const canvasRef = useRef<HTMLDivElement>(null);
-  const fitDoneRef = useRef(false);
   const currentKey = `${isDark ? "dark" : "light"}\n${code}`;
-
-  // Fit-to-screen: measure SVG natural size and scale to fit viewport.
-  useEffect(() => {
-    if (!zoomOpen || !canvasRef.current || fitDoneRef.current) return;
-    const raf = requestAnimationFrame(() => {
-      const svgEl = canvasRef.current?.querySelector("svg");
-      if (!svgEl) return;
-      const vw = window.innerWidth * FIT_PADDING;
-      const vh = window.innerHeight * FIT_PADDING;
-      const rect = svgEl.getBoundingClientRect();
-      const sw = rect.width || 800;
-      const sh = rect.height || 600;
-      // Fit the smaller axis; no upper bound — let the diagram fill the viewport.
-      const fit = Math.min(vw / sw, vh / sh);
-      const scale = Math.max(ZOOM_MIN, fit);
-      setZoomLevel(scale);
-      setPan({ x: 0, y: 0 });
-      fitDoneRef.current = true;
-    });
-    return () => cancelAnimationFrame(raf);
-  }, [zoomOpen, svg]);
-
-  // Zoom modal: lock body scroll and handle Escape key.
-  useEffect(() => {
-    if (!zoomOpen) return;
-
-    document.body.style.overflow = "hidden";
-
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") closeZoom();
-    };
-    window.addEventListener("keydown", onKey);
-
-    return () => {
-      document.body.style.overflow = "";
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [zoomOpen]);
+  const previewVisible = showPreview && !isStreaming;
 
   useEffect(() => {
-    if (!showPreview || isStreaming) return;
+    if (!previewVisible) return;
 
     let cancelled = false;
-    setFailedKey(null);
+    setRenderState({ key: currentKey, status: "loading" });
 
     const render = async () => {
       const { default: mermaid } = await import("mermaid");
@@ -97,150 +54,52 @@ export function MermaidBlock({ code, isStreaming }: MermaidBlockProps) {
           : `mermaid-${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const result = await mermaid.render(id, code);
       if (!cancelled) {
-        setSvg(result.svg);
-        setRenderedKey(currentKey);
+        setRenderState({ key: currentKey, status: "ready", svg: result.svg });
       }
     };
 
     render().catch(() => {
-      if (!cancelled) setFailedKey(currentKey);
+      if (!cancelled) setRenderState({ key: currentKey, status: "error" });
     });
 
     return () => {
       cancelled = true;
     };
-  }, [code, isDark, isStreaming, showPreview]);
+  }, [code, currentKey, isDark, previewVisible]);
 
   const previewButton = (
     <button
+      type="button"
       onClick={() => setShowPreview((v) => !v)}
       disabled={isStreaming}
-      title={isStreaming ? "Preview available after streaming" : (showPreview ? "Show Mermaid source" : "Preview Mermaid diagram")}
-      className={["markdown-code-action", showPreview ? "is-active" : ""].filter(Boolean).join(" ")}
+      title={isStreaming ? "Preview available after streaming" : (previewVisible ? "Show Mermaid source" : "Preview Mermaid diagram")}
+      className={["markdown-code-action", previewVisible ? "is-active" : ""].filter(Boolean).join(" ")}
     >
-      {showPreview ? "Source" : "Preview"}
+      {previewVisible ? "Source" : "Preview"}
     </button>
   );
 
-  if (!showPreview || isStreaming) {
+  if (!previewVisible) {
     return <CodeBlock code={code} lang="mermaid" headerAction={previewButton} />;
   }
 
-  const closeZoom = () => {
-    setZoomOpen(false);
-    setZoomLevel(1);
-    setPan({ x: 0, y: 0 });
-  };
-
-  const resetZoom = () => {
-    setZoomLevel(1);
-    setPan({ x: 0, y: 0 });
-  };
-
-  // Wheel zoom inside the modal — no upper bound.
-  const handleWheel = (e: WheelEvent) => {
-    e.preventDefault();
-    setZoomLevel((z) => Math.max(ZOOM_MIN, z - e.deltaY * 0.002));
-  };
-
-  // Drag-to-pan inside the modal.
-  const handleMouseDown = (e: MouseEvent) => {
-    // Only left button.
-    if (e.button !== 0) return;
-    e.preventDefault();
-    dragRef.current = {
-      active: true,
-      startX: e.clientX,
-      startY: e.clientY,
-      panStartX: pan.x,
-      panStartY: pan.y,
-    };
-  };
-
-  useEffect(() => {
-    if (!zoomOpen) return;
-    const onMove = (e: globalThis.MouseEvent) => {
-      if (!dragRef.current.active) return;
-      setPan({
-        x: dragRef.current.panStartX + (e.clientX - dragRef.current.startX),
-        y: dragRef.current.panStartY + (e.clientY - dragRef.current.startY),
-      });
-    };
-    const onUp = () => {
-      dragRef.current.active = false;
-    };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-    return () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    };
-  }, [zoomOpen, pan.x, pan.y]);
-
-  const body =
-    failedKey === currentKey ? (
+  const body = renderState?.key === currentKey && renderState.status === "error" ? (
       <div className="mermaid-block mermaid-block-error">Invalid Mermaid diagram</div>
-    ) : !svg || renderedKey !== currentKey ? (
+    ) : renderState?.key !== currentKey || renderState.status !== "ready" ? (
       <div className="mermaid-block mermaid-block-loading" aria-label="Rendering Mermaid diagram" />
     ) : (
       <>
-        {/* Clickable inline preview — opens zoom modal */}
-        <div
-          className="mermaid-block mermaid-block-clickable"
-          style={{ cursor: "pointer" }}
-          title="Click to zoom"
-          onClick={() => { setZoomOpen(true); fitDoneRef.current = false; }}
-          dangerouslySetInnerHTML={{ __html: svg }}
-        />
-        {/* Zoom modal */}
-        {zoomOpen && (
-          <div
-            className="mermaid-zoom-backdrop"
-            onClick={(e) => {
-              // Close only when clicking the backdrop, not the SVG inside.
-              if (e.target === e.currentTarget) closeZoom();
-            }}
-          >
-            <div className="mermaid-zoom-toolbar">
-              <button
-                style={{ touchAction: "manipulation" }}
-                onClick={() => setZoomLevel((z) => Math.max(ZOOM_MIN, z - ZOOM_STEP))}
-                disabled={zoomLevel <= ZOOM_MIN}
-                title="Zoom out"
-              >
-                -
-              </button>
-              <span style={{ fontSize: 12, minWidth: 48, textAlign: "center", userSelect: "none" }}>
-                {Math.round(zoomLevel * 100)}%
-              </span>
-              <button
-                style={{ touchAction: "manipulation" }}
-                onClick={() => setZoomLevel((z) => z + ZOOM_STEP)}
-                title="Zoom in"
-              >
-                +
-              </button>
-              <button
-                style={{ touchAction: "manipulation", marginLeft: 8 }}
-                onClick={resetZoom}
-                title="Reset zoom & pan"
-              >
-                reset
-              </button>
-            </div>
-            <div
-              ref={canvasRef}
-              className="mermaid-zoom-canvas"
-              onWheel={handleWheel}
-              onMouseDown={handleMouseDown}
-              style={{
-                transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoomLevel})`,
-                cursor: dragRef.current.active ? "grabbing" : "grab",
-              }}
-              dangerouslySetInnerHTML={{ __html: svg }}
-            />
-          </div>
+        {!zoomOpen && (
+          <button
+            type="button"
+            className="mermaid-block mermaid-preview-button"
+            title="Open diagram viewer"
+            aria-label="Open diagram viewer"
+            onClick={() => setZoomOpen(true)}
+            dangerouslySetInnerHTML={{ __html: renderState.svg }}
+          />
         )}
+        {zoomOpen && <MermaidZoomDialog svg={renderState.svg} onClose={() => setZoomOpen(false)} />}
       </>
     );
 
@@ -252,6 +111,109 @@ export function MermaidBlock({ code, isStreaming }: MermaidBlockProps) {
       </div>
       {body}
     </div>
+  );
+}
+
+function MermaidZoomDialog({ svg, onClose }: { svg: string; onClose: () => void }) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const [zoom, setZoom] = useState(1);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    dialog.showModal();
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      if (dialog.open) dialog.close();
+    };
+  }, []);
+
+  return (
+    <dialog
+      ref={dialogRef}
+      className="mermaid-zoom-dialog"
+      aria-label="Mermaid diagram viewer"
+      onCancel={(event) => {
+        event.preventDefault();
+        onClose();
+      }}
+      onKeyDown={(event) => {
+        if (event.key !== "Escape") return;
+        event.preventDefault();
+        onClose();
+      }}
+    >
+      <div className="mermaid-zoom-layout">
+        <div className="mermaid-zoom-toolbar">
+          <span className="mermaid-zoom-title">Mermaid diagram</span>
+          <div className="mermaid-zoom-actions">
+            <div className="mermaid-zoom-stepper">
+              <button
+                type="button"
+                onClick={() => setZoom((value) => Math.max(ZOOM_MIN, value - ZOOM_STEP))}
+                disabled={zoom <= ZOOM_MIN}
+                title="Zoom out"
+                aria-label="Zoom out"
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                  <path d="M5 12h14" />
+                </svg>
+              </button>
+              <span className="mermaid-zoom-value">{Math.round(zoom * 100)}%</span>
+              <button
+                type="button"
+                onClick={() => setZoom((value) => Math.min(ZOOM_MAX, value + ZOOM_STEP))}
+                disabled={zoom >= ZOOM_MAX}
+                title="Zoom in"
+                aria-label="Zoom in"
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+              </button>
+            </div>
+            <button
+              type="button"
+              className="mermaid-zoom-icon-button"
+              onClick={() => setZoom(1)}
+              title="Fit to width"
+              aria-label="Fit to width"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              className="mermaid-zoom-icon-button"
+              onClick={onClose}
+              title="Close"
+              aria-label="Close"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                <path d="M6 6l12 12M18 6 6 18" />
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div
+          className="mermaid-zoom-viewport"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) onClose();
+          }}
+        >
+          <div
+            className="mermaid-zoom-canvas"
+            style={{ width: `${zoom * 100}%` }}
+            dangerouslySetInnerHTML={{ __html: svg }}
+          />
+        </div>
+      </div>
+    </dialog>
   );
 }
 
