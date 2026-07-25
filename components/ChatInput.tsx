@@ -52,6 +52,7 @@ interface Props {
   thinkingLevelMap?: Record<string, string | null> | null;
   retryInfo?: { attempt: number; maxAttempts: number; errorMessage?: string } | null;
   queuedMessages?: QueuedMessages | null;
+  inputHistory?: string[];
   onRecallQueue?: () => void;
   slashCommands?: SlashCommandInfo[];
   slashCommandsLoading?: boolean;
@@ -203,7 +204,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   onSend, onAbort, onSteer, onFollowUp, isStreaming, model, isAutoModelSelection, modelNames, modelList, onModelChange,
   onCompact, onAbortCompaction, isCompacting, compactError, compactResult, toolPreset, onToolPresetChange,
   thinkingLevel, onThinkingLevelChange, availableThinkingLevels, thinkingLevelMap,
-  retryInfo, queuedMessages, onRecallQueue,
+  retryInfo, queuedMessages, inputHistory = [], onRecallQueue,
   slashCommands, slashCommandsLoading, onLoadSlashCommands,
   onBuiltinCommand,
   soundEnabled, onSoundToggle, onAudioUnlock,
@@ -229,6 +230,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const [atQuery, setAtQuery] = useState<AtQueryMatch | null>(null);
   const [atMenuOpen, setAtMenuOpen] = useState(false);
   const [atActiveIndex, setAtActiveIndex] = useState(0);
+  const [historyMenuOpen, setHistoryMenuOpen] = useState(false);
+  const [historyActiveIndex, setHistoryActiveIndex] = useState(0);
   const [fileIndex, setFileIndex] = useState<{ cwd: string; entries: FileIndexEntry[]; truncated: boolean } | null>(null);
   const [fileIndexLoading, setFileIndexLoading] = useState(false);
   const [atServerResult, setAtServerResult] = useState<{ cwd: string; query: string; matches: FileIndexEntry[] } | null>(null);
@@ -239,12 +242,14 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const toolDropdownRef = useRef<HTMLDivElement>(null);
   const thinkingDropdownRef = useRef<HTMLDivElement>(null);
   const controlsMenuRef = useRef<HTMLDivElement>(null);
+  const historyMenuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isComposingRef = useRef(false);
   const lastCompositionEndAtRef = useRef(0);
   const slashCommandsRequestedRef = useRef(false);
   const slashItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const atItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const historyItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const fileIndexMetaRef = useRef<{ cwd: string; fetchedAt: number } | null>(null);
   const fileIndexFetchingRef = useRef<string | null>(null);
   const draftKeyRef = useRef(draftKey);
@@ -370,6 +375,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const clearInput = useCallback(() => {
     setValue("");
     setAtQuery(null);
+    setHistoryMenuOpen(false);
     if (draftKey) clearDraft(draftKey);
     if (draftKeyRef.current && draftKeyRef.current !== draftKey) clearDraft(draftKeyRef.current);
     clearImages();
@@ -401,6 +407,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     draftKeyRef.current = draftKey;
     setValue(draft?.value ?? "");
     setAtQuery(null);
+    setHistoryMenuOpen(false);
     setAttachedImages((prev) => {
       prev.forEach(revokeImagePreview);
       return draftImagesToAttachedImages(draft?.images);
@@ -613,6 +620,36 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     atItemRefs.current[atActiveIndex]?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [atActiveIndex, atMenuOpen]);
 
+  useEffect(() => {
+    if (historyActiveIndex >= inputHistory.length) {
+      setHistoryActiveIndex(Math.max(0, inputHistory.length - 1));
+    }
+  }, [inputHistory.length, historyActiveIndex]);
+
+  useEffect(() => {
+    historyItemRefs.current.length = inputHistory.length;
+  }, [inputHistory.length]);
+
+  useEffect(() => {
+    if (!historyMenuOpen) return;
+    historyItemRefs.current[historyActiveIndex]?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [historyActiveIndex, historyMenuOpen]);
+
+  const applyHistoryInput = useCallback((text: string) => {
+    setValue(text);
+    setHistoryMenuOpen(false);
+    setHistoryActiveIndex(0);
+    setAtQuery(null);
+    requestAnimationFrame(() => {
+      const ta = textareaRef.current;
+      if (!ta) return;
+      ta.focus();
+      ta.setSelectionRange(text.length, text.length);
+      ta.style.height = "auto";
+      ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
+    });
+  }, []);
+
   const applySlashCommand = useCallback((command: SlashCommandPaletteItem) => {
     const nextValue = `/${command.name} `;
     setValue(nextValue);
@@ -704,6 +741,29 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         return;
       }
 
+      if (historyMenuOpen && !isComposing) {
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          setHistoryActiveIndex((i) => Math.min(Math.max(0, inputHistory.length - 1), i + 1));
+          return;
+        }
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          setHistoryActiveIndex((i) => Math.max(0, i - 1));
+          return;
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          setHistoryMenuOpen(false);
+          return;
+        }
+        if ((e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) && inputHistory[historyActiveIndex]) {
+          e.preventDefault();
+          applyHistoryInput(inputHistory[historyActiveIndex]);
+          return;
+        }
+      }
+
       if (slashMenuOpen && slashQuery !== null) {
         if (e.key === "ArrowDown") {
           e.preventDefault();
@@ -762,7 +822,16 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         }
       }
 
-      // Esc stops the agent when no slash/@ menu or IME composition is active.
+      if (e.key === "ArrowUp" && !isComposing && !isStreaming && inputHistory.length > 0 && value.trim().length === 0) {
+        e.preventDefault();
+        setSlashMenuOpen(false);
+        setAtMenuOpen(false);
+        setHistoryActiveIndex(inputHistory.length - 1);
+        setHistoryMenuOpen(true);
+        return;
+      }
+
+      // Esc stops the agent when no slash/@/history menu or IME composition is active.
       if (e.key === "Escape" && !isComposing && isStreaming && onAbort) {
         e.preventDefault();
         onAbort();
@@ -779,7 +848,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         }
       }
     },
-    [isStreaming, onSteer, onFollowUp, onAbort, slashMenuOpen, slashQuery, filteredSlashCommands, slashActiveIndex, applySlashCommand, sendQueued, handleSend, getNextSlashIndex, atMenuOpen, atQuery, atMatches, atActiveIndex, applyAtCompletion]
+    [isStreaming, onSteer, onFollowUp, onAbort, slashMenuOpen, slashQuery, filteredSlashCommands, slashActiveIndex, applySlashCommand, sendQueued, handleSend, getNextSlashIndex, atMenuOpen, atQuery, atMatches, atActiveIndex, applyAtCompletion, historyMenuOpen, inputHistory, historyActiveIndex, applyHistoryInput, value]
   );
 
   const handleInput = useCallback(() => {
@@ -888,6 +957,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       }
       if (controlsMenuRef.current && !controlsMenuRef.current.contains(e.target as Node)) {
         setControlsMenuOpen(false);
+      }
+      if (historyMenuRef.current && !historyMenuRef.current.contains(e.target as Node) && !textareaRef.current?.contains(e.target as Node)) {
+        setHistoryMenuOpen(false);
       }
     };
     document.addEventListener("mousedown", handler);
@@ -1052,6 +1124,93 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
 
         {/* Main input */}
         <div style={{ position: "relative" }}>
+          {historyMenuOpen && inputHistory.length > 0 && (
+            <div
+              ref={historyMenuRef}
+              style={{
+                position: "absolute",
+                left: 0,
+                right: 0,
+                bottom: "calc(100% + 8px)",
+                zIndex: 120,
+                background: "var(--bg)",
+                border: "1px solid var(--border)",
+                borderRadius: 8,
+                boxShadow: "0 -6px 20px rgba(0,0,0,0.12)",
+                overflow: "hidden",
+                maxHeight: "min(44vh, 360px)",
+              }}
+            >
+              <div
+                title="Input history"
+                style={{
+                  height: 30,
+                  padding: "0 10px",
+                  borderBottom: "1px solid var(--border)",
+                  display: "flex",
+                  alignItems: "center",
+                  color: "var(--text-dim)",
+                }}
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M3 12a9 9 0 1 0 3-6.7" />
+                  <path d="M3 4v5h5" />
+                  <path d="M12 7v5l3 2" />
+                </svg>
+              </div>
+              <div style={{ maxHeight: "calc(min(44vh, 360px) - 31px)", overflowY: "auto", padding: 4 }}>
+                {inputHistory.map((item, index) => {
+                  const active = index === historyActiveIndex;
+                  return (
+                    <button
+                      key={`${index}:${item}`}
+                      ref={(node) => {
+                        historyItemRefs.current[index] = node;
+                      }}
+                      type="button"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        applyHistoryInput(item);
+                      }}
+                      onMouseEnter={() => setHistoryActiveIndex(index)}
+                      style={{
+                        width: "100%",
+                        display: "flex",
+                        alignItems: "flex-start",
+                        gap: 8,
+                        padding: "7px 8px",
+                        border: "none",
+                        borderRadius: 6,
+                        background: active ? "var(--bg-selected)" : "none",
+                        color: "var(--text)",
+                        cursor: "pointer",
+                        textAlign: "left",
+                        fontSize: 12.5,
+                        lineHeight: 1.45,
+                      }}
+                    >
+                      <span style={{ flexShrink: 0, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-dim)", paddingTop: 1 }}>
+                        {index + 1}
+                      </span>
+                      <span style={{ minWidth: 0, display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 2, overflow: "hidden", overflowWrap: "anywhere" }}>
+                        {item}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
           {slashMenuOpen && slashQuery !== null && (
             <div
               style={{
@@ -1298,6 +1457,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             value={value}
             onChange={(e) => {
               setValue(e.target.value);
+              setHistoryMenuOpen(false);
               updateAtQuery(e.target.value, e.target.selectionStart);
             }}
             onSelect={(e) => {

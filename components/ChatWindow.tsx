@@ -1,6 +1,6 @@
 "use client";
 import { registerAbortHandler } from "@/hooks/useKeyboardShortcuts";
-import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { AgentMessage, AssistantContentBlock, AssistantMessage, BashExecutionMessage, CustomMessage, ExtensionUiRequest, SessionInfo, SessionTreeNode, ToolResultMessage } from "@/lib/types";
 import { normalizeCustomPanelLines, parseAnsiLine } from "@/lib/ansi";
 import { asBracketedPaste, toTerminalKeyData } from "@/lib/terminal-input";
@@ -69,6 +69,20 @@ function findFinalAssistantIndex(messages: AgentMessage[], userIdx: number, endI
     if (messages[candidateIdx]?.role === "assistant") return candidateIdx;
   }
   return -1;
+}
+
+function getUserInputText(message: AgentMessage): string | null {
+  if (message.role !== "user") return null;
+  if (typeof message.content === "string") {
+    const text = message.content.trim();
+    return text.length > 0 ? text : null;
+  }
+  const text = message.content
+    .filter((block) => block.type === "text")
+    .map((block) => block.text)
+    .join("\n")
+    .trim();
+  return text.length > 0 ? text : null;
 }
 
 function countToolCalls(messages: AgentMessage[], indices: number[]): number {
@@ -288,6 +302,18 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
   const { isDragOver, handleDragEnter, handleDragOver, handleDragLeave, handleDrop } = useDragDrop(onDrop);
 
   const visibleMessages = messages.filter((m) => m.role === "user" || m.role === "assistant");
+  const inputHistory = useMemo(() => {
+    const seen = new Set<string>();
+    const history: string[] = [];
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const text = getUserInputText(messages[i]);
+      if (!text || seen.has(text)) continue;
+      seen.add(text);
+      history.push(text);
+      if (history.length >= 50) break;
+    }
+    return history.reverse();
+  }, [messages]);
   const messageRefs = useMessageRefs(visibleMessages.length);
 
   const isEmptyNew = isNew && messages.length === 0 && !streamState.isStreaming && !sessionBusy;
@@ -328,6 +354,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
       thinkingLevelMap={currentThinkingLevelMap}
       retryInfo={retryInfo}
       queuedMessages={queuedMessages}
+      inputHistory={inputHistory}
       onRecallQueue={handleRecallQueue}
       slashCommands={slashCommands}
       slashCommandsLoading={slashCommandsLoading}
