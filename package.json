@@ -26,8 +26,7 @@
   ],
   "scripts": {
     "dev": "next dev -p 30141",
-    "build": "node scripts/build.mjs",
-    "build:raw": "next build --webpack",
+    "build": "next build --webpack",
     "start": "next start -p 30141",
     "lint": "eslint .",
     "release": "npm version patch --no-git-tag-version && npm run build && npm publish --access public"

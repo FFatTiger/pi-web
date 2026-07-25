@@ -10,9 +10,6 @@ try {
 } catch { /* package not found, use default */ }
 
 const nextConfig: NextConfig = {
-  // Keep output tracing inside pi-web. On Windows, an inferred workspace root
-  // can traverse protected user-profile junctions such as Application Data.
-  outputFileTracingRoot: __dirname,
   serverExternalPackages: [
     "undici",
     "@earendil-works/pi-coding-agent",

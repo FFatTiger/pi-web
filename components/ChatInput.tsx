@@ -1114,21 +1114,33 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               }}
             >
               <div
+                title="Input history"
                 style={{
-                  padding: "8px 10px",
+                  height: 30,
+                  padding: "0 10px",
                   borderBottom: "1px solid var(--border)",
                   display: "flex",
                   alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: 8,
-                  fontSize: 11,
                   color: "var(--text-dim)",
                 }}
               >
-                <span>Input history · {inputHistory.length}</span>
-                <span style={{ fontFamily: "var(--font-mono)" }}>Enter to use</span>
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M3 12a9 9 0 1 0 3-6.7" />
+                  <path d="M3 4v5h5" />
+                  <path d="M12 7v5l3 2" />
+                </svg>
               </div>
-              <div style={{ maxHeight: "calc(min(44vh, 360px) - 34px)", overflowY: "auto", padding: 4 }}>
+              <div style={{ maxHeight: "calc(min(44vh, 360px) - 31px)", overflowY: "auto", padding: 4 }}>
                 {inputHistory.map((item, index) => {
                   const active = index === historyActiveIndex;
                   return (
