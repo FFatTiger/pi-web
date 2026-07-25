@@ -21,19 +21,22 @@ npm install -g @agegr/pi-web
 pi-web
 ```
 
-启动后打开 [http://localhost:30141](http://localhost:30141)。命令行版本会在服务就绪后尝试自动打开浏览器。
+启动后打开 [http://127.0.0.1:30141](http://127.0.0.1:30141)。命令行版本会在服务就绪后尝试自动打开浏览器。Pi Web 默认仅监听 `127.0.0.1`。
 
 **可选参数：**
 
 ```bash
 pi-web --port 8080              # 自定义端口
-pi-web --hostname 127.0.0.1     # 仅本机访问
-pi-web -p 8080 -H 127.0.0.1     # 组合使用
+pi-web --hostname 0.0.0.0       # 在可信网络中开放访问
+pi-web -p 8080 -H 0.0.0.0       # 组合使用
 pi-web --no-open                # 不自动打开浏览器
 
 PORT=8080 pi-web                # 也支持环境变量
+PI_WEB_HOSTNAME=0.0.0.0 pi-web  # 显式开放网络访问
 PI_WEB_NO_OPEN=1 pi-web         # 适用于后台服务或开机自启
 ```
+
+Pi Web 没有应用层身份验证，并且可以调用高权限智能体。请勿将其暴露到互联网；仅在可信网络中使用非 loopback 监听地址。
 
 ## HTTP 代理
 
@@ -82,7 +85,7 @@ npm install
 npm run dev
 ```
 
-本地开发端口为 [http://localhost:30141](http://localhost:30141)。
+本地开发端口为 [http://127.0.0.1:30141](http://127.0.0.1:30141)。
 
 常用检查：
 
