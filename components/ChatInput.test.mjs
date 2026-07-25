@@ -8,7 +8,7 @@ const jiti = createJiti(import.meta.url, {
   jsx: { runtime: "automatic" },
   tsconfigPaths: true,
 });
-const { ModelErrorBanner } = await jiti.import("./ChatInput.tsx");
+const { ChatInput, ModelErrorBanner } = await jiti.import("./ChatInput.tsx");
 
 test("renders the upstream model error", () => {
   const html = renderToStaticMarkup(
@@ -24,4 +24,21 @@ test("renders the upstream model error", () => {
 
 test("does not render an empty model error", () => {
   assert.equal(renderToStaticMarkup(React.createElement(ModelErrorBanner, { error: null })), "");
+});
+
+test("keeps the model selector visible when a model error leaves no options", () => {
+  const html = renderToStaticMarkup(
+    React.createElement(ChatInput, {
+      onSend() {},
+      onAbort() {},
+      onModelChange() {},
+      isStreaming: false,
+      modelError: "Invalid models.json schema",
+      modelList: [],
+      modelNames: {},
+    }),
+  );
+
+  assert.match(html, />No models</);
+  assert.match(html, /title="No available models"/);
 });

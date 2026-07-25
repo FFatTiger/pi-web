@@ -1676,7 +1676,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               </svg>
             </button>
             {/* Model selector — visible always, disabled during streaming */}
-            {modelOptions.length > 0 && currentName && onModelChange && (
+            {(modelOptions.length > 0 || currentName || modelError) && onModelChange && (
                 <div ref={dropdownRef} style={{ position: "relative", flex: isMobile ? "1 1 auto" : undefined, minWidth: 0 }}>
                   <button
                     onClick={(e) => {
@@ -1711,6 +1711,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                       e.currentTarget.style.background = modelDropdownOpen ? "var(--bg-hover)" : "none";
                       e.currentTarget.style.color = "var(--text-muted)";
                     }}
+                    title={modelOptions.length > 0 ? "Change model" : "No available models"}
                   >
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <rect x="4" y="4" width="16" height="16" rx="2" />
@@ -1720,7 +1721,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                       <line x1="20" y1="9" x2="23" y2="9" /><line x1="20" y1="14" x2="23" y2="14" />
                       <line x1="1" y1="9" x2="4" y2="9" /><line x1="1" y1="14" x2="4" y2="14" />
                     </svg>
-                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{currentName}</span>
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
+                      {currentName ?? (modelOptions.length > 0 ? "Select model" : "No models")}
+                    </span>
                   </button>
                   {modelDropdownOpen && modelDropdownRect && (() => {
                     const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
@@ -1740,7 +1743,11 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                       borderRadius: 8, boxShadow: "0 -4px 16px rgba(0,0,0,0.10)",
                       overflow: "hidden", maxHeight: maxH, overflowY: "auto",
                       }}>
-                      {modelsByProvider.map((group, gi) => (
+                      {modelsByProvider.length === 0 ? (
+                        <div style={{ padding: "8px 12px", color: "var(--text-dim)", fontSize: 12, whiteSpace: "nowrap" }}>
+                          No available models
+                        </div>
+                      ) : modelsByProvider.map((group, gi) => (
                         <div key={group.provider}>
                           {(modelsByProvider.length > 1) && (
                             <div style={{
