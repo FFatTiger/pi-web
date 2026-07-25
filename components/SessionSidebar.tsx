@@ -440,10 +440,11 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         completedInBackground.forEach((id) => next.add(id));
         return next;
       });
+      loadSessions(false);
     }
 
     previousRunningSessionIdsRef.current = runningSessionIds;
-  }, [runningSessionIds, selectedSessionId]);
+  }, [runningSessionIds, selectedSessionId, loadSessions]);
 
   useEffect(() => {
     if (!selectedSessionId) return;
