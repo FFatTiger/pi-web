@@ -18,6 +18,16 @@
 
 ## Unreleased
 
+## 2026-07-25 - Windows 生产构建修复
+
+提交：`fix: constrain output tracing root on Windows`
+
+- 修改目的：避免 Next.js 在 Windows 上遍历受保护的 `C:\\Users\\<user>\\Application Data` 兼容性链接，导致 `EPERM: operation not permitted, scandir` 并使生产构建缺少 `.next` 产物。
+- 修改内容：`npm run build` 改为跨平台包装器；仅在 Windows 构建期间将 `HOME`、`USERPROFILE`、`APPDATA` 和 `LOCALAPPDATA` 指向项目内临时 `.buildhome/`。同时显式限制 Next.js 的 `outputFileTracingRoot` 为项目目录。
+- 影响范围：仅影响构建期环境；不改变运行时的 pi 数据目录、Web UI 或 API 行为。
+- 验证方式：已在 macOS 执行 `npm run lint` 和 `npm run build`；Windows 端需拉取更新后重新构建验证。
+- 兼容性说明：Windows 用户应通过 `npm run build` 使用包装器；`npm run build:raw` 仅用于排查，不应作为常规 Windows 构建命令。
+
 ## 2026-07-25 - 输入历史回填
 
 提交：`feat: add input history recall`
