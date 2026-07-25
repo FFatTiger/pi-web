@@ -1110,6 +1110,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           });
         }
         addNotice({ type: "error", message: e.message });
+        // The prompt never reached the agent, so restore the user's text into
+        // the input instead of losing it. Mirrors the shell-command recovery in
+        // executeBash; insertIfEmpty avoids clobbering anything typed since.
+        if (message) opts.chatInputRef?.current?.insertIfEmpty(message);
       }
       optimisticUserMessageKeyRef.current = null;
       agentRunningRef.current = false;
@@ -1117,7 +1121,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       setAgentPhase(null);
       dispatch({ type: "end" });
     }
-  }, [isNew, newSessionCwd, newSessionModel, session, ensureNewSession, ensureEventsConnected, promoteNewSession, waitForPromptSettlement, addNotice]);
+  }, [isNew, newSessionCwd, newSessionModel, session, ensureNewSession, ensureEventsConnected, promoteNewSession, waitForPromptSettlement, addNotice, opts.chatInputRef]);
 
   const executeBash = useCallback(async (command: string, excludeFromContext: boolean) => {
     if (agentRunningRef.current || bashRunningRef.current) return;
