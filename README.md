@@ -102,6 +102,7 @@ app/
   api/
     agent/          # creates/drives AgentSession and exposes SSE events
     auth/           # OAuth and API key management
+    cwd/browse/     # browsable server directory listing
     cwd/validate/   # custom working directory validation
     default-cwd/    # pi default working directory lookup
     files/          # file listing, reading, preview, and watching
@@ -113,6 +114,7 @@ app/
 components/
   AppShell.tsx        # main layout, URL state, top panels, file tabs
   SessionSidebar.tsx  # project selector, session tree, Explorer
+  DirectoryPicker.tsx # browsable and editable working-directory picker
   ChatWindow.tsx      # messages, SSE, image drag/drop, minimap
   ChatInput.tsx       # input bar, model/tools/thinking/compact/slash controls
   MessageView.tsx     # message, thinking, tool call/result rendering
@@ -121,6 +123,7 @@ components/
   FileExplorer.tsx    # file tree
   FileViewer.tsx      # source, diff, image, audio, PDF, DOCX preview
 lib/
+  directory-browser.ts # directory normalization and safe listing helpers
   http-dispatcher.ts  # HTTP(S) proxy setup for server-side fetch
   rpc-manager.ts      # AgentSessionWrapper lifecycle and global registry
   session-reader.ts   # parses .jsonl session files and branch contexts
