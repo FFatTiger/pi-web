@@ -20,7 +20,7 @@ import { useWebPush } from "@/hooks/useWebPush";
 import { useAppPresence } from "@/hooks/useAppPresence";
 import { copyText } from "@/lib/clipboard";
 import { getFileName } from "@/lib/file-paths";
-import { buildAtMentionText, buildFileAtMentionsText } from "@/lib/file-fuzzy";
+import { buildAtMentionText, buildFileAtMentionsText, buildFileLineMentionText } from "@/lib/file-fuzzy";
 import { getInitialNavigation } from "@/lib/initial-navigation";
 import type { SessionInfo, SessionTreeNode } from "@/lib/types";
 import type { ChatInputHandle } from "./ChatInput";
@@ -185,6 +185,10 @@ export function AppShell() {
   const handleAtMentions = useCallback((relativePaths: string[]) => {
     const mentions = buildFileAtMentionsText(relativePaths);
     if (mentions) chatInputRef.current?.insertText(mentions);
+  }, []);
+
+  const handleFileLineMention = useCallback((relativePath: string, startLine: number, endLine: number) => {
+    chatInputRef.current?.insertText(buildFileLineMentionText(relativePath, startLine, endLine));
   }, []);
 
   const [activeCwd, setActiveCwd] = useState<string | null>(null);
@@ -1250,6 +1254,7 @@ export function AppShell() {
         onOpenFile={handleOpenFile}
         onAtMention={handleAtMention}
         onAtMentions={handleAtMentions}
+        onMentionLines={rightPanelMode === "file" ? handleFileLineMention : undefined}
       />
     </div>
     <OfflineBanner online={online} />

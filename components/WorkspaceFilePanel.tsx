@@ -19,6 +19,7 @@ interface WorkspaceFilePanelProps {
   onOpenFile: (filePath: string, fileName: string, sourceSessionId?: string | null) => void;
   onAtMention: (relativePath: string, isDir: boolean) => void;
   onAtMentions: (relativePaths: string[]) => void;
+  onMentionLines?: (relativePath: string, startLine: number, endLine: number) => void;
 }
 
 export function WorkspaceFilePanel(props: WorkspaceFilePanelProps) {
@@ -33,6 +34,7 @@ export function WorkspaceFilePanel(props: WorkspaceFilePanelProps) {
     onOpenFile,
     onAtMention,
     onAtMentions,
+    onMentionLines,
   } = props;
   const explorerRef = useRef<FileExplorerHandle>(null);
   const [localRefreshKey, setLocalRefreshKey] = useState(0);
@@ -134,6 +136,7 @@ export function WorkspaceFilePanel(props: WorkspaceFilePanelProps) {
                 cwd={cwd ?? undefined}
                 sourceSessionId={activeTab.sourceSessionId}
                 onOpenFile={(filePath) => onOpenFile(filePath, getFileName(filePath), activeTab.sourceSessionId)}
+                onMentionLines={mode === "file" ? onMentionLines : undefined}
                 gitRefreshKey={explorerRefreshKey}
               />
             ) : (

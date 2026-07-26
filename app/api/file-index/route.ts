@@ -6,6 +6,7 @@ import path from "path";
 import {
   filterDeniedFileIndexPaths,
   getAllowedFileRoots,
+  isExistingFilePathAllowed,
   isFilePathAllowed,
   isWindowsAbsolutePath,
 } from "@/lib/file-access";
@@ -149,6 +150,9 @@ export async function GET(req: NextRequest) {
     }
     if (!stat.isDirectory()) {
       return NextResponse.json({ error: "Not a directory" }, { status: 400 });
+    }
+    if (!isExistingFilePathAllowed(cwd, allowedRoots)) {
+      return NextResponse.json({ error: "Access denied" }, { status: 403 });
     }
 
     const cache = getIndexCache();

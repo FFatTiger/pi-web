@@ -3,6 +3,7 @@ import { homedir } from "os";
 import path from "path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { getAdditionalAllowedRoots, normalizeSlashes } from "./allowed-roots";
+import { isExistingPathWithinRoots } from "./path-security";
 import { isPushSecretPath } from "./push-paths";
 import { listAllSessions } from "./session-reader";
 export { allowFileRoot, normalizeSlashes } from "./allowed-roots";
@@ -135,4 +136,13 @@ export function isFilePathAllowed(
     }
   }
   return false;
+}
+
+/**
+ * Authorize an existing path after resolving symbolic links.
+ * Complements string-prefix allow checks; does not replace Push-secret denial
+ * (callers still go through isFilePathAllowed / isResolvedFilePathDenied first).
+ */
+export function isExistingFilePathAllowed(target: string, allowedRoots: Set<string>): boolean {
+  return isExistingPathWithinRoots(target, allowedRoots);
 }

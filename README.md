@@ -1,6 +1,6 @@
 # Pi Web
 
-[中文文档](./README.zh-CN.md)
+[中文文档](./README.zh-CN.md) | [日本語](./README.ja.md)
 
 Local web UI for the [pi coding agent](https://github.com/badlogic/pi-mono). Pi Web reads your local pi session files and gives you a browser workspace for session browsing, real-time chat, model configuration, skill management, and project file preview.
 
@@ -24,11 +24,13 @@ This repository is the [`FFatTiger/pi-web`](https://github.com/FFatTiger/pi-web)
 > [!IMPORTANT]
 > The npm package `@agegr/pi-web` is published by the upstream project. The `npx` and global-install commands below install upstream, not the fork-specific changes described above.
 
-**Upstream baseline (observed 2026-07-23):** this fork is currently merged with upstream through **v0.8.0**, including Pi 0.81, automatic session naming, Git-aware file diffs, `!` / `!!` shell prefixes, `?cwd=` workspace deep-links, HTTP proxy support, and middle-click file-tab close. Fork-only production features above remain. Compare [`agegr/pi-web`](https://github.com/agegr/pi-web) before the next rebase or release.
+**Upstream baseline (observed 2026-07-26):** this fork is currently merged with upstream through **v0.8.1**, including Pi 0.82.1, Node.js >=22.19, loopback-default bind with explicit LAN scripts, request/path security and upload body limits, session-title/path hardening, model runtime reload/errors, markdown images/Mermaid/LaTeX, selected-file-line mentions, and ChatInput history. Fork-only production features above remain. Compare [`agegr/pi-web`](https://github.com/agegr/pi-web) before the next rebase or release.
 
 ## Quick Start
 
 ### Run this fork from source
+
+Pi Web requires Node.js 22.19.0 or newer. Check your version with `node --version`.
 
 ```bash
 git clone https://github.com/FFatTiger/pi-web.git
@@ -37,7 +39,7 @@ npm install
 npm run dev
 ```
 
-Then open [http://localhost:30141](http://localhost:30141).
+Then open [http://localhost:30141](http://localhost:30141). `npm run dev` binds to `127.0.0.1` by default; use `npm run dev:lan` to listen on `0.0.0.0` on a trusted network.
 
 ### Run the upstream npm release
 
@@ -60,13 +62,16 @@ Then open [http://localhost:30141](http://localhost:30141). The CLI will try to 
 
 ```bash
 pi-web --port 8080              # custom port
-pi-web --hostname 127.0.0.1     # local access only
-pi-web -p 8080 -H 127.0.0.1     # combine options
+pi-web --hostname 0.0.0.0       # expose on a trusted network
+pi-web -p 8080 -H 0.0.0.0       # combine options
 pi-web --no-open                # do not open the browser automatically
 
 PORT=8080 pi-web                # environment variable is also supported
+PI_WEB_HOSTNAME=0.0.0.0 pi-web  # explicit network exposure
 PI_WEB_NO_OPEN=1 pi-web         # useful when running as a background service
 ```
+
+Pi Web listens on `127.0.0.1` by default. This fork adds a fail-closed password gate; still prefer loopback unless you intentionally expose a trusted LAN bind.
 
 ## HTTP Proxy
 

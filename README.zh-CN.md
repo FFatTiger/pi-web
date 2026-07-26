@@ -1,8 +1,10 @@
 # Pi Web
 
-[English](./README.md)
+[English](./README.md) | [日本語](./README.ja.md)
 
 [pi 编程智能体](https://github.com/badlogic/pi-mono) 的本地网页界面。它会读取本机的 pi 会话文件，在浏览器里提供会话管理、实时对话、模型配置、技能管理和项目文件预览。
+
+中文微信群：请查看 [GitHub Discussions 帖子](https://github.com/agegr/pi-web/discussions/271)。
 
 ## 关于此 Fork
 
@@ -20,11 +22,13 @@
 > [!IMPORTANT]
 > npm 包 `@agegr/pi-web` 由上游项目发布。下方的 `npx` 和全局安装命令安装的是上游版本，不包含上述 Fork 独有改动。
 
-**上游基线（核对时间：2026-07-23）：** 本 Fork 当前已合入上游到 **v0.8.0**，包括 Pi 0.81、自动会话命名、Git-aware 文件 diff、`!` / `!!` shell 前缀、`?cwd=` 工作区深链、HTTP 代理支持，以及中键关闭文件 tab。上方 Fork 独有生产特性仍然保留。下次 rebase 或发布前请重新比较 [`agegr/pi-web`](https://github.com/agegr/pi-web)。
+**上游基线（核对时间：2026-07-26）：** 本 Fork 当前已合入上游到 **v0.8.1**，包括 Pi 0.82.1、Node.js >=22.19、默认 loopback 监听与显式 LAN 脚本、请求/路径安全与上传体积限制、会话标题/路径加固、模型运行时重载与错误、Markdown 图片/Mermaid/LaTeX、选中行 mention，以及 ChatInput 历史。上方 Fork 独有生产特性仍然保留。下次 rebase 或发布前请重新比较 [`agegr/pi-web`](https://github.com/agegr/pi-web)。
 
 ## 快速开始
 
 ### 从源码运行本 Fork
+
+Pi Web 要求 Node.js 22.19.0 或更高版本。可通过 `node --version` 检查当前版本。
 
 ```bash
 git clone https://github.com/FFatTiger/pi-web.git
@@ -33,7 +37,7 @@ npm install
 npm run dev
 ```
 
-启动后打开 [http://localhost:30141](http://localhost:30141)。
+启动后打开 [http://localhost:30141](http://localhost:30141)。`npm run dev` 默认绑定 `127.0.0.1`；在可信网络中可用 `npm run dev:lan` 监听 `0.0.0.0`。
 
 ### 运行上游 npm 版本
 
@@ -56,13 +60,16 @@ pi-web
 
 ```bash
 pi-web --port 8080              # 自定义端口
-pi-web --hostname 127.0.0.1     # 仅本机访问
-pi-web -p 8080 -H 127.0.0.1     # 组合使用
+pi-web --hostname 0.0.0.0       # 在可信网络中开放访问
+pi-web -p 8080 -H 0.0.0.0       # 组合使用
 pi-web --no-open                # 不自动打开浏览器
 
 PORT=8080 pi-web                # 也支持环境变量
+PI_WEB_HOSTNAME=0.0.0.0 pi-web  # 显式开放网络访问
 PI_WEB_NO_OPEN=1 pi-web         # 适用于后台服务或开机自启
 ```
+
+Pi Web 默认仅监听 `127.0.0.1`。本 Fork 另有默认锁定的密码门禁；非 loopback 绑定仍应仅用于可信网络。
 
 ## HTTP 代理
 
