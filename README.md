@@ -10,7 +10,7 @@ The same pi session in CLI and Pi Web: structured tool calls, readable Markdown,
 
 ## About this fork
 
-This repository is the [`FFatTiger/pi-web`](https://github.com/FFatTiger/pi-web) fork of [`agegr/pi-web`](https://github.com/agegr/pi-web). It keeps pi-web's local browser workspace while adding the security, remote-operation, background-notification, project, and mobile behavior used by this fork.
+This repository is the [`FFatTiger/pi-web`](https://github.com/FFatTiger/pi-web) fork of [`agegr/pi-web`](https://github.com/agegr/pi-web). It keeps pi-web's local browser workspace while adding the security, remote-operation, project, and mobile behavior used by this fork.
 
 | Area | This fork adds |
 | --- | --- |

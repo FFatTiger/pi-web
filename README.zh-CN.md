@@ -4,7 +4,22 @@
 
 [pi 编程智能体](https://github.com/badlogic/pi-mono) 的本地网页界面。它会读取本机的 pi 会话文件，在浏览器里提供会话管理、实时对话、模型配置、技能管理和项目文件预览。
 
-中文微信群：请查看 [GitHub Discussions 帖子](https://github.com/agegr/pi-web/discussions/271)。
+## 关于此 Fork
+
+本仓库是 [`FFatTiger/pi-web`](https://github.com/FFatTiger/pi-web) 对 [`agegr/pi-web`](https://github.com/agegr/pi-web) 的 Fork。它在保留上游本地浏览器工作区的同时，增加了本 Fork 使用的密码门禁、多项目/worktree 与移动端体验。
+
+| 领域 | 本 Fork 增加的能力 |
+| --- | --- |
+| 应用访问 | 默认锁定的密码门禁、签名会话、登录限速、业务 API/SSE 保护，以及只能显式配置才可关闭的门禁。 |
+| 项目与 worktree | 多项目会话分组、关联 worktree 识别、worktree 切换/创建/删除，以及限定于项目范围的 Explorer。 |
+| 移动端工作流 | 空状态自动打开会话选择器、防聚焦放大的编辑控件、紧凑顶部导航、完整会话/上下文指标，以及侧边栏退出按钮。 |
+| 上游 PWA | 保留上游官方可安装 PWA（Manifest、Service Worker、离线页和图标），不包含 Fork 自定义更新 UI 或 Web Push/完成通知通道。 |
+| 安全边界 | 受限文件根目录、流式请求大小限制，以及叠加在上游 Host/Origin API 防护之上的密码门禁。 |
+
+> [!IMPORTANT]
+> npm 包 `@agegr/pi-web` 由上游项目发布。下方的 `npx` 和全局安装命令安装的是上游版本，不包含上述 Fork 独有改动。
+
+**上游基线：** 本 Fork 基于上游 **v0.8.3**，包括 Pi 0.82.1、Node.js >=22.19、默认 loopback 监听与显式 LAN 脚本、PWA、i18n、模型发现/目录、项目可信任模式、请求/路径安全、上传限制、会话标题/路径加固、模型运行时错误处理、Markdown 图片/Mermaid/LaTeX、选中代码行 mention、输入历史和 minimap 等。上方的密码门禁、多项目体验和移动端优化仍是 Fork 独有能力。
 
 ## 快速开始
 
@@ -39,7 +54,7 @@ PI_WEB_ALLOWED_HOSTS=pi-web.internal pi-web  # 允许指定的代理或自定义
 PI_WEB_NO_OPEN=1 pi-web         # 适用于后台服务或开机自启
 ```
 
-Pi Web 没有应用层身份验证，并且可以调用高权限智能体。请勿将其暴露到互联网；仅在可信网络中使用非 loopback 监听地址。
+Pi Web 默认仅监听 `127.0.0.1`。**上游版本没有应用层身份验证**；本 Fork 则提供下文所述的 fail-closed 密码门禁。无论使用哪个版本，都不应把高权限 agent 直接暴露到互联网；非 loopback 监听仅应在可信网络使用。
 API 请求仅接受 loopback 名称、IP 字面量、当前监听主机名，以及 `PI_WEB_ALLOWED_HOSTS` 中以逗号分隔的精确主机名。可信反向代理使用不同的外部主机名时，请配置该变量。
 
 ## HTTP 代理
