@@ -40,3 +40,8 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 .factory
+# local agent worktrees
+/.worktrees/
+
+# local planning docs - do not publish
+/docs/superpowers/
