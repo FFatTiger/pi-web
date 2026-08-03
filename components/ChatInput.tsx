@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useRef, useState, useCallback, useEffect, useImperativeHandle, forwardRef, KeyboardEvent } from "react";
+import { createPortal } from "react-dom";
 import type { BuiltinSlashCommandResult, CompactResultInfo, QueuedMessages, SlashCommandInfo } from "@/hooks/useAgentSession";
 import type { SkillsResponse } from "@/lib/api-types";
 import { clearDraft, getDraft, setDraft, type ChatDraftImage } from "@/lib/draft-store";
@@ -17,6 +18,54 @@ import { FolderIcon, getFileIcon } from "./FileIcons";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useI18n } from "@/hooks/useI18n";
 import { ProviderIcon } from "./ProviderIcon";
+
+type AnchorRect = { top: number; left: number; right: number; width: number; bottom: number };
+
+function getViewportSize() {
+  return {
+    width: window.visualViewport?.width ?? window.innerWidth,
+    height: window.visualViewport?.height ?? window.innerHeight,
+  };
+}
+
+function getAnchorRect(node: HTMLElement): AnchorRect {
+  const rect = node.getBoundingClientRect();
+  return {
+    top: rect.top,
+    left: rect.left,
+    right: rect.right,
+    width: rect.width,
+    bottom: rect.bottom,
+  };
+}
+
+/** Fixed menu that opens above a toolbar trigger and stays inside the viewport. */
+function getUpwardMenuStyle(
+  anchor: AnchorRect,
+  options: { align: "left" | "right"; minWidth?: number; maxWidth?: number; preferWidth?: number },
+): React.CSSProperties {
+  const viewport = getViewportSize();
+  const maxWidth = Math.min(options.maxWidth ?? 280, viewport.width - 16);
+  const minWidth = Math.min(options.minWidth ?? 180, maxWidth);
+  const preferred = Math.min(options.preferWidth ?? Math.max(minWidth, anchor.width + 24), maxWidth);
+  const left = options.align === "left"
+    ? Math.min(Math.max(8, anchor.left), viewport.width - preferred - 8)
+    : Math.max(8, Math.min(anchor.right - preferred, viewport.width - preferred - 8));
+  return {
+    position: "fixed",
+    bottom: Math.max(8, viewport.height - anchor.top + 6),
+    left,
+    width: preferred,
+    maxWidth,
+    maxHeight: Math.max(120, anchor.top - 14),
+    zIndex: 500,
+    background: "var(--bg)",
+    border: "1px solid var(--border)",
+    borderRadius: 8,
+    boxShadow: "0 -4px 16px rgba(0,0,0,0.10)",
+    overflow: "auto",
+  };
+}
 
 export interface AttachedImage {
   data: string;   // base64, no prefix
@@ -324,10 +373,12 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const isMobile = useIsMobile();
   const [value, setValue] = useState(() => (draftKey ? getDraft(draftKey)?.value ?? "" : ""));
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
-  const [modelDropdownRect, setModelDropdownRect] = useState<{ top: number; left: number; right: number; width: number } | null>(null);
+  const [modelDropdownRect, setModelDropdownRect] = useState<AnchorRect | null>(null);
   const [modelFilter, setModelFilter] = useState("");
   const [toolDropdownOpen, setToolDropdownOpen] = useState(false);
+  const [toolDropdownRect, setToolDropdownRect] = useState<AnchorRect | null>(null);
   const [thinkingDropdownOpen, setThinkingDropdownOpen] = useState(false);
+  const [thinkingDropdownRect, setThinkingDropdownRect] = useState<AnchorRect | null>(null);
   const [attachedImages, setAttachedImages] = useState<AttachedImage[]>(() => (
     draftKey ? draftImagesToAttachedImages(getDraft(draftKey)?.images) : []
   ));
@@ -356,7 +407,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const dropdownRef = useRef<HTMLDivElement>(null);
   const modelDropdownPanelRef = useRef<HTMLDivElement>(null);
   const toolDropdownRef = useRef<HTMLDivElement>(null);
+  const toolDropdownPanelRef = useRef<HTMLDivElement>(null);
   const thinkingDropdownRef = useRef<HTMLDivElement>(null);
+  const thinkingDropdownPanelRef = useRef<HTMLDivElement>(null);
   const historyMenuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isComposingRef = useRef(false);
@@ -1085,11 +1138,19 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         setModelDropdownOpen(false);
         setModelFilter("");
       }
-      if (toolDropdownRef.current && !toolDropdownRef.current.contains(e.target as Node)) {
+      if (
+        toolDropdownRef.current && !toolDropdownRef.current.contains(e.target as Node) &&
+        toolDropdownPanelRef.current && !toolDropdownPanelRef.current.contains(e.target as Node)
+      ) {
         setToolDropdownOpen(false);
+        setToolDropdownRect(null);
       }
-      if (thinkingDropdownRef.current && !thinkingDropdownRef.current.contains(e.target as Node)) {
+      if (
+        thinkingDropdownRef.current && !thinkingDropdownRef.current.contains(e.target as Node) &&
+        thinkingDropdownPanelRef.current && !thinkingDropdownPanelRef.current.contains(e.target as Node)
+      ) {
         setThinkingDropdownOpen(false);
+        setThinkingDropdownRect(null);
       }
       if (historyMenuRef.current && !historyMenuRef.current.contains(e.target as Node) && !textareaRef.current?.contains(e.target as Node)) {
         setHistoryMenuOpen(false);
@@ -1742,7 +1803,15 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             {!isStreaming && onThinkingLevelChange && (
               <div ref={thinkingDropdownRef} className="chat-input-toolbar-thinking" style={{ position: "relative" }}>
                 <button
-                  onClick={() => !isStreaming && setThinkingDropdownOpen((v) => !v)}
+                  onClick={(e) => {
+                    if (isStreaming) return;
+                    const rect = getAnchorRect(e.currentTarget);
+                    setThinkingDropdownRect(rect);
+                    setThinkingDropdownOpen((open) => {
+                      if (open) setThinkingDropdownRect(null);
+                      return !open;
+                    });
+                  }}
                   disabled={isStreaming}
                    title={t("chat.changeReasoning", { level: thinkingDisplayLabel })}
                    aria-label={t("chat.changeReasoningLabel")}
@@ -1788,14 +1857,18 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                   <span className="chat-input-thinking-label" style={{ whiteSpace: "nowrap" }}>{thinkingDisplayLabel}</span>
                   <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0, transform: thinkingDropdownOpen ? "rotate(180deg)" : undefined }}><path d="m3 4.5 3 3 3-3" /></svg>
                 </button>
-                {thinkingDropdownOpen && (
-                  <div style={{
-                    position: "absolute", bottom: "calc(100% + 6px)",
-                    ...(isMobile ? { left: 0 } : { right: 0 }),
-                    zIndex: 100, background: "var(--bg)", border: "1px solid var(--border)",
-                    borderRadius: 8, boxShadow: "0 -4px 16px rgba(0,0,0,0.10)",
-                    overflow: "hidden", minWidth: 180,
-                  }}>
+                {thinkingDropdownOpen && thinkingDropdownRect && createPortal(
+                  <div
+                    ref={thinkingDropdownPanelRef}
+                    role="listbox"
+                    aria-label={t("chat.changeReasoningLabel")}
+                    style={getUpwardMenuStyle(thinkingDropdownRect, {
+                      align: isMobile ? "left" : "right",
+                      minWidth: 180,
+                      maxWidth: 320,
+                      preferWidth: 240,
+                    })}
+                  >
                     {THINKING_LEVELS.filter((lvl) => {
                       if (!availableThinkingLevels) return true;
                       if (lvl === "auto") return true;
@@ -1809,7 +1882,11 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                       return (
                         <button
                           key={lvl}
-                          onClick={() => { setThinkingDropdownOpen(false); if (!isActive) onThinkingLevelChange(lvl); }}
+                          onClick={() => {
+                            setThinkingDropdownOpen(false);
+                            setThinkingDropdownRect(null);
+                            if (!isActive) onThinkingLevelChange(lvl);
+                          }}
                           style={{
                             display: "flex", alignItems: "center", gap: 8,
                             width: "100%", padding: "7px 12px",
@@ -1834,7 +1911,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                         </button>
                       );
                     })}
-                  </div>
+                  </div>,
+                  document.body,
                 )}
               </div>
             )}
@@ -1862,7 +1940,15 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             {!isStreaming && onToolPresetChange && (
               <div ref={toolDropdownRef} className="chat-input-toolbar-tools" style={{ position: "relative" }}>
                 <button
-                  onClick={() => !isStreaming && setToolDropdownOpen((v) => !v)}
+                  onClick={(e) => {
+                    if (isStreaming) return;
+                    const rect = getAnchorRect(e.currentTarget);
+                    setToolDropdownRect(rect);
+                    setToolDropdownOpen((open) => {
+                      if (open) setToolDropdownRect(null);
+                      return !open;
+                    });
+                  }}
                   disabled={isStreaming}
                    title={t("chat.changeToolPreset") + `: ${toolPresetLabel}`}
                    aria-label={t("chat.changeToolPreset")}
@@ -1893,13 +1979,18 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                   <span style={{ whiteSpace: "nowrap" }}>{toolPresetLabel}</span>
                   <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0, transform: toolDropdownOpen ? "rotate(180deg)" : undefined }}><path d="m3 4.5 3 3 3-3" /></svg>
                 </button>
-                {toolDropdownOpen && (
-                  <div style={{
-                    position: "absolute", bottom: "calc(100% + 6px)", right: 0,
-                    zIndex: 100, background: "var(--bg)", border: "1px solid var(--border)",
-                    borderRadius: 8, boxShadow: "0 -4px 16px rgba(0,0,0,0.10)",
-                    overflow: "hidden", minWidth: 120,
-                  }}>
+                {toolDropdownOpen && toolDropdownRect && createPortal(
+                  <div
+                    ref={toolDropdownPanelRef}
+                    role="listbox"
+                    aria-label={t("chat.changeToolPreset")}
+                    style={getUpwardMenuStyle(toolDropdownRect, {
+                      align: "right",
+                      minWidth: 140,
+                      maxWidth: 280,
+                      preferWidth: 180,
+                    })}
+                  >
                     {TOOL_PRESETS.map((lvl) => {
                       const preset = TOOL_PRESET_MAP[lvl];
                       const isActive = (toolPreset ?? "default") === preset;
@@ -1907,7 +1998,11 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                       return (
                         <button
                           key={lvl}
-                          onClick={() => { setToolDropdownOpen(false); if (!isActive) onToolPresetChange(preset); }}
+                          onClick={() => {
+                            setToolDropdownOpen(false);
+                            setToolDropdownRect(null);
+                            if (!isActive) onToolPresetChange(preset);
+                          }}
                           style={{
                             display: "flex", alignItems: "center", gap: 8,
                             width: "100%", padding: "7px 12px",
@@ -1929,7 +2024,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                         </button>
                       );
                     })}
-                  </div>
+                  </div>,
+                  document.body,
                 )}
               </div>
             )}
@@ -1940,8 +2036,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                   <button
                     onClick={(e) => {
                       if (isMobile) textareaRef.current?.blur();
-                      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                      setModelDropdownRect({ top: rect.top, left: rect.left, right: rect.right, width: rect.width });
+                      setModelDropdownRect(getAnchorRect(e.currentTarget));
                       setModelDropdownOpen((open) => {
                         if (open) setModelFilter("");
                         return !open;
@@ -1986,21 +2081,20 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                     <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0, transform: modelDropdownOpen ? "rotate(180deg)" : undefined }}><path d="m3 4.5 3 3 3-3" /></svg>
                   </button>
                   {modelDropdownOpen && modelDropdownRect && (() => {
-                    const viewportWidth = window.visualViewport?.width ?? window.innerWidth;
-                    const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
-                    const bottom = Math.max(8, viewportHeight - modelDropdownRect.top + 6);
+                    const viewport = getViewportSize();
+                    const bottom = Math.max(8, viewport.height - modelDropdownRect.top + 6);
                     const maxH = Math.max(120, modelDropdownRect.top - 14);
                     // Mobile stays inset 8px. Desktop right-anchors to the trigger,
                     // then clamps to the same viewport inset so the panel cannot overflow.
                     const panelPos: React.CSSProperties = isMobile
                       ? { left: 8, right: 8, width: "auto", maxWidth: "calc(100vw - 16px)" }
                       : {
-                          left: Math.max(8, modelDropdownRect.right - Math.min(360, viewportWidth - 16)),
+                          left: Math.max(8, modelDropdownRect.right - Math.min(360, viewport.width - 16)),
                           width: "max-content",
-                          minWidth: Math.min(Math.max(220, modelDropdownRect.width), viewportWidth - 16),
+                          minWidth: Math.min(Math.max(220, modelDropdownRect.width), viewport.width - 16),
                           maxWidth: "min(360px, calc(100vw - 16px))",
                         };
-                    return (
+                    return createPortal(
                       <div
                         ref={modelDropdownPanelRef}
                         className="chat-input-model-dropdown"
@@ -2098,7 +2192,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                           </div>
                         ))}
                       </div>
-                    </div>
+                    </div>,
+                      document.body,
                     );
                   })()}
                 </div>

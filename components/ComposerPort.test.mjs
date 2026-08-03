@@ -82,9 +82,15 @@ test("model panel always searches, right-anchors safely, and exposes dialog sema
   assert.doesNotMatch(chatInput, /MODEL_FILTER_THRESHOLD|showModelFilter/);
   const panel = block(chatInput, "{modelDropdownOpen && modelDropdownRect", "{isStreaming && (");
   assert.match(panel, /placeholder=\{t\("chat\.filterModels"\)\}/);
-  assert.match(panel, /left: Math\.max\(8, modelDropdownRect\.right - Math\.min\(360, viewportWidth - 16\)\)/);
+  assert.match(panel, /left: Math\.max\(8, modelDropdownRect\.right - Math\.min\(360, viewport\.width - 16\)\)/);
   assert.match(panel, /maxWidth: "min\(360px, calc\(100vw - 16px\)\)"/);
-  assert.match(panel, /minWidth: Math\.min\(Math\.max\(220, modelDropdownRect\.width\), viewportWidth - 16\)/);
+  assert.match(panel, /minWidth: Math\.min\(Math\.max\(220, modelDropdownRect\.width\), viewport\.width - 16\)/);
+  assert.match(panel, /createPortal\(/);
+  assert.match(panel, /document\.body/);
+  assert.match(chatInput, /thinkingDropdownOpen && thinkingDropdownRect && createPortal/);
+  assert.match(chatInput, /toolDropdownOpen && toolDropdownRect && createPortal/);
+  assert.match(chatInput, /function getUpwardMenuStyle/);
+
   assert.match(panel, /maxHeight: maxH/);
   assert.match(panel, /\? \{ left: 8, right: 8, width: "auto", maxWidth: "calc\(100vw - 16px\)" \}/);
   assert.match(panel, /role="dialog"/);
