@@ -9,5 +9,7 @@ test("session statistics render in the composer footer instead of duplicating in
   assert.doesNotMatch(appShell, /Session stats — right-aligned in top bar/);
   assert.doesNotMatch(appShell, /onClick=\{\(\) => toggleTopPanel\("session"\)\}[\s\S]*?\{fmt\(t\.input\)\}/);
   assert.match(appShell, /activeTopPanel === "session"/);
-  assert.match(appShell, /const openSessionStatsPanel = useCallback/);
+  assert.match(appShell, /const toggleSessionStatsPanel = useCallback/);
+  assert.match(appShell, /setActiveTopPanel\(\(current\) => current === "session" \? null : "session"\)/);
+  assert.match(appShell, /onSessionStatsPanelOpen=\{toggleSessionStatsPanel\}/);
 });
