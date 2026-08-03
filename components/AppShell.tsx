@@ -217,9 +217,9 @@ export function AppShell() {
     setActiveTopPanel((cur) => cur === panel ? null : panel);
   }, [isMobile]);
 
-  const openSessionStatsPanel = useCallback(() => {
+  const toggleSessionStatsPanel = useCallback(() => {
     if (isMobile) setSidebarOpen(false);
-    setActiveTopPanel("session");
+    setActiveTopPanel((current) => current === "session" ? null : "session");
   }, [isMobile]);
 
   const handleSidebarToggle = useCallback(() => {
@@ -1295,7 +1295,7 @@ export function AppShell() {
               onBranchDataChange={handleBranchDataChange}
               onSystemPromptChange={handleSystemPromptChange}
               onSessionStatsChange={handleSessionStatsChange}
-              onSessionStatsPanelOpen={openSessionStatsPanel}
+              onSessionStatsPanelOpen={toggleSessionStatsPanel}
               onContextUsageChange={handleContextUsageChange}
               onOpenFile={handleOpenLinkedFile}
             />
