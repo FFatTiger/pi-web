@@ -13,6 +13,7 @@ import { ProjectTrustDialog } from "./ProjectTrustDialog";
 import { BranchNavigator } from "./BranchNavigator";
 import { WorktreeSwitcher } from "./WorktreeSwitcher";
 import { WorkspaceFilePanel, type RightPanelMode } from "./WorkspaceFilePanel";
+import { SideChatPanel } from "./SideChatPanel";
 import { useTheme } from "@/hooks/useTheme";
 import { useI18n } from "@/hooks/useI18n";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -543,6 +544,12 @@ export function AppShell() {
     if (isMobile) setSidebarOpen(false);
     setRightPanelMode((mode) => mode === "explorer" ? "closed" : "explorer");
   }, [activeCwd, isMobile]);
+
+  const toggleSideChatPanel = useCallback(() => {
+    if (!selectedSession) return;
+    if (isMobile) setSidebarOpen(false);
+    setRightPanelMode((mode) => mode === "chat" ? "closed" : "chat");
+  }, [isMobile, selectedSession]);
 
   const handleViewFullHistory = useCallback(() => {
     if (!selectedSession) return;
@@ -1121,7 +1128,7 @@ export function AppShell() {
                   marginLeft: "auto",
                   display: "flex", alignItems: "center", gap: isMobile ? 4 : 10,
                   paddingLeft: isMobile ? 6 : 12,
-                  paddingRight: rightPanelMode === "closed" ? 48 : 12,
+                  paddingRight: rightPanelMode === "closed" ? 84 : 12,
                   flexShrink: 0,
                   height: "100%",
                   background: activeTopPanel === "session" ? "var(--bg-selected)" : "none",
@@ -1460,7 +1467,7 @@ export function AppShell() {
           "--right-panel-width": `${rightPanelResizer.width}px`,
           display: "flex",
           flexDirection: "column",
-          height: "calc(36px + env(safe-area-inset-top))",
+          height: "100%",
           borderLeft: "1px solid var(--border)",
           background: "var(--bg)",
         } as React.CSSProperties}
@@ -1479,6 +1486,16 @@ export function AppShell() {
           onAtMentions={handleAtMentions}
           onMentionLines={rightPanelMode === "file" ? handleFileLineMention : undefined}
           onChangesCountChange={setChangesCount}
+          sideChat={selectedSession ? (
+            <SideChatPanel
+              key={selectedSession.id}
+              active={rightPanelMode === "chat"}
+              mainSession={selectedSession}
+              onClose={() => setRightPanelMode("closed")}
+              onAgentEnd={handleAgentEnd}
+              onOpenFile={handleOpenLinkedFile}
+            />
+          ) : null}
         />
       </div>
     </div>
@@ -1489,7 +1506,7 @@ export function AppShell() {
         top: 0,
         right: "env(safe-area-inset-right)",
         zIndex: 300,
-        display: "flex",
+        display: rightPanelMode === "chat" ? "none" : "flex",
       }}
     >
       {rightPanelMode === "explorer" && changesCount > 0 && (
@@ -1512,6 +1529,29 @@ export function AppShell() {
           <span style={{ fontSize: 11, fontWeight: 600 }}>{changesCount}</span>
         </button>
       )}
+      <button
+        onClick={toggleSideChatPanel}
+        disabled={!selectedSession}
+        title={rightPanelMode === "chat" ? "Hide Side Chat" : "Show Side Chat"}
+        aria-label={rightPanelMode === "chat" ? "Hide Side Chat" : "Show Side Chat"}
+        aria-pressed={rightPanelMode === "chat"}
+        style={{
+          display: "flex", alignItems: "center", justifyContent: "center",
+          width: 36, height: 36, padding: 0,
+          background: "var(--bg-panel)", border: "none",
+          borderLeft: "1px solid var(--border)", borderBottom: "1px solid var(--border)",
+          color: rightPanelMode === "chat" ? "var(--text)" : "var(--text-muted)",
+          cursor: !selectedSession ? "not-allowed" : "pointer",
+          opacity: !selectedSession ? 0.4 : 1,
+          transition: "color 0.12s, opacity 0.12s",
+        }}
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" />
+          <path d="M8 9h8" />
+          <path d="M8 13h5" />
+        </svg>
+      </button>
       <button
         onClick={toggleExplorerPanel}
         disabled={!activeCwd}

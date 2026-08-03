@@ -34,16 +34,16 @@ test("AuthControls is not placed in the top bar", () => {
   assert.equal(topBarBlock.includes("<AuthControls"), false);
 });
 
-test("session stats remain right-aligned with single explorer-button clearance", () => {
+test("session stats remain right-aligned with Side Chat and Explorer clearance", () => {
   assert.ok(topBarStart >= 0 && topBarEnd > topBarStart);
   assert.match(topBarBlock, /marginLeft:\s*"auto"/);
   assert.match(
     topBarBlock,
-    /paddingRight:\s*rightPanelMode\s*===\s*"closed"\s*\?\s*48\s*:\s*12/,
+    /paddingRight:\s*rightPanelMode\s*===\s*"closed"\s*\?\s*84\s*:\s*12/,
   );
 });
 
-test("fixed right corner keeps only the Explorer entry", () => {
+test("fixed right corner exposes Side Chat and Explorer entries", () => {
   const explorerGroupStart = source.indexOf("{/* Fixed right-corner control: file explorer */}");
   assert.ok(explorerGroupStart >= 0, "explorer fixed group marker missing");
   const explorerGroupEnd = source.indexOf("{modelsConfigOpen &&", explorerGroupStart);
@@ -51,6 +51,8 @@ test("fixed right corner keeps only the Explorer entry", () => {
   const fixedRegion = source.slice(explorerGroupStart, explorerGroupEnd);
   assert.equal(fixedRegion.includes("<AuthControls"), false);
   assert.match(fixedRegion, /rightPanelMode === "explorer"/);
+  assert.match(fixedRegion, /rightPanelMode === "chat"/);
+  assert.match(fixedRegion, /toggleSideChatPanel/);
   assert.doesNotMatch(fixedRegion, /rightPanelMode === "file"/);
   assert.doesNotMatch(fixedRegion, /toggleFilePanel/);
 });

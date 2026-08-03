@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { getFileName } from "@/lib/file-paths";
 import { FileExplorer, type FileExplorerHandle } from "./FileExplorer";
 import { FileViewer } from "./FileViewer";
 import { TabBar, type Tab } from "./TabBar";
 
-export type RightPanelMode = "closed" | "explorer" | "file";
+export type RightPanelMode = "closed" | "explorer" | "file" | "chat";
 
 type OpenFileOptions = { sourceSessionId?: string | null; modeHint?: "diff" };
 
@@ -24,6 +24,7 @@ interface WorkspaceFilePanelProps {
   onAtMentions: (relativePaths: string[]) => void;
   onMentionLines?: (relativePath: string, startLine: number, endLine: number) => void;
   onChangesCountChange?: (count: number) => void;
+  sideChat?: ReactNode;
 }
 
 export function WorkspaceFilePanel(props: WorkspaceFilePanelProps) {
@@ -41,6 +42,7 @@ export function WorkspaceFilePanel(props: WorkspaceFilePanelProps) {
     onAtMentions,
     onMentionLines,
     onChangesCountChange,
+    sideChat,
   } = props;
   const explorerRef = useRef<FileExplorerHandle>(null);
   const [localRefreshKey, setLocalRefreshKey] = useState(0);
@@ -65,9 +67,10 @@ export function WorkspaceFilePanel(props: WorkspaceFilePanelProps) {
       className="workspace-file-panel-content"
       style={{ display: "flex", flex: 1, minWidth: 0, minHeight: 0, flexDirection: "column", background: "var(--bg)" }}
     >
+      <div style={{ display: mode === "chat" ? "none" : "flex", flex: 1, minWidth: 0, minHeight: 0, flexDirection: "column" }}>
       {mode === "explorer" ? (
         <>
-          <div style={{ height: 36, display: "flex", alignItems: "center", padding: "0 8px 0 12px", borderBottom: "1px solid var(--border)", background: "var(--bg-panel)", flexShrink: 0 }}>
+          <div style={{ height: 36, display: "flex", alignItems: "center", padding: "0 116px 0 12px", borderBottom: "1px solid var(--border)", background: "var(--bg-panel)", flexShrink: 0 }}>
             <strong style={{ flex: 1, fontSize: 11, color: "var(--text)", letterSpacing: "0.04em", textTransform: "uppercase" }}>Explorer</strong>
             <button
               type="button"
@@ -132,7 +135,7 @@ export function WorkspaceFilePanel(props: WorkspaceFilePanelProps) {
         </>
       ) : (
         <>
-          <div style={{ display: "flex", alignItems: "center", flexShrink: 0, background: "var(--bg-panel)", borderBottom: "1px solid var(--border)", height: "calc(36px + env(safe-area-inset-top))", paddingTop: "env(safe-area-inset-top)" }}>
+          <div style={{ display: "flex", alignItems: "center", flexShrink: 0, background: "var(--bg-panel)", borderBottom: "1px solid var(--border)", height: "calc(36px + env(safe-area-inset-top))", paddingTop: "env(safe-area-inset-top)", paddingRight: 72 }}>
             <div style={{ flex: 1, overflow: "hidden" }}>
               <TabBar tabs={fileTabs} activeTabId={activeFileTabId ?? ""} onSelectTab={onSelectFileTab} onCloseTab={onCloseFileTab} />
             </div>
@@ -153,6 +156,8 @@ export function WorkspaceFilePanel(props: WorkspaceFilePanelProps) {
           </div>
         </>
       )}
+      </div>
+      {sideChat}
     </div>
   );
 }

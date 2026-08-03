@@ -10,6 +10,7 @@ import type { AgentMessage, SessionEntry, SessionHeader, SessionInfo, SessionCon
 import type { SessionEntry as PiSessionEntry, SessionInfo as PiSessionInfo } from "@earendil-works/pi-coding-agent";
 import { normalizeToolCalls } from "./normalize";
 import { sessionPathKey } from "./session-path";
+import { isSideChatSessionName, SIDE_CHAT_METADATA_TYPE } from "./side-chat-metadata";
 import { resolveProject, type ProjectInfo } from "./worktree";
 
 export { getAgentDir };
@@ -17,18 +18,21 @@ export { getAgentDir };
 async function loadAllSessions(): Promise<SessionInfo[]> {
   const piSessions: PiSessionInfo[] = await SessionManager.listAll();
   const pathToId = new Map<string, string>();
-  for (const s of piSessions) pathToId.set(sessionPathKey(s.path), s.id);
+  for (const s of piSessions) {
+    pathToId.set(sessionPathKey(s.path), s.id);
+    cacheSessionPath(s.id, s.path);
+  }
+  const visibleSessions = piSessions.filter((session) => !isSideChatSessionName(session.name));
 
   // Resolve each unique cwd to its project root (main repo shared by all
   // worktrees). resolveProject caches per-cwd, so this is cheap after warmup.
-  const uniqueCwds = [...new Set(piSessions.map((s) => s.cwd).filter(Boolean))];
+  const uniqueCwds = [...new Set(visibleSessions.map((s) => s.cwd).filter(Boolean))];
   const projectByCwd = new Map<string, ProjectInfo>();
   await Promise.all(uniqueCwds.map(async (cwd) => {
     projectByCwd.set(cwd, await resolveProject(cwd));
   }));
 
-  return piSessions.map((s) => {
-    cacheSessionPath(s.id, s.path);
+  return visibleSessions.map((s) => {
     const project = s.cwd ? projectByCwd.get(s.cwd) : undefined;
     return {
       path: s.path,
@@ -218,6 +222,30 @@ export function buildSessionContext(
     byId as unknown as Map<string, PiSessionEntry>,
   );
 
+  // Side Chat sessions are branched from the main session so the model keeps
+  // that context. The marker separates inherited entries from Side-owned
+  // entries on the active branch; only the Side Chat UI hides the former.
+  const activePath: SessionEntry[] = [];
+  if (leafId !== null) {
+    let current = leafId ? byId.get(leafId) : entries[entries.length - 1];
+    while (current) {
+      activePath.push(current);
+      current = current.parentId ? byId.get(current.parentId) : undefined;
+    }
+    activePath.reverse();
+  }
+  let sideChatMarkerIndex = -1;
+  for (let i = activePath.length - 1; i >= 0; i--) {
+    const entry = activePath[i];
+    if (entry.type === "custom" && entry.customType === SIDE_CHAT_METADATA_TYPE) {
+      sideChatMarkerIndex = i;
+      break;
+    }
+  }
+  const inheritedEntryIds = sideChatMarkerIndex >= 0
+    ? new Set(activePath.slice(0, sideChatMarkerIndex).map((entry) => entry.id))
+    : null;
+
   // Convert the SDK-selected context entries and their IDs together. This keeps
   // fork/navigation targets aligned while preserving pi's compaction ordering.
   const messages: AgentMessage[] = [];
@@ -234,6 +262,9 @@ export function buildSessionContext(
   return {
     messages,
     entryIds,
+    ...(inheritedEntryIds
+      ? { hiddenMessageEntryIds: entryIds.filter((entryId) => inheritedEntryIds.has(entryId)) }
+      : {}),
     thinkingLevel: piCtx.thinkingLevel,
     model: piCtx.model,
   };

@@ -853,9 +853,9 @@ function NoticeShelf({ notices, floating = false, align = "left" }: { notices: N
   );
 }
 
-type ExtensionDialogRequest = Extract<ExtensionUiRequest, { method: "select" | "confirm" | "input" | "editor" }>;
+export type ExtensionDialogRequest = Extract<ExtensionUiRequest, { method: "select" | "confirm" | "input" | "editor" }>;
 
-function ExtensionDialog({
+export function ExtensionDialog({
   request,
   onRespond,
 }: {
@@ -1032,7 +1032,7 @@ function ExtensionDialog({
   );
 }
 
-type ExtensionCustomRequest = Extract<ExtensionUiRequest, { method: "custom" }>;
+export type ExtensionCustomRequest = Extract<ExtensionUiRequest, { method: "custom" }>;
 
 function renderAnsiLine(line: string, keyPrefix: string): ReactNode[] {
   return parseAnsiLine(line).map((segment, index) => (
@@ -1042,7 +1042,7 @@ function renderAnsiLine(line: string, keyPrefix: string): ReactNode[] {
   ));
 }
 
-function ExtensionCustomPanel({
+export function ExtensionCustomPanel({
   request,
   onInput,
 }: {
