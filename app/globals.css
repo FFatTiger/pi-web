@@ -830,7 +830,7 @@ pre, code {
   .chat-input-toolbar {
     padding: 6px 12px;
     flex-wrap: nowrap;
-    overflow: hidden;
+    overflow: visible;
   }
   .chat-input-toolbar-left { flex: 0 1 auto !important; }
   .chat-input-thinking-label {

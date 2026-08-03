@@ -134,7 +134,7 @@ test("composer and status CSS locks reference dimensions and current 52px minima
     "height: 26px;",
   ]) assert.match(composer, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.match(chatInput, /paddingRight: isMobile \? 16 : 52/);
-  assert.match(composer, /@media \(max-width: 640px\)[\s\S]*?\.chat-input-toolbar \{[\s\S]*?padding: 6px 12px;[\s\S]*?flex-wrap: nowrap;[\s\S]*?overflow: hidden;/);
+  assert.match(composer, /@media \(max-width: 640px\)[\s\S]*?\.chat-input-toolbar \{[\s\S]*?padding: 6px 12px;[\s\S]*?flex-wrap: nowrap;[\s\S]*?overflow: visible;/);
   assert.match(composer, /\.chat-input-toolbar-model \{ flex: 1 1 88px !important; min-width: 48px !important; max-width: 128px; overflow: hidden; \}/);
   assert.match(composer, /\.chat-input-send \{ flex-shrink: 0; \}/);
   assert.doesNotMatch(composer, /\.chat-input-shell \{ width: 100%; margin-left: 0; \}/);
