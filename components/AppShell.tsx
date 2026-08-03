@@ -78,6 +78,9 @@ export function AppShell() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileSidebarReady, setMobileSidebarReady] = useState(false);
   const [rightPanelMode, setRightPanelMode] = useState<RightPanelMode>("closed");
+  // Side Chat open/closed is remembered per main session so switching A→B
+  // does not carry A's panel, and returning to A restores it.
+  const sideChatOpenBySessionRef = useRef(new Map<string, boolean>());
   const sidebarWidthRef = useRef(SIDEBAR_DEFAULT_WIDTH);
   const rightPanelWidthRef = useRef(RIGHT_PANEL_FALLBACK_WIDTH);
   const getResponsiveRightPanelWidth = useCallback(
@@ -183,6 +186,19 @@ export function AppShell() {
   const autoNameTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activeSessionIdRef = useRef<string | null>(selectedSession?.id ?? null);
   activeSessionIdRef.current = selectedSession?.id ?? null;
+
+  const rememberSideChatOpen = useCallback((sessionId: string | null | undefined, open: boolean) => {
+    if (!sessionId) return;
+    sideChatOpenBySessionRef.current.set(sessionId, open);
+  }, []);
+
+  const closeRightPanel = useCallback(() => {
+    setRightPanelMode((mode) => {
+      if (mode === "chat") rememberSideChatOpen(activeSessionIdRef.current, false);
+      return "closed";
+    });
+  }, [rememberSideChatOpen]);
+
   const handleSessionStatsChange = useCallback((stats: SessionStatsInfo | null) => {
     setSessionStats(stats);
   }, []);
@@ -226,10 +242,10 @@ export function AppShell() {
   const handleSidebarToggle = useCallback(() => {
     if (isMobile) {
       setActiveTopPanel(null);
-      setRightPanelMode("closed");
+      closeRightPanel();
     }
     setSidebarOpen((open) => !open);
-  }, [isMobile]);
+  }, [closeRightPanel, isMobile]);
 
   useEffect(() => {
     if (!activeTopPanel || !topBarRef.current) return;
@@ -355,6 +371,13 @@ export function AppShell() {
     setSessionKey((k) => k + 1);
     setSystemPrompt(null);
     setInitialSessionRestored(true);
+    // Restore this session's Side Chat preference; never carry another session's chat panel.
+    const sideChatOpen = sideChatOpenBySessionRef.current.get(session.id) === true;
+    setRightPanelMode((current) => {
+      if (sideChatOpen) return "chat";
+      if (current === "chat") return "closed";
+      return current;
+    });
     // On mobile, collapse the overlay drawer so the chat is revealed after pick.
     if (isMobile && !isRestore) setSidebarOpen(false);
     // Skip router.replace when restoring from URL — the param is already correct
@@ -379,6 +402,7 @@ export function AppShell() {
     setBranchActiveLeafId(null);
     setSystemPrompt(null);
     setActiveTopPanel(null);
+    setRightPanelMode((current) => (current === "chat" ? "closed" : current));
     if (isMobile) setSidebarOpen(false);
     router.replace("/", { scroll: false });
   }, [isMobile, router]);
@@ -548,8 +572,12 @@ export function AppShell() {
   const toggleSideChatPanel = useCallback(() => {
     if (!selectedSession) return;
     if (isMobile) setSidebarOpen(false);
-    setRightPanelMode((mode) => mode === "chat" ? "closed" : "chat");
-  }, [isMobile, selectedSession]);
+    setRightPanelMode((mode) => {
+      const next = mode === "chat" ? "closed" : "chat";
+      rememberSideChatOpen(selectedSession.id, next === "chat");
+      return next;
+    });
+  }, [isMobile, rememberSideChatOpen, selectedSession]);
 
   const handleViewFullHistory = useCallback(() => {
     if (!selectedSession) return;
@@ -1354,7 +1382,7 @@ export function AppShell() {
       <div
         aria-hidden="true"
         className={`right-panel-overlay-backdrop${rightPanelMode !== "closed" ? " is-open" : ""}`}
-        onClick={() => setRightPanelMode("closed")}
+        onClick={closeRightPanel}
       />
       {rightPanelMode !== "closed" && (
         <div
@@ -1398,7 +1426,7 @@ export function AppShell() {
               key={selectedSession.id}
               active={rightPanelMode === "chat"}
               mainSession={selectedSession}
-              onClose={() => setRightPanelMode("closed")}
+              onClose={closeRightPanel}
               onAgentEnd={handleAgentEnd}
               onOpenFile={handleOpenLinkedFile}
             />

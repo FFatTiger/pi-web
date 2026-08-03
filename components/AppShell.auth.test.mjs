@@ -54,3 +54,12 @@ test("fixed right corner exposes Side Chat and Explorer entries", () => {
   assert.doesNotMatch(fixedRegion, /rightPanelMode === "file"/);
   assert.doesNotMatch(fixedRegion, /toggleFilePanel/);
 });
+
+test("Side Chat open state is remembered per main session", () => {
+  assert.match(source, /sideChatOpenBySessionRef/);
+  assert.match(source, /rememberSideChatOpen\(selectedSession\.id, next === "chat"\)/);
+  assert.match(source, /const sideChatOpen = sideChatOpenBySessionRef\.current\.get\(session\.id\) === true/);
+  assert.match(source, /if \(sideChatOpen\) return "chat"/);
+  assert.match(source, /if \(current === "chat"\) return "closed"/);
+  assert.match(source, /onClose=\{closeRightPanel\}/);
+});
