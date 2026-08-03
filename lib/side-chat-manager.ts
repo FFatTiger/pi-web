@@ -183,12 +183,9 @@ export async function openSideChat(mainSessionId: string, action: SideChatAction
 
     if (action === "open" && current) {
       cacheSessionPath(current.id, current.path);
-      // Restart warm RPC so side-chat resource policy (no package extensions)
-      // applies after code updates; startRpcSession otherwise reuses the old wrapper.
-      const warm = getRpcSession(current.id);
-      if (warm?.isAlive()) {
-        await warm.shutdown();
-      }
+      // Reuse a warm RPC when present. Side-chat resource policy (noExtensions)
+      // is applied at startRpcSession time for cold starts; refork/clear create
+      // a new session when a full reset is needed.
       await startRpcSession(current.id, current.path, undefined, { persistInitialPreferences: false });
       return { session: toClientSessionInfo(current) };
     }

@@ -504,8 +504,11 @@ export function AppShell() {
       setBranchActiveLeafId(null);
       setSystemPrompt(null);
       setActiveTopPanel(null);
+      // Drop the panel without re-writing the per-session map entry we are about to delete.
+      setRightPanelMode("closed");
       router.replace("/", { scroll: false });
     }
+    sideChatOpenBySessionRef.current.delete(sessionId);
   }, [selectedSession, router]);
 
   const handleOpenFile = useCallback((

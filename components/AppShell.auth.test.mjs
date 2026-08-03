@@ -62,4 +62,6 @@ test("Side Chat open state is remembered per main session", () => {
   assert.match(source, /if \(sideChatOpen\) return "chat"/);
   assert.match(source, /if \(current === "chat"\) return "closed"/);
   assert.match(source, /onClose=\{closeRightPanel\}/);
+  assert.match(source, /sideChatOpenBySessionRef\.current\.delete\(sessionId\)/);
+  assert.match(source, /handleSessionDeleted[\s\S]*?setRightPanelMode\("closed"\)/);
 });
