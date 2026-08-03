@@ -20,6 +20,6 @@ test("opening the model picker on mobile does not summon the software keyboard",
 
 test("mobile toolbar leaves upward dropdowns visible", () => {
   assert.match(css, /@media \(max-width: 640px\)[\s\S]*?\.chat-input-toolbar \{[\s\S]*?overflow: visible;/);
-  assert.match(source, /thinkingDropdownOpen && \([\s\S]*?bottom: "calc\(100% \+ 6px\)"/);
+  assert.match(source, /thinkingDropdownOpen && \([\s\S]*?\.\.\.\(isMobile \? \{ left: 0 \} : \{ right: 0 \}\)/);
   assert.match(source, /toolDropdownOpen && \([\s\S]*?bottom: "calc\(100% \+ 6px\)"/);
 });
