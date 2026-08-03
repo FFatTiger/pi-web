@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAgentSession } from "@/hooks/useAgentSession";
 import { useI18n } from "@/hooks/useI18n";
 import type { AgentMessage, SessionInfo, ToolResultMessage } from "@/lib/types";
@@ -88,11 +88,27 @@ export function SideChatPanel({ active, mainSession, onClose, onAgentEnd, onOpen
   }, [actionBusy, mainSession.id]);
 
   const controlsDisabled = actionBusy || !sideSession;
+  // Inline styles: panel-header buttons elsewhere in the app do the same so
+  // Tailwind preflight / CSS load order cannot strip the chrome.
+  const headerIconBtnStyle = useMemo((): React.CSSProperties => ({
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: 26,
+    height: 26,
+    padding: 0,
+    border: "none",
+    borderRadius: 6,
+    background: "transparent",
+    color: "var(--text-muted)",
+    cursor: controlsDisabled ? "not-allowed" : "pointer",
+    opacity: controlsDisabled ? 0.4 : 1,
+    flexShrink: 0,
+  }), [controlsDisabled]);
 
   return (
     <div
       ref={panelRef}
-      className="side-chat-panel"
       style={{
         display: active ? "flex" : "none",
         position: "relative",
@@ -103,7 +119,6 @@ export function SideChatPanel({ active, mainSession, onClose, onAgentEnd, onOpen
       }}
     >
       <header
-        className="side-chat-header"
         style={{
           display: "flex",
           alignItems: "center",
@@ -116,7 +131,6 @@ export function SideChatPanel({ active, mainSession, onClose, onAgentEnd, onOpen
         }}
       >
         <div
-          className="side-chat-header-title"
           style={{
             flex: 1,
             minWidth: 0,
@@ -132,24 +146,44 @@ export function SideChatPanel({ active, mainSession, onClose, onAgentEnd, onOpen
         >
           {t("sideChat.title")}
         </div>
-        <div
-          className="side-chat-header-actions"
-          style={{ display: "flex", alignItems: "center", gap: 1, flexShrink: 0 }}
-        >
+        <div style={{ display: "flex", alignItems: "center", gap: 1, flexShrink: 0 }}>
           {compact ? (
-            <div className="side-chat-header-menu" style={{ position: "relative" }}>
+            <div style={{ position: "relative" }}>
               <button
                 type="button"
-                className="side-chat-header-btn side-chat-header-icon-btn"
                 disabled={controlsDisabled}
                 onClick={() => setMenuOpen((open) => !open)}
                 aria-label={t("sideChat.actions")}
                 aria-expanded={menuOpen}
+                style={headerIconBtnStyle}
+                onMouseEnter={(e) => {
+                  if (controlsDisabled) return;
+                  e.currentTarget.style.background = "var(--bg-hover)";
+                  e.currentTarget.style.color = "var(--text)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "transparent";
+                  e.currentTarget.style.color = "var(--text-muted)";
+                }}
               >
                 <MoreIcon />
               </button>
               {menuOpen && (
-                <div className="side-chat-header-menu-panel" role="menu">
+                <div
+                  role="menu"
+                  style={{
+                    position: "absolute",
+                    top: "calc(100% + 4px)",
+                    right: 0,
+                    zIndex: 30,
+                    minWidth: 120,
+                    padding: 4,
+                    border: "1px solid var(--border)",
+                    borderRadius: 8,
+                    background: "var(--bg)",
+                    boxShadow: "0 8px 24px rgba(0, 0, 0, 0.14)",
+                  }}
+                >
                   <MenuButton label={t("sideChat.refork")} onClick={() => void runAction("refork")} />
                   <MenuButton label={t("sideChat.clear")} onClick={() => void runAction("clear")} />
                 </div>
@@ -159,37 +193,62 @@ export function SideChatPanel({ active, mainSession, onClose, onAgentEnd, onOpen
             <>
               <button
                 type="button"
-                className="side-chat-header-btn"
                 disabled={controlsDisabled}
                 onClick={() => void runAction("refork")}
                 title={t("sideChat.reforkTitle")}
+                aria-label={t("sideChat.refork")}
+                style={headerIconBtnStyle}
+                onMouseEnter={(e) => {
+                  if (controlsDisabled) return;
+                  e.currentTarget.style.background = "var(--bg-hover)";
+                  e.currentTarget.style.color = "var(--text)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "transparent";
+                  e.currentTarget.style.color = "var(--text-muted)";
+                }}
               >
                 <RefreshIcon />
-                <span>{t("sideChat.refork")}</span>
               </button>
               <button
                 type="button"
-                className="side-chat-header-btn"
                 disabled={controlsDisabled}
                 onClick={() => void runAction("clear")}
                 title={t("sideChat.clearTitle")}
+                aria-label={t("sideChat.clear")}
+                style={headerIconBtnStyle}
+                onMouseEnter={(e) => {
+                  if (controlsDisabled) return;
+                  e.currentTarget.style.background = "var(--bg-hover)";
+                  e.currentTarget.style.color = "var(--text)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "transparent";
+                  e.currentTarget.style.color = "var(--text-muted)";
+                }}
               >
                 <ClearIcon />
-                <span>{t("sideChat.clear")}</span>
               </button>
             </>
           )}
           <span
-            className="side-chat-header-divider"
             aria-hidden="true"
             style={{ width: 1, height: 14, margin: "0 3px", background: "var(--border)", flexShrink: 0 }}
           />
           <button
             type="button"
-            className="side-chat-header-btn side-chat-header-icon-btn side-chat-header-close"
             onClick={onClose}
             aria-label={t("sideChat.close")}
             title={t("sideChat.close")}
+            style={{ ...headerIconBtnStyle, color: "var(--text-dim)", cursor: "pointer", opacity: 1 }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "var(--bg-hover)";
+              e.currentTarget.style.color = "var(--text)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "transparent";
+              e.currentTarget.style.color = "var(--text-dim)";
+            }}
           >
             <CloseIcon />
           </button>
@@ -215,7 +274,25 @@ export function SideChatPanel({ active, mainSession, onClose, onAgentEnd, onOpen
 
 function MenuButton({ label, onClick }: { label: string; onClick: () => void }) {
   return (
-    <button type="button" className="side-chat-header-menu-item" role="menuitem" onClick={onClick}>
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      style={{
+        display: "block",
+        width: "100%",
+        padding: "7px 10px",
+        border: "none",
+        borderRadius: 5,
+        background: "transparent",
+        color: "var(--text)",
+        textAlign: "left",
+        cursor: "pointer",
+        fontSize: 12,
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+    >
       {label}
     </button>
   );
