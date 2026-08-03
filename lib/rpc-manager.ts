@@ -7,13 +7,20 @@ import { resolve } from "path";
 import { validateAgentImages } from "./image-attachments";
 import { invalidateModelsCache } from "./models-cache";
 import { resolveVisibleModels, selectInitialModelScope } from "./model-scope";
-import { cacheSessionPath, invalidateSessionListCache } from "./session-reader";
+import { cacheSessionPath, invalidateSessionListCache, resolveSessionPath } from "./session-reader";
 import { getProjectTrustStatus, projectTrustReloadOptions } from "./project-trust";
 import { persistExplicitStartupPreferences } from "./startup-preferences";
 import type { SlashCommandInfo } from "@earendil-works/pi-coding-agent";
 import type { AgentSessionLike, ExtensionUiContextLike, ToolInfo } from "./pi-types";
 import type { ExtensionUiRequest, ExtensionUiResponse, ExtensionWidgetItem } from "./types";
 import { createHeadlessCustomUiTui, DEFAULT_CUSTOM_UI_COLUMNS } from "./custom-ui-terminal";
+import { createSideChatExtension, type SideChatMainSnapshot } from "./side-chat-extension";
+import {
+  getMainSessionWrittenFiles,
+  hydrateMainSessionFileActivity,
+  trackMainSessionToolCall,
+} from "./side-chat-file-activity";
+import { getSideChatToolSelection, isSideChatSessionName, readSideChatSessionMetadata } from "./side-chat-metadata";
 
 // ============================================================================
 // Types
@@ -83,8 +90,10 @@ const IDLE_RESET_EVENT_TYPES = new Set([
 
 export interface RpcSessionStartOptions {
   toolNames?: string[];
+  includeExtensionTools?: boolean;
   initialModel?: { provider: string; modelId: string };
   thinkingLevel?: ThinkingLevel;
+  persistInitialPreferences?: boolean;
 }
 
 const CODING_TOOL_NAMES = ["read", "bash", "edit", "write", "grep", "find", "ls"];
@@ -117,8 +126,10 @@ class PlainTextTheme extends Theme {
 const PLAIN_TEXT_THEME = new PlainTextTheme();
 const CUSTOM_UI_KEYBINDINGS = new TuiKeybindingsManager(TUI_KEYBINDINGS);
 
-function withExtensionTools(session: AgentSessionLike, toolNames: string[]): string[] {
+function selectActiveTools(session: AgentSessionLike, toolNames: string[], includeExtensionTools = true): string[] {
   if (toolNames.length === 0) return [];
+
+  if (!includeExtensionTools) return [...new Set(toolNames)];
 
   const codingToolNames = new Set(CODING_TOOL_NAMES);
   const extensionToolNames = session
@@ -146,6 +157,11 @@ export class AgentSessionWrapper {
   private extensionBindingPromise: Promise<void> | null = null;
   private extensionBindingError: unknown = null;
   private forceEmptySystemPrompt = false;
+  private configuredToolNames: string[] | undefined;
+  private includeExtensionTools = true;
+  // The leaf before the current agent run starts. The current user task and
+  // in-flight tool chain must not become Side Chat's inherited assignment.
+  private activeAgentRunBaseLeafId: string | null | undefined;
   private unsubscribe: (() => void) | null = null;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private onDestroyCallback: (() => void) | null = null;
@@ -174,8 +190,31 @@ export class AgentSessionWrapper {
     return this._alive && (this.promptRunning || this.inner.isStreaming || this.inner.isCompacting || this.inner.isBashRunning);
   }
 
+  getSideChatContextLeafId(): string | null {
+    return this.activeAgentRunBaseLeafId !== undefined
+      ? this.activeAgentRunBaseLeafId
+      : this.inner.sessionManager.getLeafId();
+  }
+
   start(): void {
+    const isSideChat = isSideChatSessionName(this.inner.sessionManager.getSessionName());
+    if (!isSideChat) {
+      hydrateMainSessionFileActivity(this.sessionId, this.inner.sessionManager);
+    }
     this.unsubscribe = this.inner.subscribe((event: AgentEvent) => {
+      if (event.type === "agent_start" && this.activeAgentRunBaseLeafId === undefined) {
+        this.activeAgentRunBaseLeafId = this.inner.sessionManager.getLeafId();
+      } else if (event.type === "agent_settled") {
+        this.activeAgentRunBaseLeafId = undefined;
+      }
+      if (!isSideChat && event.type === "tool_execution_start") {
+        trackMainSessionToolCall(
+          this.sessionId,
+          this.cwd,
+          typeof event.toolName === "string" ? event.toolName : "",
+          event.args,
+        );
+      }
       if (event.type === "agent_end") {
         invalidateSessionListCache();
       }
@@ -190,6 +229,21 @@ export class AgentSessionWrapper {
   setForceEmptySystemPrompt(force: boolean): void {
     this.forceEmptySystemPrompt = force;
     this.applyForcedEmptySystemPrompt();
+  }
+
+  setToolSelection(toolNames: string[] | undefined, includeExtensionTools = true): void {
+    this.configuredToolNames = toolNames ? [...toolNames] : undefined;
+    this.includeExtensionTools = includeExtensionTools;
+    this.applyConfiguredTools();
+  }
+
+  private applyConfiguredTools(): void {
+    if (!this.configuredToolNames) return;
+    this.inner.setActiveToolsByName(selectActiveTools(
+      this.inner,
+      this.configuredToolNames,
+      this.includeExtensionTools,
+    ));
   }
 
   beginExtensionBinding(options: ExtensionBindingOptions = {}): void {
@@ -354,6 +408,10 @@ export class AgentSessionWrapper {
         // Fire and forget — events come via subscribe
         const promptImages = command.images as Array<{ type: "image"; data: string; mimeType: string }> | undefined;
         const streamingBehavior = command.streamingBehavior as "steer" | "followUp" | undefined;
+        const capturedRunBase = this.activeAgentRunBaseLeafId === undefined;
+        if (capturedRunBase) {
+          this.activeAgentRunBaseLeafId = this.inner.sessionManager.getLeafId();
+        }
         this.promptRunning = true;
         notifyRunningChange();
         this.inner.prompt(command.message as string, {
@@ -362,11 +420,13 @@ export class AgentSessionWrapper {
           source: "rpc",
         }).then(() => {
           this.promptRunning = false;
+          if (capturedRunBase && !this.inner.isStreaming) this.activeAgentRunBaseLeafId = undefined;
           this.resetIdleTimer();
           if (!streamingBehavior) this.emit({ type: "prompt_done" });
           notifyRunningChange();
         }).catch((error) => {
           this.promptRunning = false;
+          if (capturedRunBase && !this.inner.isStreaming) this.activeAgentRunBaseLeafId = undefined;
           this.resetIdleTimer();
           invalidateSessionListCache();
           this.emit({
@@ -577,8 +637,9 @@ export class AgentSessionWrapper {
 
       case "set_tools": {
         const toolNames = command.toolNames as string[];
+        const includeExtensionTools = command.includeExtensionTools !== false;
         this.setForceEmptySystemPrompt(toolNames.length === 0);
-        this.inner.setActiveToolsByName(withExtensionTools(this.inner, toolNames));
+        this.setToolSelection(toolNames, includeExtensionTools);
         this.applyForcedEmptySystemPrompt();
         return null;
       }
@@ -592,6 +653,7 @@ export class AgentSessionWrapper {
         if (typeof this.inner.bindExtensions !== "function") {
           this.inner.extensionRunner.setUIContext?.(this.createExtensionUiContext(), "rpc");
         }
+        this.applyConfiguredTools();
         this.applyForcedEmptySystemPrompt();
         invalidateModelsCache();
         return { success: true };
@@ -1086,6 +1148,25 @@ export function getRpcSession(sessionId: string): AgentSessionWrapper | undefine
   return getRegistry().get(sessionId);
 }
 
+async function getSideChatMainSnapshot(sessionId: string): Promise<SideChatMainSnapshot | null> {
+  let active = getRegistry().get(sessionId);
+  if (!active?.isAlive()) {
+    const sessionPath = await resolveSessionPath(sessionId);
+    if (!sessionPath) return null;
+    active = (await startRpcSession(sessionId, sessionPath, undefined, {
+      persistInitialPreferences: false,
+    })).session;
+  }
+  const sessionManager = active.inner.sessionManager;
+  return {
+    sessionManager,
+    ...(active.inner.agent.state?.systemPrompt
+      ? { systemPrompt: active.inner.agent.state.systemPrompt }
+      : {}),
+    writtenFiles: getMainSessionWrittenFiles(sessionId, sessionManager),
+  };
+}
+
 export function hasBusyRpcSessionForCwd(cwd: string): boolean {
   const targetCwd = normalizeRpcCwd(cwd);
   if (getStartingSessionCwds().has(targetCwd)) return true;
@@ -1168,7 +1249,6 @@ export async function startRpcSession(
   cwd: string | undefined,
   options: RpcSessionStartOptions = {},
 ): Promise<{ session: AgentSessionWrapper; realSessionId: string }> {
-  const { toolNames, initialModel, thinkingLevel } = options;
   const registry = getRegistry();
   const locks = getLocks();
 
@@ -1186,6 +1266,14 @@ export async function startRpcSession(
     sessionManager = SessionManager.create(cwd, undefined);
   }
   const sessionCwd = sessionManager.getCwd();
+  const sideChatMetadata = readSideChatSessionMetadata(
+    sessionManager.getSessionName(),
+    sessionManager.getEntries(),
+  );
+  const sideChatSelection = sideChatMetadata ? getSideChatToolSelection() : undefined;
+  const toolNames = options.toolNames ?? sideChatSelection?.toolNames;
+  const includeExtensionTools = options.includeExtensionTools ?? sideChatSelection?.includeExtensionTools ?? true;
+  const { initialModel, thinkingLevel } = options;
   const finishStartingSession = trackStartingSession(sessionCwd);
   const starting = (async () => {
     // Some extensions access the SDK's global theme even outside the terminal UI.
@@ -1211,10 +1299,30 @@ export async function startRpcSession(
     // Gate untrusted project extensions so opening a repository does not run
     // its .pi/extensions code automatically (see lib/project-trust.ts, #236).
     const trustReloadOptions = projectTrustReloadOptions(sessionCwd, agentDir);
+    const sideChatExtension = sideChatMetadata
+      ? createSideChatExtension({
+        forkLeafId: sideChatMetadata.forkLeafId,
+        getMainSnapshot: () => getSideChatMainSnapshot(sideChatMetadata.mainSessionId),
+      })
+      : undefined;
+    // Side Chat only loads its own inline extension (peek_main + prompt).
+    // noExtensions skips package/project MCP extensions so they cannot call
+    // setStatus (e.g. "MCP: 1 server enabled") or register external tools.
     const services = await createAgentSessionServices({
       cwd: sessionCwd,
       agentDir,
-      ...(trustReloadOptions ? { resourceLoaderReloadOptions: trustReloadOptions } : {}),
+      ...(sideChatExtension
+        ? {
+          resourceLoaderOptions: {
+            extensionFactories: [sideChatExtension],
+            noExtensions: true,
+          },
+        }
+        : {}),
+      // Project-trust gating is only relevant when package/project extensions load.
+      ...(!sideChatExtension && trustReloadOptions
+        ? { resourceLoaderReloadOptions: trustReloadOptions }
+        : {}),
     });
     const scope = await resolveVisibleModels(
       services.modelRuntime,
@@ -1241,30 +1349,33 @@ export async function startRpcSession(
       ...(toolsOption !== undefined ? { tools: toolsOption } : {}),
     });
 
-    const persistedPreferences = await persistExplicitStartupPreferences(
-      services.settingsManager,
-      {
-        ...(initialModel ? { model: initialModel } : {}),
-        ...(thinkingLevel ? { thinkingLevel } : {}),
-      },
-      {
-        ...(inner.model
-          ? { model: { provider: inner.model.provider, modelId: inner.model.id } }
-          : {}),
-        thinkingLevel: inner.thinkingLevel,
-        supportsThinking: inner.supportsThinking(),
-      },
-    );
-    if (persistedPreferences.modelDefaultChanged) invalidateModelsCache();
+    if (options.persistInitialPreferences !== false) {
+      const persistedPreferences = await persistExplicitStartupPreferences(
+        services.settingsManager,
+        {
+          ...(initialModel ? { model: initialModel } : {}),
+          ...(thinkingLevel ? { thinkingLevel } : {}),
+        },
+        {
+          ...(inner.model
+            ? { model: { provider: inner.model.provider, modelId: inner.model.id } }
+            : {}),
+          thinkingLevel: inner.thinkingLevel,
+          supportsThinking: inner.supportsThinking(),
+        },
+      );
+      if (persistedPreferences.modelDefaultChanged) invalidateModelsCache();
+    }
 
     // If specific tool names were requested (non-empty), set the active tools to the
     // requested builtin coding tools PLUS all extension/package tools, so installed
     // extensions stay usable in Pi Web just like in the `pi` CLI.
     if (toolNames && toolNames.length > 0) {
-      inner.setActiveToolsByName(withExtensionTools(inner, toolNames));
+      inner.setActiveToolsByName(selectActiveTools(inner, toolNames, includeExtensionTools));
     }
 
     const wrapper = new AgentSessionWrapper(inner);
+    if (toolNames !== undefined) wrapper.setToolSelection(toolNames, includeExtensionTools);
     // When all tools are disabled, clear the system prompt entirely.
     // pi's buildSystemPrompt always produces a non-empty prompt even with no tools;
     // keep this forced after extension resource discovery and reloads as well.

@@ -41,7 +41,7 @@ test("session stats are no longer duplicated in the top bar", () => {
   assert.doesNotMatch(topBarBlock, /\{fmt\(t\.input\)\}/);
 });
 
-test("fixed right corner keeps only the Explorer entry", () => {
+test("fixed right corner exposes Side Chat and Explorer entries", () => {
   const explorerGroupStart = source.indexOf("{/* Fixed right-corner control: file explorer */}");
   assert.ok(explorerGroupStart >= 0, "explorer fixed group marker missing");
   const explorerGroupEnd = source.indexOf("{modelsConfigOpen &&", explorerGroupStart);
@@ -49,6 +49,19 @@ test("fixed right corner keeps only the Explorer entry", () => {
   const fixedRegion = source.slice(explorerGroupStart, explorerGroupEnd);
   assert.equal(fixedRegion.includes("<AuthControls"), false);
   assert.match(fixedRegion, /rightPanelMode === "explorer"/);
+  assert.match(fixedRegion, /rightPanelMode === "chat"/);
+  assert.match(fixedRegion, /toggleSideChatPanel/);
   assert.doesNotMatch(fixedRegion, /rightPanelMode === "file"/);
   assert.doesNotMatch(fixedRegion, /toggleFilePanel/);
+});
+
+test("Side Chat open state is remembered per main session", () => {
+  assert.match(source, /sideChatOpenBySessionRef/);
+  assert.match(source, /rememberSideChatOpen\(selectedSession\.id, next === "chat"\)/);
+  assert.match(source, /const sideChatOpen = sideChatOpenBySessionRef\.current\.get\(session\.id\) === true/);
+  assert.match(source, /if \(sideChatOpen\) return "chat"/);
+  assert.match(source, /if \(current === "chat"\) return "closed"/);
+  assert.match(source, /onClose=\{closeRightPanel\}/);
+  assert.match(source, /sideChatOpenBySessionRef\.current\.delete\(sessionId\)/);
+  assert.match(source, /handleSessionDeleted[\s\S]*?setRightPanelMode\("closed"\)/);
 });

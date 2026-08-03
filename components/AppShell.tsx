@@ -13,6 +13,7 @@ import { ProjectTrustDialog } from "./ProjectTrustDialog";
 import { BranchNavigator } from "./BranchNavigator";
 import { WorktreeSwitcher } from "./WorktreeSwitcher";
 import { WorkspaceFilePanel, type RightPanelMode } from "./WorkspaceFilePanel";
+import { SideChatPanel } from "./SideChatPanel";
 import { useTheme } from "@/hooks/useTheme";
 import { useI18n } from "@/hooks/useI18n";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -77,6 +78,9 @@ export function AppShell() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileSidebarReady, setMobileSidebarReady] = useState(false);
   const [rightPanelMode, setRightPanelMode] = useState<RightPanelMode>("closed");
+  // Side Chat open/closed is remembered per main session so switching A→B
+  // does not carry A's panel, and returning to A restores it.
+  const sideChatOpenBySessionRef = useRef(new Map<string, boolean>());
   const sidebarWidthRef = useRef(SIDEBAR_DEFAULT_WIDTH);
   const rightPanelWidthRef = useRef(RIGHT_PANEL_FALLBACK_WIDTH);
   const getResponsiveRightPanelWidth = useCallback(
@@ -182,6 +186,19 @@ export function AppShell() {
   const autoNameTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activeSessionIdRef = useRef<string | null>(selectedSession?.id ?? null);
   activeSessionIdRef.current = selectedSession?.id ?? null;
+
+  const rememberSideChatOpen = useCallback((sessionId: string | null | undefined, open: boolean) => {
+    if (!sessionId) return;
+    sideChatOpenBySessionRef.current.set(sessionId, open);
+  }, []);
+
+  const closeRightPanel = useCallback(() => {
+    setRightPanelMode((mode) => {
+      if (mode === "chat") rememberSideChatOpen(activeSessionIdRef.current, false);
+      return "closed";
+    });
+  }, [rememberSideChatOpen]);
+
   const handleSessionStatsChange = useCallback((stats: SessionStatsInfo | null) => {
     setSessionStats(stats);
   }, []);
@@ -225,10 +242,10 @@ export function AppShell() {
   const handleSidebarToggle = useCallback(() => {
     if (isMobile) {
       setActiveTopPanel(null);
-      setRightPanelMode("closed");
+      closeRightPanel();
     }
     setSidebarOpen((open) => !open);
-  }, [isMobile]);
+  }, [closeRightPanel, isMobile]);
 
   useEffect(() => {
     if (!activeTopPanel || !topBarRef.current) return;
@@ -354,6 +371,13 @@ export function AppShell() {
     setSessionKey((k) => k + 1);
     setSystemPrompt(null);
     setInitialSessionRestored(true);
+    // Restore this session's Side Chat preference; never carry another session's chat panel.
+    const sideChatOpen = sideChatOpenBySessionRef.current.get(session.id) === true;
+    setRightPanelMode((current) => {
+      if (sideChatOpen) return "chat";
+      if (current === "chat") return "closed";
+      return current;
+    });
     // On mobile, collapse the overlay drawer so the chat is revealed after pick.
     if (isMobile && !isRestore) setSidebarOpen(false);
     // Skip router.replace when restoring from URL — the param is already correct
@@ -378,6 +402,7 @@ export function AppShell() {
     setBranchActiveLeafId(null);
     setSystemPrompt(null);
     setActiveTopPanel(null);
+    setRightPanelMode((current) => (current === "chat" ? "closed" : current));
     if (isMobile) setSidebarOpen(false);
     router.replace("/", { scroll: false });
   }, [isMobile, router]);
@@ -479,8 +504,11 @@ export function AppShell() {
       setBranchActiveLeafId(null);
       setSystemPrompt(null);
       setActiveTopPanel(null);
+      // Drop the panel without re-writing the per-session map entry we are about to delete.
+      setRightPanelMode("closed");
       router.replace("/", { scroll: false });
     }
+    sideChatOpenBySessionRef.current.delete(sessionId);
   }, [selectedSession, router]);
 
   const handleOpenFile = useCallback((
@@ -543,6 +571,16 @@ export function AppShell() {
     if (isMobile) setSidebarOpen(false);
     setRightPanelMode((mode) => mode === "explorer" ? "closed" : "explorer");
   }, [activeCwd, isMobile]);
+
+  const toggleSideChatPanel = useCallback(() => {
+    if (!selectedSession) return;
+    if (isMobile) setSidebarOpen(false);
+    setRightPanelMode((mode) => {
+      const next = mode === "chat" ? "closed" : "chat";
+      rememberSideChatOpen(selectedSession.id, next === "chat");
+      return next;
+    });
+  }, [isMobile, rememberSideChatOpen, selectedSession]);
 
   const handleViewFullHistory = useCallback(() => {
     if (!selectedSession) return;
@@ -1298,6 +1336,7 @@ export function AppShell() {
               onSessionStatsPanelOpen={toggleSessionStatsPanel}
               onContextUsageChange={handleContextUsageChange}
               onOpenFile={handleOpenLinkedFile}
+              hideMinimap={rightPanelMode !== "closed"}
             />
           ) : initialCwdStatus === "validating" ? (
             <div
@@ -1346,7 +1385,7 @@ export function AppShell() {
       <div
         aria-hidden="true"
         className={`right-panel-overlay-backdrop${rightPanelMode !== "closed" ? " is-open" : ""}`}
-        onClick={() => setRightPanelMode("closed")}
+        onClick={closeRightPanel}
       />
       {rightPanelMode !== "closed" && (
         <div
@@ -1366,7 +1405,7 @@ export function AppShell() {
           "--right-panel-width": `${rightPanelResizer.width}px`,
           display: "flex",
           flexDirection: "column",
-          height: "calc(36px + env(safe-area-inset-top))",
+          height: "100%",
           borderLeft: "1px solid var(--border)",
           background: "var(--bg)",
         } as React.CSSProperties}
@@ -1385,6 +1424,16 @@ export function AppShell() {
           onAtMentions={handleAtMentions}
           onMentionLines={rightPanelMode === "file" ? handleFileLineMention : undefined}
           onChangesCountChange={setChangesCount}
+          sideChat={selectedSession ? (
+            <SideChatPanel
+              key={selectedSession.id}
+              active={rightPanelMode === "chat"}
+              mainSession={selectedSession}
+              onClose={closeRightPanel}
+              onAgentEnd={handleAgentEnd}
+              onOpenFile={handleOpenLinkedFile}
+            />
+          ) : null}
         />
       </div>
     </div>
@@ -1395,7 +1444,7 @@ export function AppShell() {
         top: 0,
         right: "env(safe-area-inset-right)",
         zIndex: 300,
-        display: "flex",
+        display: rightPanelMode === "chat" ? "none" : "flex",
       }}
     >
       {rightPanelMode === "explorer" && changesCount > 0 && (
@@ -1418,6 +1467,29 @@ export function AppShell() {
           <span style={{ fontSize: 11, fontWeight: 600 }}>{changesCount}</span>
         </button>
       )}
+      <button
+        onClick={toggleSideChatPanel}
+        disabled={!selectedSession}
+        title={rightPanelMode === "chat" ? translate("sideChat.hide") : translate("sideChat.show")}
+        aria-label={rightPanelMode === "chat" ? translate("sideChat.hide") : translate("sideChat.show")}
+        aria-pressed={rightPanelMode === "chat"}
+        style={{
+          display: "flex", alignItems: "center", justifyContent: "center",
+          width: 36, height: 36, padding: 0,
+          background: "var(--bg-panel)", border: "none",
+          borderLeft: "1px solid var(--border)", borderBottom: "1px solid var(--border)",
+          color: rightPanelMode === "chat" ? "var(--text)" : "var(--text-muted)",
+          cursor: !selectedSession ? "not-allowed" : "pointer",
+          opacity: !selectedSession ? 0.4 : 1,
+          transition: "color 0.12s, opacity 0.12s",
+        }}
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" />
+          <path d="M8 9h8" />
+          <path d="M8 13h5" />
+        </svg>
+      </button>
       <button
         onClick={toggleExplorerPanel}
         disabled={!activeCwd}

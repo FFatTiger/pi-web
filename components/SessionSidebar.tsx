@@ -5,11 +5,14 @@ import type { SessionInfo } from "@/lib/types";
 import { AuthControls } from "./AuthControls";
 import {
   buildSidebarSessionTree,
+  flattenTemporarySessions,
   getProjectActivity,
+  getProjectDisplayName,
   getSidebarSessionVisibility,
   groupSidebarProjects,
   parseExpandedProjects,
   parseManualProjects,
+  partitionSidebarProjects,
   serializeExpandedProjects,
   serializeManualProjects,
   upsertManualProject,
@@ -80,35 +83,6 @@ function formatRelativeTime(dateStr: string): string {
   if (hours < 24) return `${hours}h ago`;
   if (days < 7) return `${days}d ago`;
   return date.toLocaleDateString();
-}
-
-/** Substitute the home dir prefix with ~ (no path truncation — see PathLabel) */
-function displayCwd(cwd: string, homeDir?: string): string {
-  return (homeDir && cwd.startsWith(homeDir)) ? "~" + cwd.slice(homeDir.length) : cwd;
-}
-
-/**
- * Path label that ellipsizes on the LEFT, keeping the (most relevant) trailing
- * segments visible: "…orkspace/pi-web".
- */
-function PathLabel({ text, style }: { text: string; style?: CSSProperties }) {
-  return (
-    <span
-      style={{
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-        whiteSpace: "nowrap",
-        display: "block",
-        minWidth: 0,
-        lineHeight: 1.35,
-        direction: "rtl",
-        textAlign: "left",
-        ...style,
-      }}
-    >
-      <span style={{ unicodeBidi: "plaintext" }}>{text}</span>
-    </span>
-  );
 }
 
 const DROPDOWN_ANIMATION_MS = 140;
@@ -259,7 +233,6 @@ export function SessionSidebar({
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [homeDir, setHomeDir] = useState("");
   const [directoryOpen, setDirectoryOpen] = useState(false);
   const [customPathValue, setCustomPathValue] = useState("");
   const [customPathError, setCustomPathError] = useState<string | null>(null);
@@ -433,15 +406,17 @@ export function SessionSidebar({
     });
   }, [selectedSessionId]);
 
-  useEffect(() => {
-    fetch("/api/home").then((r) => r.json()).then((d: { home?: string }) => {
-      if (d.home) setHomeDir(d.home);
-    }).catch(() => {});
-  }, []);
-
   const projectGroups = useMemo(
     () => groupSidebarProjects(allSessions, manualProjects),
     [allSessions, manualProjects],
+  );
+  const { projects: regularProjects, temporary: temporaryProjects } = useMemo(
+    () => partitionSidebarProjects(projectGroups),
+    [projectGroups],
+  );
+  const temporarySessions = useMemo(
+    () => flattenTemporarySessions(temporaryProjects),
+    [temporaryProjects],
   );
 
   useEffect(() => {
@@ -584,6 +559,46 @@ export function SessionSidebar({
     // AppShell resolves the remembered per-project cwd from projectCwds.
     onNewSession?.(tempId, group.root, group.root);
   }, [onNewSession]);
+
+  const renderProjectGroup = (group: SidebarProjectGroup) => {
+    const expanded = expandedProjects.has(group.root);
+    const selected = activeProjectRoot === group.root;
+    const activity = getProjectActivity(group.sessions, runningSessionIds, unreadSessionIds);
+    const fullTree = buildSidebarSessionTree(group.sessions);
+    const visibility = getSidebarSessionVisibility(group.sessions, {
+      runningSessionIds,
+      unreadSessionIds,
+      selectedSessionId,
+    });
+    const showAllSessions = showAllSessionProjects.has(group.root);
+    return (
+      <ProjectGroup
+        key={group.root}
+        group={group}
+        expanded={expanded}
+        selected={selected}
+        activity={activity}
+        selectedSessionId={selectedSessionId}
+        runningSessionIds={runningSessionIds}
+        unreadSessionIds={unreadSessionIds}
+        onToggle={() => toggleProject(group)}
+        onNewSession={(event) => {
+          event.stopPropagation();
+          startProjectSession(group);
+        }}
+        onSelectSession={onSelectSession}
+        onRenamed={loadSessions}
+        onSessionDeleted={(id) => {
+          onSessionDeleted?.(id);
+          void loadSessions();
+        }}
+        tree={showAllSessions ? fullTree : visibility.tree}
+        hiddenCount={visibility.hiddenCount}
+        showAllSessions={showAllSessions}
+        onToggleShowAllSessions={() => toggleShowAllSessions(group.root)}
+      />
+    );
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
@@ -801,8 +816,8 @@ export function SessionSidebar({
         </div>
       </div>
 
-      {/* Project groups */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "0", minHeight: 0 }}>
+      {/* Project / temporary sections */}
+      <div style={{ flex: 1, overflowY: "auto", padding: "6px 0 10px", minHeight: 0 }}>
         {loading && (
           <div style={{ padding: "16px 14px", color: "var(--text-muted)", fontSize: 12 }}>
             Loading...
@@ -818,47 +833,59 @@ export function SessionSidebar({
             Open a directory to get started
           </div>
         )}
-        {projectGroups.map((group) => {
-          const expanded = expandedProjects.has(group.root);
-          const selected = activeProjectRoot === group.root;
-          const activity = getProjectActivity(group.sessions, runningSessionIds, unreadSessionIds);
-          const fullTree = buildSidebarSessionTree(group.sessions);
-          const visibility = getSidebarSessionVisibility(group.sessions, {
-            runningSessionIds,
-            unreadSessionIds,
-            selectedSessionId,
-          });
-          const showAllSessions = showAllSessionProjects.has(group.root);
-          return (
-            <ProjectGroup
-              key={group.root}
-              group={group}
-              expanded={expanded}
-              selected={selected}
-              activity={activity}
-              homeDir={homeDir}
-              selectedSessionId={selectedSessionId}
-              runningSessionIds={runningSessionIds}
-              unreadSessionIds={unreadSessionIds}
-              onToggle={() => toggleProject(group)}
-              onNewSession={(event) => {
-                event.stopPropagation();
-                startProjectSession(group);
-              }}
-              onSelectSession={onSelectSession}
-              onRenamed={loadSessions}
-              onSessionDeleted={(id) => {
-                onSessionDeleted?.(id);
-                void loadSessions();
-              }}
-              tree={showAllSessions ? fullTree : visibility.tree}
-              hiddenCount={visibility.hiddenCount}
-              showAllSessions={showAllSessions}
-              onToggleShowAllSessions={() => toggleShowAllSessions(group.root)}
-            />
-          );
-        })}
+
+        {regularProjects.length > 0 && (
+          <SidebarSection label="项目">
+            {regularProjects.map((group) => renderProjectGroup(group))}
+          </SidebarSection>
+        )}
+
+        {(temporaryProjects.length > 0 || temporarySessions.length > 0) && (
+          <SidebarSection label="临时对话">
+            {temporarySessions.length === 0 ? (
+              <div style={{ padding: "6px 14px 10px 34px", fontSize: 12, color: "var(--text-dim)" }}>
+                没有聊天
+              </div>
+            ) : (
+              temporarySessions.map((session) => (
+                <SessionItem
+                  key={session.id}
+                  session={session}
+                  isSelected={session.id === selectedSessionId}
+                  isRunning={runningSessionIds.has(session.id)}
+                  isUnread={unreadSessionIds.has(session.id)}
+                  onClick={() => onSelectSession(session)}
+                  onRenamed={loadSessions}
+                  onDeleted={(id) => {
+                    onSessionDeleted?.(id);
+                    void loadSessions();
+                  }}
+                />
+              ))
+            )}
+          </SidebarSection>
+        )}
       </div>
+    </div>
+  );
+}
+
+function SidebarSection({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div style={{ marginTop: 4, marginBottom: 8 }}>
+      <div
+        style={{
+          padding: "8px 14px 4px",
+          fontSize: 11,
+          fontWeight: 500,
+          color: "var(--text-dim)",
+          letterSpacing: "0.01em",
+          userSelect: "none",
+        }}
+      >
+        {label}
+      </div>
+      <div>{children}</div>
     </div>
   );
 }
@@ -868,7 +895,6 @@ function ProjectGroup({
   expanded,
   selected,
   activity,
-  homeDir,
   selectedSessionId,
   runningSessionIds,
   unreadSessionIds,
@@ -886,7 +912,6 @@ function ProjectGroup({
   expanded: boolean;
   selected: boolean;
   activity: ProjectActivity;
-  homeDir: string;
   selectedSessionId: string | null;
   runningSessionIds: Set<string>;
   unreadSessionIds: Set<string>;
@@ -901,10 +926,10 @@ function ProjectGroup({
   onToggleShowAllSessions: () => void;
 }) {
   const [hovered, setHovered] = useState(false);
-  const label = displayCwd(group.root, homeDir);
+  const label = getProjectDisplayName(group.root);
 
   return (
-    <div>
+    <div style={{ marginBottom: 2 }}>
       <div
         role="button"
         tabIndex={0}
@@ -921,23 +946,27 @@ function ProjectGroup({
         aria-expanded={expanded}
         aria-label={`Project ${label}`}
         style={{
-          height: 40,
+          minHeight: 34,
           display: "flex",
           alignItems: "center",
-          gap: 6,
-          padding: "0 8px 0 10px",
+          gap: 8,
+          padding: "5px 10px 5px 12px",
+          margin: "0 6px",
           cursor: "pointer",
-          background: hovered ? "var(--bg-hover)" : "var(--bg-panel)",
-          borderTop: "1px solid var(--border)",
-          borderBottom: "1px solid var(--border)",
-          borderLeft: selected ? "2px solid var(--accent)" : "2px solid transparent",
+          background: selected
+            ? "var(--bg-selected)"
+            : hovered
+              ? "var(--bg-hover)"
+              : "transparent",
+          borderRadius: 8,
+          border: "none",
           transition: "background 0.1s",
         }}
       >
         <svg
-          width="10"
-          height="10"
-          viewBox="0 0 10 10"
+          width="15"
+          height="15"
+          viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
           strokeWidth="1.8"
@@ -946,31 +975,33 @@ function ProjectGroup({
           aria-hidden="true"
           style={{
             flexShrink: 0,
-            color: selected ? "var(--text-muted)" : "var(--text-dim)",
-            transform: expanded ? "rotate(90deg)" : "none",
-            transition: "transform 0.15s",
+            color: selected ? "var(--text)" : "var(--text-muted)",
           }}
         >
-          <polyline points="3 2 7 5 3 8" />
+          <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
         </svg>
-        <PathLabel
-          text={label}
+        <span
           style={{
             flex: 1,
-            fontFamily: "var(--font-mono)",
-            fontSize: 11,
-            color: selected ? "var(--text)" : "var(--text-muted)",
-            fontWeight: selected ? 650 : 550,
-            letterSpacing: "0.01em",
+            minWidth: 0,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            fontSize: 13,
+            color: selected ? "var(--text)" : "var(--text)",
+            fontWeight: selected ? 550 : 450,
+            letterSpacing: "-0.01em",
           }}
-        />
+        >
+          {label}
+        </span>
         <button
           type="button"
           onClick={onNewSession}
           title={`New session in ${group.root}`}
           aria-label={`New session in ${label}`}
           style={{
-            display: "flex",
+            display: hovered || selected ? "flex" : "none",
             alignItems: "center",
             justifyContent: "center",
             width: 22,
@@ -978,14 +1009,14 @@ function ProjectGroup({
             padding: 0,
             background: "none",
             border: "none",
-            borderRadius: 5,
+            borderRadius: 6,
             color: "var(--text-dim)",
             cursor: "pointer",
             flexShrink: 0,
             transition: "color 0.12s, background 0.12s",
           }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.color = "var(--accent)";
+            e.currentTarget.style.color = "var(--text)";
             e.currentTarget.style.background = "var(--bg-hover)";
           }}
           onMouseLeave={(e) => {
@@ -1019,15 +1050,14 @@ function ProjectGroup({
       {expanded && (
         group.sessions.length === 0 ? (
           <div style={{
-            padding: "7px 14px 11px 28px",
-            fontSize: 11,
+            padding: "4px 14px 8px 36px",
+            fontSize: 12,
             color: "var(--text-dim)",
-            background: "var(--bg)",
           }}>
-            No sessions yet
+            没有聊天
           </div>
         ) : (
-          <div style={{ background: "var(--bg)" }}>
+          <div>
             {tree.map((node) => (
               <SessionTreeItem
                 key={node.session.id}
@@ -1051,19 +1081,18 @@ function ProjectGroup({
                 aria-expanded={showAllSessions}
                 style={{
                   width: "100%",
-                  height: 30,
-                  padding: "0 14px 0 28px",
+                  height: 28,
+                  padding: "0 14px 0 36px",
                   display: "flex",
                   alignItems: "center",
                   background: "transparent",
                   border: "none",
                   color: "var(--text-dim)",
                   cursor: "pointer",
-                  fontSize: 11,
-                  fontFamily: "var(--font-mono)",
+                  fontSize: 12,
                 }}
               >
-                {showAllSessions ? "Show less" : `Show all (${hiddenCount})`}
+                {showAllSessions ? "收起" : "展开显示"}
               </button>
             )}
           </div>
@@ -1294,7 +1323,7 @@ function SessionItem({
   }, []);
 
   // Fixed-height outer wrapper — content swaps in place so the list never reflows
-  const ITEM_HEIGHT = 54;
+  const ITEM_HEIGHT = 34;
 
   return (
     <div
@@ -1305,15 +1334,18 @@ function SessionItem({
         height: ITEM_HEIGHT,
         display: "flex",
         alignItems: "center",
-        paddingLeft: depth > 0 ? depth * 12 + 14 : 14,
+        margin: "1px 6px",
+        paddingLeft: depth > 0 ? depth * 12 + 28 : 34,
         paddingRight: 8,
         cursor: confirmDelete || renaming ? "default" : "pointer",
         background: confirmDelete
           ? "rgba(239,68,68,0.06)"
           : isSelected ? "var(--bg-selected)" : hovered ? "var(--bg-hover)" : "transparent",
-        borderLeft: confirmDelete
-          ? "2px solid #ef4444"
-          : isSelected ? "2px solid var(--accent)" : "2px solid transparent",
+        borderRadius: 8,
+        border: "none",
+        boxShadow: confirmDelete
+          ? "inset 2px 0 0 #ef4444"
+          : "none",
         transition: "background 0.1s",
         opacity: deleting ? 0.5 : 1,
         gap: 6,
@@ -1393,48 +1425,28 @@ function SessionItem({
               <path d="M18 9a9 9 0 0 1-9 9" />
             </svg>
           )}
-          <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 6 }}>
             <div
               style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 5,
+                flex: 1,
                 minWidth: 0,
-                fontSize: 12,
+                fontSize: 13,
                 fontWeight: isSelected ? 500 : 400,
-                lineHeight: 1.4,
-                color: "var(--text)",
+                lineHeight: 1.35,
+                color: isSelected ? "var(--text)" : "var(--text-muted)",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
               }}
-              title={title}
+              title={`${title}${session.worktreeBranch ? ` · ${session.worktreeBranch}` : ""} · ${formatRelativeTime(session.modified)} · ${session.messageCount} msgs`}
             >
-              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
-                {title}
+              {title}
+            </div>
+            {(isRunning || isUnread) && (
+              <span style={{ display: "inline-flex", flexShrink: 0 }}>
+                {isRunning ? <RunningSessionIndicator /> : <UnreadSessionIndicator />}
               </span>
-            </div>
-            <div style={{ marginTop: 2, display: "flex", alignItems: "center", gap: 8, color: "var(--text-dim)", fontSize: 11, minWidth: 0 }}>
-              {isRunning ? (
-                <RunningSessionIndicator />
-              ) : isUnread ? (
-                <UnreadSessionIndicator />
-              ) : (
-                <span title={session.modified}>{formatRelativeTime(session.modified)}</span>
-              )}
-              <span>{session.messageCount} msgs</span>
-              {session.worktreeBranch && (
-                <span
-                  title={`Worktree: ${session.cwd}`}
-                  style={{ display: "flex", alignItems: "center", gap: 3, color: "var(--accent)", minWidth: 0, overflow: "hidden" }}
-                >
-                  <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-                    <line x1="6" y1="3" x2="6" y2="15" />
-                    <circle cx="18" cy="6" r="3" />
-                    <circle cx="6" cy="18" r="3" />
-                    <path d="M18 9a9 9 0 0 1-9 9" />
-                  </svg>
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{session.worktreeBranch}</span>
-                </span>
-              )}
-            </div>
+            )}
           </div>
 
           {hasChildren && (

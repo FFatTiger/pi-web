@@ -153,6 +153,42 @@ export function getSidebarSessionVisibility(
   };
 }
 
+/** Default-cwd scratch roots created by /api/default-cwd: ~/pi-cwd-YYYYMMDD */
+const TEMPORARY_PROJECT_BASENAME = /^pi-cwd-\d{8}$/;
+
+export function getProjectBasename(root: string): string {
+  const normalized = root.replace(/[\\/]+$/, "").replace(/\\/g, "/");
+  const parts = normalized.split("/").filter(Boolean);
+  return parts[parts.length - 1] || root;
+}
+
+export function isTemporaryProjectRoot(root: string): boolean {
+  return TEMPORARY_PROJECT_BASENAME.test(getProjectBasename(root));
+}
+
+export function getProjectDisplayName(root: string): string {
+  return getProjectBasename(root);
+}
+
+export function partitionSidebarProjects(groups: SidebarProjectGroup[]): {
+  projects: SidebarProjectGroup[];
+  temporary: SidebarProjectGroup[];
+} {
+  const projects: SidebarProjectGroup[] = [];
+  const temporary: SidebarProjectGroup[] = [];
+  for (const group of groups) {
+    if (isTemporaryProjectRoot(group.root)) temporary.push(group);
+    else projects.push(group);
+  }
+  return { projects, temporary };
+}
+
+export function flattenTemporarySessions(groups: SidebarProjectGroup[]): SessionInfo[] {
+  return groups
+    .flatMap((group) => group.sessions)
+    .sort((a, b) => b.modified.localeCompare(a.modified));
+}
+
 export function groupSidebarProjects(
   sessions: SessionInfo[],
   manualProjects: ManualProject[],

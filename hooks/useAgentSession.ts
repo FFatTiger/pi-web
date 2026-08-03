@@ -22,6 +22,7 @@ export interface SessionData {
   context: {
     messages: AgentMessage[];
     entryIds: string[];
+    hiddenMessageEntryIds?: string[];
     thinkingLevel: string;
     model: { provider: string; modelId: string } | null;
   };

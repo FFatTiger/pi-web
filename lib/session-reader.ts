@@ -10,6 +10,7 @@ import type { AgentMessage, SessionEntry, SessionHeader, SessionInfo, SessionCon
 import type { SessionEntry as PiSessionEntry, SessionInfo as PiSessionInfo } from "@earendil-works/pi-coding-agent";
 import { normalizeToolCalls } from "./normalize";
 import { sessionPathKey } from "./session-path";
+import { isSideChatSessionName, SIDE_CHAT_METADATA_TYPE } from "./side-chat-metadata";
 import { resolveProject, type ProjectInfo } from "./worktree";
 
 export { getAgentDir };
@@ -17,18 +18,21 @@ export { getAgentDir };
 async function loadAllSessions(): Promise<SessionInfo[]> {
   const piSessions: PiSessionInfo[] = await SessionManager.listAll();
   const pathToId = new Map<string, string>();
-  for (const s of piSessions) pathToId.set(sessionPathKey(s.path), s.id);
+  for (const s of piSessions) {
+    pathToId.set(sessionPathKey(s.path), s.id);
+    cacheSessionPath(s.id, s.path);
+  }
+  const visibleSessions = piSessions.filter((session) => !isSideChatSessionName(session.name));
 
   // Resolve each unique cwd to its project root (main repo shared by all
   // worktrees). resolveProject caches per-cwd, so this is cheap after warmup.
-  const uniqueCwds = [...new Set(piSessions.map((s) => s.cwd).filter(Boolean))];
+  const uniqueCwds = [...new Set(visibleSessions.map((s) => s.cwd).filter(Boolean))];
   const projectByCwd = new Map<string, ProjectInfo>();
   await Promise.all(uniqueCwds.map(async (cwd) => {
     projectByCwd.set(cwd, await resolveProject(cwd));
   }));
 
-  return piSessions.map((s) => {
-    cacheSessionPath(s.id, s.path);
+  return visibleSessions.map((s) => {
     const project = s.cwd ? projectByCwd.get(s.cwd) : undefined;
     return {
       path: s.path,
@@ -52,6 +56,12 @@ export async function listAllSessions(): Promise<SessionInfo[]> {
   // Return cached result if still fresh (avoids re-scanning session files
   // and re-spawning git processes on every page load).
   if (globalThis.__piSessionListCache && Date.now() - globalThis.__piSessionListCache.ts < SESSION_LIST_CACHE_TTL_MS) {
+    // Path cache can be empty after HMR/partial invalidation while the list
+    // cache is still warm. Rehydrate id→path from the warm list so resolve
+    // helpers never miss solely because loadAllSessions was short-circuited.
+    for (const session of globalThis.__piSessionListCache.data) {
+      if (!getPathCache().has(session.id)) cacheSessionPath(session.id, session.path);
+    }
     return globalThis.__piSessionListCache.data;
   }
 
@@ -110,12 +120,36 @@ function getPathToIdCache(): Map<string, string> {
   return globalThis.__piPathToSessionIdCache;
 }
 
+function isSessionListCacheWarm(): boolean {
+  return Boolean(
+    globalThis.__piSessionListCache
+    && Date.now() - globalThis.__piSessionListCache.ts < SESSION_LIST_CACHE_TTL_MS,
+  );
+}
+
+/** Full disk scan that also refreshes the visible-list cache when generation is current. */
+async function scanAllSessionsIntoCaches(): Promise<void> {
+  const generation = globalThis.__piSessionListGeneration ?? 0;
+  const data = await loadAllSessions();
+  if ((globalThis.__piSessionListGeneration ?? 0) === generation) {
+    globalThis.__piSessionListCache = { data, ts: Date.now() };
+  }
+}
+
 export async function resolveSessionPath(sessionId: string): Promise<string | null> {
   const cached = getPathCache().get(sessionId);
   if (cached) return cached;
 
-  // Cache miss: scan all sessions to populate cache, then retry
+  // If the list cache is warm, listAllSessions only rehydrates visible sessions
+  // into the path cache. A subsequent full scan is needed for filtered sessions
+  // (side chat) that never appear in the visible list.
+  const listWasWarm = isSessionListCacheWarm();
   await listAllSessions();
+  const fromList = getPathCache().get(sessionId);
+  if (fromList) return fromList;
+  if (!listWasWarm) return null;
+
+  await scanAllSessionsIntoCaches();
   return getPathCache().get(sessionId) ?? null;
 }
 
@@ -124,7 +158,13 @@ export async function resolveSessionIdByPath(filePath: string): Promise<string |
   const cached = getPathToIdCache().get(pathKey);
   if (cached) return cached;
 
+  const listWasWarm = isSessionListCacheWarm();
   await listAllSessions();
+  const fromList = getPathToIdCache().get(pathKey);
+  if (fromList) return fromList;
+  if (!listWasWarm) return undefined;
+
+  await scanAllSessionsIntoCaches();
   return getPathToIdCache().get(pathKey);
 }
 
@@ -218,6 +258,30 @@ export function buildSessionContext(
     byId as unknown as Map<string, PiSessionEntry>,
   );
 
+  // Side Chat sessions are branched from the main session so the model keeps
+  // that context. The marker separates inherited entries from Side-owned
+  // entries on the active branch; only the Side Chat UI hides the former.
+  const activePath: SessionEntry[] = [];
+  if (leafId !== null) {
+    let current = leafId ? byId.get(leafId) : entries[entries.length - 1];
+    while (current) {
+      activePath.push(current);
+      current = current.parentId ? byId.get(current.parentId) : undefined;
+    }
+    activePath.reverse();
+  }
+  let sideChatMarkerIndex = -1;
+  for (let i = activePath.length - 1; i >= 0; i--) {
+    const entry = activePath[i];
+    if (entry.type === "custom" && entry.customType === SIDE_CHAT_METADATA_TYPE) {
+      sideChatMarkerIndex = i;
+      break;
+    }
+  }
+  const inheritedEntryIds = sideChatMarkerIndex >= 0
+    ? new Set(activePath.slice(0, sideChatMarkerIndex).map((entry) => entry.id))
+    : null;
+
   // Convert the SDK-selected context entries and their IDs together. This keeps
   // fork/navigation targets aligned while preserving pi's compaction ordering.
   const messages: AgentMessage[] = [];
@@ -234,6 +298,9 @@ export function buildSessionContext(
   return {
     messages,
     entryIds,
+    ...(inheritedEntryIds
+      ? { hiddenMessageEntryIds: entryIds.filter((entryId) => inheritedEntryIds.has(entryId)) }
+      : {}),
     thinkingLevel: piCtx.thinkingLevel,
     model: piCtx.model,
   };

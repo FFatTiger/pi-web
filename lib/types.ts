@@ -303,6 +303,8 @@ export interface SessionInfo {
 export interface SessionContext {
   messages: AgentMessage[];
   entryIds: string[]; // parallel to messages — the session entry id for each message
+  /** Message entry IDs inherited before a Side Chat marker. Hidden by Side Chat UI only. */
+  hiddenMessageEntryIds?: string[];
   thinkingLevel: string;
   model: { provider: string; modelId: string } | null;
 }

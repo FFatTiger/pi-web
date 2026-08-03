@@ -45,8 +45,9 @@ test("model selector uses ProviderIcon at 14px with a caret", () => {
 test("ChatWindow renders and wires SessionInfoBar immediately after ChatInput in both branches", () => {
   assert.match(chatWindow, /import \{ SessionInfoBar \} from "\.\/SessionInfoBar"/);
   assert.equal((chatWindow.match(/\{chatInputElement\}\s*\{sessionInfoBarElement\}/g) ?? []).length, 2);
-  assert.match(chatWindow, /const CHAT_MINIMAP_WIDTH = 36;/);
-  assert.match(chatWindow, /const CHAT_INPUT_RIGHT_PADDING = CHAT_COLUMN_PADDING \+ CHAT_MINIMAP_WIDTH;/);
+  assert.match(chatWindow, /const CHAT_COLUMN_PADDING = 16;/);
+  assert.match(chatWindow, /const showMinimap = !isMobile && !hideMinimap;/);
+  assert.doesNotMatch(chatWindow, /CHAT_INPUT_RIGHT_PADDING|CHAT_MINIMAP_WIDTH/);
   assert.match(chatWindow, /soundEnabled=\{soundEnabled\}/);
   assert.match(chatWindow, /onCompact=\{session \|\| isNew \? handleCompact : undefined\}/);
   assert.match(chatWindow, /onAbortCompaction=\{handleAbortCompaction\}/);
@@ -81,9 +82,17 @@ test("model panel always searches, right-anchors safely, and exposes dialog sema
   assert.doesNotMatch(chatInput, /MODEL_FILTER_THRESHOLD|showModelFilter/);
   const panel = block(chatInput, "{modelDropdownOpen && modelDropdownRect", "{isStreaming && (");
   assert.match(panel, /placeholder=\{t\("chat\.filterModels"\)\}/);
-  assert.match(panel, /left: Math\.max\(8, modelDropdownRect\.right - Math\.min\(360, viewportWidth - 16\)\)/);
+  assert.match(panel, /left: Math\.max\(8, modelDropdownRect\.right - Math\.min\(360, viewport\.width - 16\)\)/);
   assert.match(panel, /maxWidth: "min\(360px, calc\(100vw - 16px\)\)"/);
-  assert.match(panel, /minWidth: Math\.min\(Math\.max\(220, modelDropdownRect\.width\), viewportWidth - 16\)/);
+  assert.match(panel, /minWidth: Math\.min\(Math\.max\(220, modelDropdownRect\.width\), viewport\.width - 16\)/);
+  assert.match(panel, /createPortal\(/);
+  assert.match(panel, /document\.body/);
+  assert.match(chatInput, /thinkingDropdownOpen && thinkingDropdownRect && createPortal/);
+  assert.match(chatInput, /toolDropdownOpen && toolDropdownRect && createPortal/);
+  assert.match(chatInput, /function getUpwardMenuStyle/);
+  assert.match(chatInput, /visualViewport\?\.addEventListener\("resize", updateAnchors\)/);
+  assert.match(chatInput, /addEventListener\("scroll", updateAnchors, true\)/);
+
   assert.match(panel, /maxHeight: maxH/);
   assert.match(panel, /\? \{ left: 8, right: 8, width: "auto", maxWidth: "calc\(100vw - 16px\)" \}/);
   assert.match(panel, /role="dialog"/);
@@ -130,10 +139,11 @@ test("composer and status CSS locks reference dimensions and current 52px minima
     "min-height: 50px !important;",
     "transform: scale(0.97);",
     "margin-top: -15px;",
-    "padding-right: 52px;",
     "height: 26px;",
   ]) assert.match(composer, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  assert.match(chatInput, /paddingRight: isMobile \? 16 : 52/);
+  assert.match(chatInput, /padding: "0 16px 15px"/);
+  assert.doesNotMatch(chatInput, /paddingRight: isMobile \? 16 : 52/);
+  assert.doesNotMatch(css, /padding-right: 52px;/);
   assert.match(composer, /@media \(max-width: 640px\)[\s\S]*?\.chat-input-toolbar \{[\s\S]*?padding: 6px 12px;[\s\S]*?flex-wrap: nowrap;[\s\S]*?overflow: visible;/);
   assert.match(composer, /\.chat-input-toolbar-model \{ flex: 1 1 88px !important; min-width: 48px !important; max-width: 128px; overflow: hidden; \}/);
   assert.match(composer, /\.chat-input-send \{ flex-shrink: 0; \}/);
