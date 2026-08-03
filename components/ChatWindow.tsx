@@ -37,6 +37,8 @@ interface Props {
   onSessionStatsPanelOpen?: () => void;
   onContextUsageChange?: (usage: { percent: number | null; contextWindow: number; tokens: number | null } | null) => void;
   onOpenFile?: (filePath: string) => void;
+  /** Hide minimap while a right-side panel (side chat / file) is open. */
+  hideMinimap?: boolean;
 }
 
 function phaseLabel(phase: AgentPhase, t: (key: string, params?: Record<string, string | number>) => string): string | null {
@@ -52,9 +54,7 @@ function phaseLabel(phase: AgentPhase, t: (key: string, params?: Record<string, 
   return null;
 }
 
-const CHAT_MINIMAP_WIDTH = 36;
 const CHAT_COLUMN_PADDING = 16;
-const CHAT_INPUT_RIGHT_PADDING = CHAT_COLUMN_PADDING + CHAT_MINIMAP_WIDTH;
 
 function hasFinalAssistantAnswer(message: AgentMessage): boolean {
   if (message.role !== "assistant") return false;
@@ -170,7 +170,7 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, children, t }: { mes
   );
 }
 
-export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsChange, onSessionStatsPanelOpen, onContextUsageChange, onOpenFile }: Props) {
+export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsChange, onSessionStatsPanelOpen, onContextUsageChange, onOpenFile, hideMinimap = false }: Props) {
   const { t } = useI18n();
   const { soundEnabled, onSoundToggle, playDoneSound, unlockAudio } = useAudio();
   const isMobile = useIsMobile();
@@ -340,6 +340,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     ? (modelThinkingLevelMaps[`${displayModelValue.provider}:${displayModelValue.modelId}`] ?? null)
     : null;
 
+  const showMinimap = !isMobile && !hideMinimap;
   const chatInputElement = (
     <ChatInput
       ref={chatInputRef}
@@ -468,7 +469,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                 justifyContent: "space-between",
                 gap: 12,
                 marginLeft: 16,
-                marginRight: 52,
+                marginRight: 16,
                 fontFamily: "var(--font-mono)",
               }}
             >
@@ -497,7 +498,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
             position: "absolute",
             top: 12,
             left: 0,
-            right: isMobile ? 0 : CHAT_MINIMAP_WIDTH,
+            right: 0,
             zIndex: 40,
             padding: `0 ${CHAT_COLUMN_PADDING}px`,
             pointerEvents: "none",
@@ -727,7 +728,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
             </div>
           </div>
         </div>
-        {isMobile ? null : (
+        {showMinimap ? (
           <ChatMinimap
             messages={messages}
             streamingMessage={streamState.streamingMessage}
@@ -735,14 +736,13 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
             messageRefs={messageRefs}
             onRevealHistory={revealHistoryForMinimap}
           />
-        )}
+        ) : null}
       </div>
 
       <div className="relative">
         <div
           style={{
             padding: `0 ${CHAT_COLUMN_PADDING}px`,
-            paddingRight: isMobile ? CHAT_COLUMN_PADDING : CHAT_INPUT_RIGHT_PADDING,
           }}
         >
           <div style={{ maxWidth: 820, margin: "0 auto" }}>

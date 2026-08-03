@@ -1399,6 +1399,7 @@ export function AppShell() {
               onSessionStatsPanelOpen={openSessionStatsPanel}
               onContextUsageChange={handleContextUsageChange}
               onOpenFile={handleOpenLinkedFile}
+              hideMinimap={rightPanelMode !== "closed"}
             />
           ) : initialCwdStatus === "validating" ? (
             <div

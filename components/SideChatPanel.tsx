@@ -341,7 +341,6 @@ function SideChatConversation({
         draftKey={`side-chat:${session.id}`}
         cwd={session.cwd}
         messagePlaceholder="Ask Side Chat…"
-        reserveMinimapSpace={false}
       />
     </div>
   );

@@ -70,8 +70,6 @@ interface Props {
   /** Session working directory — enables the @ file autocomplete menu */
   cwd?: string | null;
   messagePlaceholder?: string;
-  /** Main chat reserves this space for ChatMinimap; embedded chat panels do not. */
-  reserveMinimapSpace?: boolean;
 }
 
 export interface ChatInputHandle {
@@ -326,7 +324,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   draftKey,
   cwd,
   messagePlaceholder,
-  reserveMinimapSpace = true,
 }: Props, ref) {
   const { t } = useI18n();
   const isMobile = useIsMobile();
@@ -1125,7 +1122,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         flexShrink: 0,
         background: "transparent",
         padding: "0 16px 8px",
-        paddingRight: !isMobile && reserveMinimapSpace ? 52 : 16,
       }}
     >
       {/* Hidden file input */}
