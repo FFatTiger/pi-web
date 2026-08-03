@@ -56,6 +56,12 @@ export async function listAllSessions(): Promise<SessionInfo[]> {
   // Return cached result if still fresh (avoids re-scanning session files
   // and re-spawning git processes on every page load).
   if (globalThis.__piSessionListCache && Date.now() - globalThis.__piSessionListCache.ts < SESSION_LIST_CACHE_TTL_MS) {
+    // Path cache can be empty after HMR/partial invalidation while the list
+    // cache is still warm. Rehydrate id→path from the warm list so resolve
+    // helpers never miss solely because loadAllSessions was short-circuited.
+    for (const session of globalThis.__piSessionListCache.data) {
+      if (!getPathCache().has(session.id)) cacheSessionPath(session.id, session.path);
+    }
     return globalThis.__piSessionListCache.data;
   }
 
@@ -114,12 +120,36 @@ function getPathToIdCache(): Map<string, string> {
   return globalThis.__piPathToSessionIdCache;
 }
 
+function isSessionListCacheWarm(): boolean {
+  return Boolean(
+    globalThis.__piSessionListCache
+    && Date.now() - globalThis.__piSessionListCache.ts < SESSION_LIST_CACHE_TTL_MS,
+  );
+}
+
+/** Full disk scan that also refreshes the visible-list cache when generation is current. */
+async function scanAllSessionsIntoCaches(): Promise<void> {
+  const generation = globalThis.__piSessionListGeneration ?? 0;
+  const data = await loadAllSessions();
+  if ((globalThis.__piSessionListGeneration ?? 0) === generation) {
+    globalThis.__piSessionListCache = { data, ts: Date.now() };
+  }
+}
+
 export async function resolveSessionPath(sessionId: string): Promise<string | null> {
   const cached = getPathCache().get(sessionId);
   if (cached) return cached;
 
-  // Cache miss: scan all sessions to populate cache, then retry
+  // If the list cache is warm, listAllSessions only rehydrates visible sessions
+  // into the path cache. A subsequent full scan is needed for filtered sessions
+  // (side chat) that never appear in the visible list.
+  const listWasWarm = isSessionListCacheWarm();
   await listAllSessions();
+  const fromList = getPathCache().get(sessionId);
+  if (fromList) return fromList;
+  if (!listWasWarm) return null;
+
+  await scanAllSessionsIntoCaches();
   return getPathCache().get(sessionId) ?? null;
 }
 
@@ -128,7 +158,13 @@ export async function resolveSessionIdByPath(filePath: string): Promise<string |
   const cached = getPathToIdCache().get(pathKey);
   if (cached) return cached;
 
+  const listWasWarm = isSessionListCacheWarm();
   await listAllSessions();
+  const fromList = getPathToIdCache().get(pathKey);
+  if (fromList) return fromList;
+  if (!listWasWarm) return undefined;
+
+  await scanAllSessionsIntoCaches();
   return getPathToIdCache().get(pathKey);
 }
 

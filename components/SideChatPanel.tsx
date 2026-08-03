@@ -88,41 +88,113 @@ export function SideChatPanel({ active, mainSession, onClose, onAgentEnd, onOpen
   }, [actionBusy, mainSession.id]);
 
   const controlsDisabled = actionBusy || !sideSession;
-  const buttonStyle = useMemo(() => ({
-    height: 26,
-    padding: "0 8px",
-    border: "1px solid var(--border)",
-    borderRadius: 5,
-    background: "var(--bg)",
-    color: "var(--text-muted)",
-    cursor: controlsDisabled ? "not-allowed" : "pointer",
-    opacity: controlsDisabled ? 0.5 : 1,
-    fontSize: 11,
-    whiteSpace: "nowrap" as const,
-  }), [controlsDisabled]);
 
   return (
-    <div ref={panelRef} style={{ display: active ? "flex" : "none", position: "relative", flex: 1, minHeight: 0, flexDirection: "column", background: "var(--bg)" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 6, height: 36, padding: "0 7px 0 10px", borderBottom: "1px solid var(--border)", background: "var(--bg-panel)", flexShrink: 0 }}>
-        <strong style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", fontSize: 11, letterSpacing: "0.04em", textTransform: "uppercase" }}>{t("sideChat.title")}</strong>
-        {compact ? (
-          <div style={{ position: "relative" }}>
-            <button type="button" disabled={controlsDisabled} onClick={() => setMenuOpen((open) => !open)} aria-label={t("sideChat.actions")} style={{ ...buttonStyle, width: 28, padding: 0 }}>…</button>
-            {menuOpen && (
-              <div style={{ position: "absolute", top: 30, right: 0, zIndex: 30, minWidth: 110, padding: 4, border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", boxShadow: "0 8px 24px rgba(0,0,0,0.2)" }}>
-                <MenuButton label={t("sideChat.refork")} onClick={() => void runAction("refork")} />
-                <MenuButton label={t("sideChat.clear")} onClick={() => void runAction("clear")} />
-              </div>
-            )}
-          </div>
-        ) : (
-          <>
-            <button type="button" disabled={controlsDisabled} onClick={() => void runAction("refork")} title={t("sideChat.reforkTitle")} style={buttonStyle}>{t("sideChat.refork")}</button>
-            <button type="button" disabled={controlsDisabled} onClick={() => void runAction("clear")} title={t("sideChat.clearTitle")} style={buttonStyle}>{t("sideChat.clear")}</button>
-          </>
-        )}
-        <button type="button" onClick={onClose} aria-label={t("sideChat.close")} title={t("sideChat.close")} style={{ ...buttonStyle, width: 26, padding: 0, cursor: "pointer", opacity: 1 }}>×</button>
-      </div>
+    <div
+      ref={panelRef}
+      className="side-chat-panel"
+      style={{
+        display: active ? "flex" : "none",
+        position: "relative",
+        flex: 1,
+        minHeight: 0,
+        flexDirection: "column",
+        background: "var(--bg)",
+      }}
+    >
+      <header
+        className="side-chat-header"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          height: 36,
+          padding: "0 6px 0 12px",
+          borderBottom: "1px solid var(--border)",
+          background: "var(--bg-panel)",
+          flexShrink: 0,
+        }}
+      >
+        <div
+          className="side-chat-header-title"
+          style={{
+            flex: 1,
+            minWidth: 0,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            fontSize: 11,
+            fontWeight: 600,
+            letterSpacing: "0.04em",
+            textTransform: "uppercase",
+            color: "var(--text-muted)",
+          }}
+        >
+          {t("sideChat.title")}
+        </div>
+        <div
+          className="side-chat-header-actions"
+          style={{ display: "flex", alignItems: "center", gap: 1, flexShrink: 0 }}
+        >
+          {compact ? (
+            <div className="side-chat-header-menu" style={{ position: "relative" }}>
+              <button
+                type="button"
+                className="side-chat-header-btn side-chat-header-icon-btn"
+                disabled={controlsDisabled}
+                onClick={() => setMenuOpen((open) => !open)}
+                aria-label={t("sideChat.actions")}
+                aria-expanded={menuOpen}
+              >
+                <MoreIcon />
+              </button>
+              {menuOpen && (
+                <div className="side-chat-header-menu-panel" role="menu">
+                  <MenuButton label={t("sideChat.refork")} onClick={() => void runAction("refork")} />
+                  <MenuButton label={t("sideChat.clear")} onClick={() => void runAction("clear")} />
+                </div>
+              )}
+            </div>
+          ) : (
+            <>
+              <button
+                type="button"
+                className="side-chat-header-btn"
+                disabled={controlsDisabled}
+                onClick={() => void runAction("refork")}
+                title={t("sideChat.reforkTitle")}
+              >
+                <RefreshIcon />
+                <span>{t("sideChat.refork")}</span>
+              </button>
+              <button
+                type="button"
+                className="side-chat-header-btn"
+                disabled={controlsDisabled}
+                onClick={() => void runAction("clear")}
+                title={t("sideChat.clearTitle")}
+              >
+                <ClearIcon />
+                <span>{t("sideChat.clear")}</span>
+              </button>
+            </>
+          )}
+          <span
+            className="side-chat-header-divider"
+            aria-hidden="true"
+            style={{ width: 1, height: 14, margin: "0 3px", background: "var(--border)", flexShrink: 0 }}
+          />
+          <button
+            type="button"
+            className="side-chat-header-btn side-chat-header-icon-btn side-chat-header-close"
+            onClick={onClose}
+            aria-label={t("sideChat.close")}
+            title={t("sideChat.close")}
+          >
+            <CloseIcon />
+          </button>
+        </div>
+      </header>
 
       {error && <div role="alert" style={{ padding: "7px 10px", borderBottom: "1px solid var(--border)", color: "#dc2626", fontSize: 11 }}>{error}</div>}
       {loading && !sideSession ? (
@@ -143,9 +215,47 @@ export function SideChatPanel({ active, mainSession, onClose, onAgentEnd, onOpen
 
 function MenuButton({ label, onClick }: { label: string; onClick: () => void }) {
   return (
-    <button type="button" onClick={onClick} style={{ display: "block", width: "100%", padding: "6px 8px", border: "none", borderRadius: 4, background: "transparent", color: "var(--text)", textAlign: "left", cursor: "pointer", fontSize: 12 }}>
+    <button type="button" className="side-chat-header-menu-item" role="menuitem" onClick={onClick}>
       {label}
     </button>
+  );
+}
+
+function RefreshIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M21 12a9 9 0 1 1-2.6-6.3" />
+      <polyline points="21 3 21 9 15 9" />
+    </svg>
+  );
+}
+
+function ClearIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 6h18" />
+      <path d="M8 6V4h8v2" />
+      <path d="M19 6l-1 14H6L5 6" />
+    </svg>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+      <path d="M18 6 6 18" />
+      <path d="m6 6 12 12" />
+    </svg>
+  );
+}
+
+function MoreIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <circle cx="5" cy="12" r="1.6" />
+      <circle cx="12" cy="12" r="1.6" />
+      <circle cx="19" cy="12" r="1.6" />
+    </svg>
   );
 }
 

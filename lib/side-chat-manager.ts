@@ -9,7 +9,6 @@ import {
   parseSideChatSessionName,
   SIDE_CHAT_METADATA_TYPE,
   type SideChatSessionMetadata,
-  type SideChatToolMode,
 } from "./side-chat-metadata";
 import type { SessionInfo } from "./types";
 
@@ -17,7 +16,6 @@ export type SideChatAction = "open" | "refork" | "clear";
 
 export interface SideChatResult {
   session: SessionInfo;
-  toolMode: SideChatToolMode;
 }
 
 declare global {
@@ -96,11 +94,12 @@ function ensureSessionPersisted(manager: SessionManager): void {
   (manager as unknown as { flushed: boolean }).flushed = true;
 }
 
-async function markInactive(info: PiSessionInfo, toolMode: SideChatToolMode): Promise<void> {
+async function markInactive(info: PiSessionInfo): Promise<void> {
+  const mainSessionId = parseSideChatSessionName(info.name)?.mainSessionId;
+  if (!mainSessionId) return;
   const name = formatSideChatSessionName({
-    mainSessionId: parseSideChatSessionName(info.name)?.mainSessionId ?? "",
+    mainSessionId,
     status: "inactive",
-    toolMode,
   });
   const wrapper = getRpcSession(info.id);
   if (wrapper?.isAlive()) {
@@ -129,7 +128,6 @@ async function createSideChatSession(
   mainSessionPath: string,
   contextLeafId: string | null,
   activityLeafId: string | null,
-  toolMode: SideChatToolMode,
   clear: boolean,
   preferences: ReturnType<typeof getSessionPreferences>,
 ): Promise<PiSessionInfo> {
@@ -149,7 +147,6 @@ async function createSideChatSession(
   const metadata: SideChatSessionMetadata = {
     mainSessionId,
     status: "active",
-    toolMode,
     forkLeafId,
   };
   appendMetadata(manager, metadata);
@@ -183,13 +180,17 @@ export async function openSideChat(mainSessionId: string, action: SideChatAction
     const branchSourceManager = SessionManager.open(mainSessionPath, mainManager.getSessionDir());
     const activeSideChats = await listSideChats(mainSessionId);
     const current = activeSideChats[0];
-    // Keep metadata field for compatibility, but always open with full tools.
-    const toolMode: SideChatToolMode = "edit";
 
     if (action === "open" && current) {
       cacheSessionPath(current.id, current.path);
+      // Restart warm RPC so side-chat resource policy (no package extensions)
+      // applies after code updates; startRpcSession otherwise reuses the old wrapper.
+      const warm = getRpcSession(current.id);
+      if (warm?.isAlive()) {
+        await warm.shutdown();
+      }
       await startRpcSession(current.id, current.path, undefined, { persistInitialPreferences: false });
-      return { session: toClientSessionInfo(current), toolMode };
+      return { session: toClientSessionInfo(current) };
     }
 
     const currentWrapper = current ? getRpcSession(current.id) : undefined;
@@ -211,15 +212,14 @@ export async function openSideChat(mainSessionId: string, action: SideChatAction
       mainSessionPath,
       contextLeafId,
       mainLeafId,
-      toolMode,
       action === "clear",
       getSessionPreferences(mainManager),
     );
 
     for (const old of activeSideChats) {
-      await markInactive(old, parseSideChatSessionName(old.name)?.toolMode ?? toolMode);
+      await markInactive(old);
     }
     invalidateSessionListCache();
-    return { session: toClientSessionInfo(created), toolMode };
+    return { session: toClientSessionInfo(created) };
   });
 }

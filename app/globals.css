@@ -1161,6 +1161,79 @@ span.linenumber {
   display: none;
 }
 
+/* Side Chat header controls (layout is inline; these are hover/chrome only) */
+.side-chat-header-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: background-color 120ms ease, color 120ms ease, opacity 120ms ease;
+}
+.side-chat-header-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.side-chat-header-btn:active:not(:disabled) {
+  background: var(--bg-selected);
+}
+.side-chat-header-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.side-chat-header-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.side-chat-header-icon-btn {
+  width: 26px;
+  padding: 0;
+}
+.side-chat-header-close {
+  color: var(--text-dim);
+}
+.side-chat-header-close:hover:not(:disabled) {
+  color: var(--text);
+}
+.side-chat-header-menu-panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 30;
+  min-width: 120px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+}
+.side-chat-header-menu-item {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  font-size: 12px;
+}
+.side-chat-header-menu-item:hover {
+  background: var(--bg-hover);
+}
+
 /* Desktop sidebar: animate width */
 @media (min-width: 641px) {
   .sidebar-overlay-backdrop {

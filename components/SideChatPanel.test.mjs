@@ -15,6 +15,8 @@ test("Side Chat reuses the main ChatInput without exposing generic tool presets"
   assert.match(source, /sideChat\.title/);
   assert.match(source, /sideChat\.refork/);
   assert.match(source, /sideChat\.clear/);
+  assert.match(source, /side-chat-header/);
+  assert.match(source, /side-chat-header-btn/);
   assert.doesNotMatch(source, /SideChatComposer/);
   assert.doesNotMatch(source, /onToolPresetChange=/);
   assert.doesNotMatch(source, /toggleToolMode|sideChat\.readonly|sideChat\.edit|set_mode/);

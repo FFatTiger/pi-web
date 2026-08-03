@@ -90,6 +90,8 @@ test("model panel always searches, right-anchors safely, and exposes dialog sema
   assert.match(chatInput, /thinkingDropdownOpen && thinkingDropdownRect && createPortal/);
   assert.match(chatInput, /toolDropdownOpen && toolDropdownRect && createPortal/);
   assert.match(chatInput, /function getUpwardMenuStyle/);
+  assert.match(chatInput, /visualViewport\?\.addEventListener\("resize", updateAnchors\)/);
+  assert.match(chatInput, /addEventListener\("scroll", updateAnchors, true\)/);
 
   assert.match(panel, /maxHeight: maxH/);
   assert.match(panel, /\? \{ left: 8, right: 8, width: "auto", maxWidth: "calc\(100vw - 16px\)" \}/);

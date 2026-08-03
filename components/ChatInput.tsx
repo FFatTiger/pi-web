@@ -1136,6 +1136,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         modelDropdownPanelRef.current && !modelDropdownPanelRef.current.contains(e.target as Node)
       ) {
         setModelDropdownOpen(false);
+        setModelDropdownRect(null);
         setModelFilter("");
       }
       if (
@@ -1160,7 +1161,44 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
+  // Keep fixed portal menus glued to their toolbar triggers across layout
+  // shifts (panel resize, mobile keyboard / visualViewport, scroll).
+  useEffect(() => {
+    if (!thinkingDropdownOpen && !toolDropdownOpen && !modelDropdownOpen) return;
 
+    const anchorButton = (wrapper: HTMLElement | null): HTMLElement | null => {
+      if (!wrapper) return null;
+      return wrapper.querySelector("button");
+    };
+
+    const updateAnchors = () => {
+      if (thinkingDropdownOpen) {
+        const btn = anchorButton(thinkingDropdownRef.current);
+        if (btn) setThinkingDropdownRect(getAnchorRect(btn));
+      }
+      if (toolDropdownOpen) {
+        const btn = anchorButton(toolDropdownRef.current);
+        if (btn) setToolDropdownRect(getAnchorRect(btn));
+      }
+      if (modelDropdownOpen) {
+        const btn = anchorButton(dropdownRef.current);
+        if (btn) setModelDropdownRect(getAnchorRect(btn));
+      }
+    };
+
+    updateAnchors();
+    window.addEventListener("resize", updateAnchors);
+    // Capture scroll from any nested overflow container (side chat, message list).
+    window.addEventListener("scroll", updateAnchors, true);
+    window.visualViewport?.addEventListener("resize", updateAnchors);
+    window.visualViewport?.addEventListener("scroll", updateAnchors);
+    return () => {
+      window.removeEventListener("resize", updateAnchors);
+      window.removeEventListener("scroll", updateAnchors, true);
+      window.visualViewport?.removeEventListener("resize", updateAnchors);
+      window.visualViewport?.removeEventListener("scroll", updateAnchors);
+    };
+  }, [thinkingDropdownOpen, toolDropdownOpen, modelDropdownOpen]);
 
   return (
     <div
@@ -2036,9 +2074,13 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                   <button
                     onClick={(e) => {
                       if (isMobile) textareaRef.current?.blur();
-                      setModelDropdownRect(getAnchorRect(e.currentTarget));
+                      const rect = getAnchorRect(e.currentTarget);
+                      setModelDropdownRect(rect);
                       setModelDropdownOpen((open) => {
-                        if (open) setModelFilter("");
+                        if (open) {
+                          setModelDropdownRect(null);
+                          setModelFilter("");
+                        }
                         return !open;
                       });
                     }}
@@ -2118,6 +2160,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                               if (e.key === "Escape") {
                                 setModelFilter("");
                                 setModelDropdownOpen(false);
+                                setModelDropdownRect(null);
                               }
                             }}
                             placeholder={t("chat.filterModels")}
@@ -2165,6 +2208,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                                   aria-current={isActive ? "true" : undefined}
                                   onClick={() => {
                                     setModelDropdownOpen(false);
+                                    setModelDropdownRect(null);
                                     setModelFilter("");
                                     if (!isActive || isAutoModelSelection) onModelChange(opt.provider, opt.modelId);
                                   }}

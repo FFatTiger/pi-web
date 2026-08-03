@@ -1270,7 +1270,7 @@ export async function startRpcSession(
     sessionManager.getSessionName(),
     sessionManager.getEntries(),
   );
-  const sideChatSelection = sideChatMetadata ? getSideChatToolSelection(sideChatMetadata.toolMode) : undefined;
+  const sideChatSelection = sideChatMetadata ? getSideChatToolSelection() : undefined;
   const toolNames = options.toolNames ?? sideChatSelection?.toolNames;
   const includeExtensionTools = options.includeExtensionTools ?? sideChatSelection?.includeExtensionTools ?? true;
   const { initialModel, thinkingLevel } = options;
@@ -1305,11 +1305,24 @@ export async function startRpcSession(
         getMainSnapshot: () => getSideChatMainSnapshot(sideChatMetadata.mainSessionId),
       })
       : undefined;
+    // Side Chat only loads its own inline extension (peek_main + prompt).
+    // noExtensions skips package/project MCP extensions so they cannot call
+    // setStatus (e.g. "MCP: 1 server enabled") or register external tools.
     const services = await createAgentSessionServices({
       cwd: sessionCwd,
       agentDir,
-      ...(sideChatExtension ? { resourceLoaderOptions: { extensionFactories: [sideChatExtension] } } : {}),
-      ...(trustReloadOptions ? { resourceLoaderReloadOptions: trustReloadOptions } : {}),
+      ...(sideChatExtension
+        ? {
+          resourceLoaderOptions: {
+            extensionFactories: [sideChatExtension],
+            noExtensions: true,
+          },
+        }
+        : {}),
+      // Project-trust gating is only relevant when package/project extensions load.
+      ...(!sideChatExtension && trustReloadOptions
+        ? { resourceLoaderReloadOptions: trustReloadOptions }
+        : {}),
     });
     const scope = await resolveVisibleModels(
       services.modelRuntime,
