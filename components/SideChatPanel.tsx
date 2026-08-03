@@ -187,7 +187,6 @@ function SideChatConversation({
     notices,
     extensionDialog,
     extensionCustomUi,
-    extensionStatuses,
     respondToExtensionUi,
     sendExtensionCustomInput,
     messagesEndRef,
@@ -279,11 +278,6 @@ function SideChatConversation({
         )}
         <div ref={messagesEndRef} />
       </div>
-      {extensionStatuses.length > 0 && (
-        <div style={{ padding: "4px 10px", borderTop: "1px solid var(--border)", color: "var(--text-dim)", fontSize: 10 }}>
-          {extensionStatuses.map((status) => status.text).join(" · ")}
-        </div>
-      )}
       <ChatInput
         ref={inputRef}
         onSend={handleSend}
