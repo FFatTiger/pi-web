@@ -10,9 +10,14 @@ test("Side Chat reuses the main ChatInput without exposing generic tool presets"
   assert.match(source, /model=\{displayModel\}/);
   assert.match(source, /onModelChange=\{handleModelChange\}/);
   assert.match(source, /onThinkingLevelChange=\{handleThinkingLevelChange\}/);
-  assert.match(source, /messagePlaceholder="Ask Side Chat…"/);
+  assert.match(source, /messagePlaceholder=\{t\("sideChat\.placeholder"\)\}/);
+  assert.match(source, /useI18n/);
+  assert.match(source, /sideChat\.title/);
+  assert.match(source, /sideChat\.refork/);
+  assert.match(source, /sideChat\.clear/);
   assert.doesNotMatch(source, /SideChatComposer/);
   assert.doesNotMatch(source, /onToolPresetChange=/);
+  assert.doesNotMatch(source, /toggleToolMode|sideChat\.readonly|sideChat\.edit|set_mode/);
 });
 
 test("ChatInput hides built-in slash commands when no handler is supplied", async () => {

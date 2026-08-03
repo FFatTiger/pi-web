@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAgentSession } from "@/hooks/useAgentSession";
+import { useI18n } from "@/hooks/useI18n";
 import type { AgentMessage, SessionInfo, ToolResultMessage } from "@/lib/types";
-import type { SideChatToolMode } from "@/lib/side-chat-metadata";
 import { ChatInput, type ChatInputHandle } from "./ChatInput";
 import { ExtensionCustomPanel, ExtensionDialog } from "./ChatWindow";
 import { MessageView } from "./MessageView";
@@ -18,20 +18,18 @@ interface SideChatPanelProps {
 
 type SideChatApiResult = {
   session: SessionInfo;
-  toolMode: SideChatToolMode;
   error?: string;
 };
 
 async function requestSideChat(
   mainSessionId: string,
-  action: "open" | "refork" | "clear" | "set_mode",
-  toolMode?: SideChatToolMode,
+  action: "open" | "refork" | "clear",
   signal?: AbortSignal,
 ): Promise<SideChatApiResult> {
   const response = await fetch("/api/side-chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ mainSessionId, action, ...(toolMode ? { toolMode } : {}) }),
+    body: JSON.stringify({ mainSessionId, action }),
     signal,
   });
   const body = await response.json() as SideChatApiResult;
@@ -40,8 +38,8 @@ async function requestSideChat(
 }
 
 export function SideChatPanel({ active, mainSession, onClose, onAgentEnd, onOpenFile }: SideChatPanelProps) {
+  const { t } = useI18n();
   const [sideSession, setSideSession] = useState<SessionInfo | null>(null);
-  const [toolMode, setToolMode] = useState<SideChatToolMode>("readonly");
   const [loading, setLoading] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -62,10 +60,9 @@ export function SideChatPanel({ active, mainSession, onClose, onAgentEnd, onOpen
     const controller = new AbortController();
     setLoading(true);
     setError(null);
-    requestSideChat(mainSession.id, "open", undefined, controller.signal)
+    requestSideChat(mainSession.id, "open", controller.signal)
       .then((result) => {
         setSideSession(result.session);
-        setToolMode(result.toolMode);
       })
       .catch((requestError) => {
         if (requestError instanceof DOMException && requestError.name === "AbortError") return;
@@ -83,29 +80,12 @@ export function SideChatPanel({ active, mainSession, onClose, onAgentEnd, onOpen
     try {
       const result = await requestSideChat(mainSession.id, action);
       setSideSession(result.session);
-      setToolMode(result.toolMode);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : String(requestError));
     } finally {
       setActionBusy(false);
     }
   }, [actionBusy, mainSession.id]);
-
-  const toggleToolMode = useCallback(async () => {
-    if (!sideSession || actionBusy) return;
-    const nextMode: SideChatToolMode = toolMode === "readonly" ? "edit" : "readonly";
-    setActionBusy(true);
-    setError(null);
-    try {
-      const result = await requestSideChat(mainSession.id, "set_mode", nextMode);
-      setSideSession((current) => current ? { ...current, name: result.session.name } : result.session);
-      setToolMode(result.toolMode);
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : String(requestError));
-    } finally {
-      setActionBusy(false);
-    }
-  }, [actionBusy, mainSession.id, sideSession, toolMode]);
 
   const controlsDisabled = actionBusy || !sideSession;
   const buttonStyle = useMemo(() => ({
@@ -124,32 +104,29 @@ export function SideChatPanel({ active, mainSession, onClose, onAgentEnd, onOpen
   return (
     <div ref={panelRef} style={{ display: active ? "flex" : "none", position: "relative", flex: 1, minHeight: 0, flexDirection: "column", background: "var(--bg)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6, height: 36, padding: "0 7px 0 10px", borderBottom: "1px solid var(--border)", background: "var(--bg-panel)", flexShrink: 0 }}>
-        <strong style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", fontSize: 11, letterSpacing: "0.04em", textTransform: "uppercase" }}>Side Chat</strong>
-        <button type="button" disabled={controlsDisabled} onClick={() => void toggleToolMode()} title="Toggle Side Chat tool access" style={buttonStyle}>
-          {toolMode === "readonly" ? "Read-only" : "Edit"}
-        </button>
+        <strong style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", fontSize: 11, letterSpacing: "0.04em", textTransform: "uppercase" }}>{t("sideChat.title")}</strong>
         {compact ? (
           <div style={{ position: "relative" }}>
-            <button type="button" disabled={controlsDisabled} onClick={() => setMenuOpen((open) => !open)} aria-label="Side Chat actions" style={{ ...buttonStyle, width: 28, padding: 0 }}>…</button>
+            <button type="button" disabled={controlsDisabled} onClick={() => setMenuOpen((open) => !open)} aria-label={t("sideChat.actions")} style={{ ...buttonStyle, width: 28, padding: 0 }}>…</button>
             {menuOpen && (
               <div style={{ position: "absolute", top: 30, right: 0, zIndex: 30, minWidth: 110, padding: 4, border: "1px solid var(--border)", borderRadius: 6, background: "var(--bg)", boxShadow: "0 8px 24px rgba(0,0,0,0.2)" }}>
-                <MenuButton label="Refork" onClick={() => void runAction("refork")} />
-                <MenuButton label="Clear" onClick={() => void runAction("clear")} />
+                <MenuButton label={t("sideChat.refork")} onClick={() => void runAction("refork")} />
+                <MenuButton label={t("sideChat.clear")} onClick={() => void runAction("clear")} />
               </div>
             )}
           </div>
         ) : (
           <>
-            <button type="button" disabled={controlsDisabled} onClick={() => void runAction("refork")} title="Recreate from the main chat's latest point" style={buttonStyle}>Refork</button>
-            <button type="button" disabled={controlsDisabled} onClick={() => void runAction("clear")} title="Start an empty Side Chat" style={buttonStyle}>Clear</button>
+            <button type="button" disabled={controlsDisabled} onClick={() => void runAction("refork")} title={t("sideChat.reforkTitle")} style={buttonStyle}>{t("sideChat.refork")}</button>
+            <button type="button" disabled={controlsDisabled} onClick={() => void runAction("clear")} title={t("sideChat.clearTitle")} style={buttonStyle}>{t("sideChat.clear")}</button>
           </>
         )}
-        <button type="button" onClick={onClose} aria-label="Close Side Chat" title="Close Side Chat" style={{ ...buttonStyle, width: 26, padding: 0, cursor: "pointer", opacity: 1 }}>×</button>
+        <button type="button" onClick={onClose} aria-label={t("sideChat.close")} title={t("sideChat.close")} style={{ ...buttonStyle, width: 26, padding: 0, cursor: "pointer", opacity: 1 }}>×</button>
       </div>
 
       {error && <div role="alert" style={{ padding: "7px 10px", borderBottom: "1px solid var(--border)", color: "#dc2626", fontSize: 11 }}>{error}</div>}
       {loading && !sideSession ? (
-        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 12 }}>Opening Side Chat…</div>
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 12 }}>{t("sideChat.opening")}</div>
       ) : sideSession ? (
         <SideChatConversation
           key={sideSession.id}
@@ -158,7 +135,7 @@ export function SideChatPanel({ active, mainSession, onClose, onAgentEnd, onOpen
           onOpenFile={onOpenFile}
         />
       ) : (
-        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 16, color: "var(--text-muted)", fontSize: 12 }}>Open Side Chat to create an independent conversation.</div>
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 16, color: "var(--text-muted)", fontSize: 12 }}>{t("sideChat.openPrompt")}</div>
       )}
     </div>
   );
@@ -181,6 +158,7 @@ function SideChatConversation({
   onAgentEnd?: () => void;
   onOpenFile?: (filePath: string) => void;
 }) {
+  const { t } = useI18n();
   const inputRef = useRef<ChatInputHandle | null>(null);
   const {
     data,
@@ -259,7 +237,7 @@ function SideChatConversation({
     }), [entryIds, hiddenMessageEntryIds, messages]);
 
   if (loading) {
-    return <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 12 }}>Loading session…</div>;
+    return <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 12 }}>{t("sideChat.loadingSession")}</div>;
   }
 
   return (
@@ -274,7 +252,7 @@ function SideChatConversation({
       )}
       <div ref={scrollContainerRef} style={{ flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden", padding: "10px 12px" }}>
         {visibleMessages.length === 0 && !streamState.isStreaming && (
-          <div style={{ padding: "24px 8px", color: "var(--text-dim)", fontSize: 12, lineHeight: 1.6 }}>Independent conversation based on the main chat. Use Refork to refresh its starting context.</div>
+          <div style={{ padding: "24px 8px", color: "var(--text-dim)", fontSize: 12, lineHeight: 1.6 }}>{t("sideChat.emptyHint")}</div>
         )}
         {visibleMessages.map(({ message, index }) => (
           <MessageView
@@ -300,7 +278,7 @@ function SideChatConversation({
           />
         )}
         {agentRunning && !streamState.streamingMessage && agentPhase && (
-          <div style={{ padding: "6px 0", color: "var(--text-muted)", fontSize: 12 }}>Working…</div>
+          <div style={{ padding: "6px 0", color: "var(--text-muted)", fontSize: 12 }}>{t("sideChat.working")}</div>
         )}
         <div ref={messagesEndRef} />
       </div>
@@ -340,7 +318,7 @@ function SideChatConversation({
         onLoadSlashCommands={loadSlashCommands}
         draftKey={`side-chat:${session.id}`}
         cwd={session.cwd}
-        messagePlaceholder="Ask Side Chat…"
+        messagePlaceholder={t("sideChat.placeholder")}
       />
     </div>
   );

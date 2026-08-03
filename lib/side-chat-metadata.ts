@@ -84,11 +84,16 @@ export function readSideChatSessionMetadata(
   };
 }
 
-export function getSideChatToolSelection(toolMode: SideChatToolMode): {
+export function getSideChatToolSelection(toolMode?: SideChatToolMode): {
   toolNames: string[];
   includeExtensionTools: boolean;
 } {
-  return toolMode === "readonly"
-    ? { toolNames: [...SIDE_CHAT_READONLY_TOOL_NAMES], includeExtensionTools: true }
-    : { toolNames: [...SIDE_CHAT_EDIT_TOOL_NAMES], includeExtensionTools: true };
+  void toolMode;
+  // Side Chat always gets the full default tool set. Codex-style safety is
+  // enforced by the side-conversation system prompt (mutate only when asked),
+  // not by a readonly/edit UI mode.
+  return {
+    toolNames: [...SIDE_CHAT_EDIT_TOOL_NAMES, SIDE_CHAT_PEEK_TOOL_NAME],
+    includeExtensionTools: true,
+  };
 }

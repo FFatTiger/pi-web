@@ -6,7 +6,6 @@ import { cacheSessionPath, invalidateSessionListCache, resolveSessionPath } from
 import { getRpcSession, startRpcSession } from "./rpc-manager";
 import {
   formatSideChatSessionName,
-  getSideChatToolSelection,
   parseSideChatSessionName,
   SIDE_CHAT_METADATA_TYPE,
   type SideChatSessionMetadata,
@@ -184,8 +183,8 @@ export async function openSideChat(mainSessionId: string, action: SideChatAction
     const branchSourceManager = SessionManager.open(mainSessionPath, mainManager.getSessionDir());
     const activeSideChats = await listSideChats(mainSessionId);
     const current = activeSideChats[0];
-    const currentMarker = parseSideChatSessionName(current?.name);
-    const toolMode: SideChatToolMode = action === "open" ? currentMarker?.toolMode ?? "readonly" : "readonly";
+    // Keep metadata field for compatibility, but always open with full tools.
+    const toolMode: SideChatToolMode = "edit";
 
     if (action === "open" && current) {
       cacheSessionPath(current.id, current.path);
@@ -222,28 +221,5 @@ export async function openSideChat(mainSessionId: string, action: SideChatAction
     }
     invalidateSessionListCache();
     return { session: toClientSessionInfo(created), toolMode };
-  });
-}
-
-export async function setSideChatToolMode(mainSessionId: string, toolMode: SideChatToolMode): Promise<SideChatResult> {
-  return withMainSessionLock(mainSessionId, async () => {
-    const current = (await listSideChats(mainSessionId))[0];
-    if (!current) throw new Error("Open Side Chat before changing its tool mode");
-
-    cacheSessionPath(current.id, current.path);
-    const { session } = await startRpcSession(current.id, current.path, undefined, { persistInitialPreferences: false });
-
-    await session.send({
-      type: "set_session_name",
-      name: formatSideChatSessionName({ mainSessionId, status: "active", toolMode }),
-    });
-    const selection = getSideChatToolSelection(toolMode);
-    await session.send({ type: "set_tools", ...selection });
-    invalidateSessionListCache();
-
-    return {
-      session: { ...toClientSessionInfo(current), name: formatSideChatSessionName({ mainSessionId, status: "active", toolMode }) },
-      toolMode,
-    };
   });
 }

@@ -1533,8 +1533,8 @@ export function AppShell() {
       <button
         onClick={toggleSideChatPanel}
         disabled={!selectedSession}
-        title={rightPanelMode === "chat" ? "Hide Side Chat" : "Show Side Chat"}
-        aria-label={rightPanelMode === "chat" ? "Hide Side Chat" : "Show Side Chat"}
+        title={rightPanelMode === "chat" ? translate("sideChat.hide") : translate("sideChat.show")}
+        aria-label={rightPanelMode === "chat" ? translate("sideChat.hide") : translate("sideChat.show")}
         aria-pressed={rightPanelMode === "chat"}
         style={{
           display: "flex", alignItems: "center", justifyContent: "center",
