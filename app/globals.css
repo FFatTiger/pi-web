@@ -827,7 +827,30 @@ pre, code {
 }
 @media (max-width: 640px) {
   .chat-input-editor-row { padding-left: 12px; }
-  .chat-input-toolbar { padding: 6px 12px; }
+  .chat-input-toolbar {
+    padding: 6px 12px;
+    flex-wrap: nowrap;
+    overflow: hidden;
+  }
+  .chat-input-toolbar-left { flex: 0 1 auto !important; }
+  .chat-input-thinking-label {
+    display: block;
+    max-width: 48px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .chat-input-toolbar-spacer { flex: 0 0 2px !important; min-width: 2px !important; }
+  .chat-input-toolbar-controls { flex: 1 1 auto !important; min-width: 0; }
+  .chat-input-toolbar-actions { width: 100%; min-width: 0; justify-content: flex-end; }
+  .chat-input-toolbar-tools { flex: 0 1 auto; min-width: 0; }
+  .chat-input-toolbar-tools > button { max-width: 72px; }
+  .chat-input-toolbar-tools > button span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .chat-input-toolbar-model { flex: 1 1 88px !important; min-width: 48px !important; max-width: 128px; overflow: hidden; }
+  .chat-input-toolbar-model > button { width: 100% !important; min-width: 0; }
+  .chat-input-send { flex-shrink: 0; }
   .chat-input-streaming-actions { right: 12px; }
   .chat-input-toolbar-model { overflow: hidden; }
   .chat-input-toolbar-thinking > button span,
