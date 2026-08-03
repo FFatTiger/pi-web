@@ -170,7 +170,6 @@ function SideChatConversation({
     agentRunning,
     agentPhase,
     bashRunning,
-    isCompacting,
     compactError,
     compactResult,
     displayModel,
@@ -196,11 +195,9 @@ function SideChatConversation({
     handleSend,
     handleAbort,
     handleModelChange,
-    handleCompact,
     handleSteer,
     handleFollowUp,
     handlePromptWithStreamingBehavior,
-    handleAbortCompaction,
     handleRecallQueue,
     handleThinkingLevelChange,
     loadSlashCommands,
@@ -301,9 +298,6 @@ function SideChatConversation({
         modelError={modelError}
         modelScopeWarnings={modelScopeWarnings}
         onModelChange={handleModelChange}
-        onCompact={handleCompact}
-        onAbortCompaction={handleAbortCompaction}
-        isCompacting={isCompacting}
         compactError={compactError}
         compactResult={compactResult}
         thinkingLevel={thinkingLevel}

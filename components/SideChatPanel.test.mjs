@@ -24,8 +24,9 @@ test("ChatInput hides built-in slash commands when no handler is supplied", asyn
   const source = await readFile(new URL("./ChatInput.tsx", import.meta.url), "utf8");
 
   assert.match(source, /isStreaming \|\| !onBuiltinCommand \? \[\] : BUILTIN_SLASH_COMMANDS/);
-  assert.match(source, /padding: "0 16px 8px"/);
+  assert.match(source, /padding: "0 16px 15px"/);
   assert.doesNotMatch(source, /reserveMinimapSpace/);
+  assert.doesNotMatch(source, /paddingRight: isMobile \? 16 : 52/);
 });
 
 test("Side Chat actions remain available while its agent is running", async () => {

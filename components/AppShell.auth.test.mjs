@@ -34,13 +34,11 @@ test("AuthControls is not placed in the top bar", () => {
   assert.equal(topBarBlock.includes("<AuthControls"), false);
 });
 
-test("session stats remain right-aligned with Side Chat and Explorer clearance", () => {
+test("session stats are no longer duplicated in the top bar", () => {
   assert.ok(topBarStart >= 0 && topBarEnd > topBarStart);
-  assert.match(topBarBlock, /marginLeft:\s*"auto"/);
-  assert.match(
-    topBarBlock,
-    /paddingRight:\s*rightPanelMode\s*===\s*"closed"\s*\?\s*84\s*:\s*12/,
-  );
+  assert.match(topBarBlock, /Session statistics moved to the composer footer/);
+  assert.doesNotMatch(topBarBlock, /paddingRight:\s*rightPanelMode\s*===\s*"closed"\s*\?\s*48\s*:\s*12/);
+  assert.doesNotMatch(topBarBlock, /\{fmt\(t\.input\)\}/);
 });
 
 test("fixed right corner exposes Side Chat and Explorer entries", () => {

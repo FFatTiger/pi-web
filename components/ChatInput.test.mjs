@@ -9,7 +9,8 @@ const jiti = createJiti(import.meta.url, {
   tsconfigPaths: true,
 });
 const { ChatInput, ModelErrorBanner, ModelScopeWarningBanner, filterModelOptions } = await jiti.import("./ChatInput.tsx");
-const { I18nProvider } = await jiti.import("../hooks/useI18n.tsx");
+// Import via the same alias ChatInput uses so React context shares one module instance.
+const { I18nProvider } = await jiti.import("@/hooks/useI18n");
 
 test("renders the upstream model error", () => {
   const html = renderToStaticMarkup(
@@ -56,8 +57,8 @@ test("keeps the model selector visible when a model error leaves no options", ()
     ),
   );
 
-  assert.match(html, />No models</);
-  assert.match(html, /title="No available models"/);
+  assert.match(html, />No available models</);
+  assert.match(html, /aria-label="No available models"|title="No available models"/);
 });
 
 test("filters model options by name and id", () => {
@@ -84,7 +85,6 @@ test("renders compact errors above the input as a wrapping alert", () => {
       React.createElement(ChatInput, {
         onSend() {},
         onAbort() {},
-        onCompact() {},
         isStreaming: false,
         compactError: error,
       }),
