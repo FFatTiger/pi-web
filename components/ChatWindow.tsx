@@ -7,6 +7,7 @@ import { asBracketedPaste, toTerminalKeyData } from "@/lib/terminal-input";
 import { countToolCallBlocks, getAssistantErrorMessage, getDisplayableAssistantBlocks, splitFinalAssistantBlocks } from "@/lib/message-display";
 import { MessageView } from "./MessageView";
 import { ChatInput, type ChatInputHandle } from "./ChatInput";
+import { SessionInfoBar } from "./SessionInfoBar";
 import { ChatMinimap, useMessageRefs } from "./ChatMinimap";
 import { ExtensionStatusBar } from "./ExtensionStatusBar";
 import { useI18n } from "@/hooks/useI18n";
@@ -356,9 +357,6 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
       modelError={modelError}
       modelScopeWarnings={modelScopeWarnings}
       onModelChange={handleModelChange}
-      onCompact={session || isNew ? handleCompact : undefined}
-      onAbortCompaction={handleAbortCompaction}
-      isCompacting={isCompacting}
       compactError={compactError}
       compactResult={compactResult}
       toolPreset={toolPreset}
@@ -375,12 +373,27 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
       slashCommandsLoading={slashCommandsLoading}
       onLoadSlashCommands={loadSlashCommands}
       onBuiltinCommand={handleBuiltinSlashCommand}
-      soundEnabled={soundEnabled}
-      onSoundToggle={onSoundToggle}
       onAudioUnlock={unlockAudio}
       draftKey={session?.id ?? (newSessionCwd ? `new:${newSessionCwd}` : undefined)}
       cwd={session?.cwd ?? newSessionCwd}
     />
+  );
+
+  const sessionInfoBarElement = (
+    <div className={`session-info-bar-wrap${isMobile ? " is-mobile" : ""}`}>
+      <div className="session-info-bar-inner">
+        <SessionInfoBar
+          soundEnabled={soundEnabled}
+          onSoundToggle={onSoundToggle}
+          onCompact={session || isNew ? handleCompact : undefined}
+          onAbortCompaction={handleAbortCompaction}
+          isCompacting={isCompacting}
+          sessionStats={sessionStats}
+          contextUsage={contextUsage}
+          onStatsOpen={onSessionStatsPanelOpen}
+        />
+      </div>
+    </div>
   );
 
   const aboveEditorWidgets = extensionWidgets.filter((widget) => widget.placement !== "belowEditor");
@@ -487,6 +500,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
             </div>
             <NoticeShelf notices={notices} align="right" />
             {chatInputElement}
+            {sessionInfoBarElement}
           </div>
         </div>
       ) : (
@@ -750,6 +764,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
           </div>
         </div>
         {chatInputElement}
+        {sessionInfoBarElement}
         <ExtensionStatusBar statuses={extensionStatuses} />
       </div>
       </>

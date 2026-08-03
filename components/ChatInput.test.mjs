@@ -56,7 +56,7 @@ test("keeps the model selector visible when a model error leaves no options", ()
     ),
   );
 
-  assert.match(html, />No models</);
+  assert.match(html, />No available models</);
   assert.match(html, /title="No available models"/);
 });
 
