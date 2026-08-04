@@ -633,7 +633,44 @@ pre, code {
   }
 }
 
-/* Chat composer: faithful two-row desktop shell. */
+/* Codex center column: full-height scroll + sticky composer footer */
+.thread-scroll-container {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--text-dim) 55%, transparent) transparent;
+}
+.thread-scroll-container::-webkit-scrollbar {
+  width: 8px;
+}
+.thread-scroll-container::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--text-dim) 40%, transparent);
+  border-radius: 999px;
+}
+.thread-composer-footer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 25;
+  pointer-events: none;
+}
+.thread-composer-footer-fade {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to top,
+    var(--bg) 0%,
+    color-mix(in srgb, var(--bg) 92%, transparent) 42%,
+    transparent 100%
+  );
+  pointer-events: none;
+}
+.thread-composer-footer-inner {
+  position: relative;
+  z-index: 1;
+  pointer-events: auto;
+}
+
+/* Chat composer: Codex-like rounded shell. */
 .chat-input-shell {
   position: relative;
   min-width: 0;
@@ -641,14 +678,14 @@ pre, code {
   margin-left: -10px;
   overflow: visible;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-3xl, 1.25rem);
   background: var(--bg-secondary);
-  box-shadow: none;
-  transition: border-color 120ms ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  transition: border-color 120ms ease, box-shadow 120ms ease;
 }
 .chat-input-shell:focus-within {
-  border-color: var(--accent-blue);
-  box-shadow: none;
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
 }
 .chat-input-shell.is-streaming {
   border-color: var(--border);
@@ -788,8 +825,8 @@ pre, code {
 
 /* Composer-aligned session status row. */
 .session-info-bar-wrap {
-  margin-top: -15px;
-  padding: 0 16px 4px;
+  margin-top: -8px;
+  padding: 0 16px 8px;
 }
 /* ChatMinimap is a left overlay; no right-side clearance needed. */
 .session-info-bar-wrap.is-mobile { padding-right: 16px; }

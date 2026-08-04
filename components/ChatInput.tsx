@@ -1202,11 +1202,12 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
 
   return (
     <div
+      className="chat-input-wrap"
       style={{
         flexShrink: 0,
         background: "transparent",
         // ChatMinimap is a left overlay; do not reserve right-side composer padding.
-        padding: "0 16px 15px",
+        padding: "0 16px 12px",
       }}
     >
       {/* Hidden file input */}
