@@ -41,16 +41,18 @@ test("session stats are no longer duplicated in the top bar", () => {
   assert.doesNotMatch(topBarBlock, /\{fmt\(t\.input\)\}/);
 });
 
-test("fixed right corner toggles the RIGHT side panel, not the left sidebar", () => {
-  const groupStart = source.indexOf("{/* Codex-style top-right: show/hide the RIGHT side panel */}");
-  assert.ok(groupStart >= 0, "top-right right-panel toggle marker missing");
+test("fixed right corner uses Codex expand/close cluster for the RIGHT panel", () => {
+  const groupStart = source.indexOf("{/* Codex right-panel chrome: floating expand + close cluster");
+  assert.ok(groupStart >= 0, "top-right right-panel cluster marker missing");
   const groupEnd = source.indexOf("{modelsConfigOpen &&", groupStart);
   assert.ok(groupEnd > groupStart, "top-right control group end missing");
   const fixedRegion = source.slice(groupStart, groupEnd);
   assert.equal(fixedRegion.includes("<AuthControls"), false);
-  assert.match(fixedRegion, /toggleRightPanel/);
-  assert.match(fixedRegion, /layout\.hideRightPanel/);
-  assert.match(fixedRegion, /layout\.showRightPanel/);
+  assert.match(fixedRegion, /codex-panel-control-cluster/);
+  assert.match(fixedRegion, /toggleRightPanelMaximized/);
+  assert.match(fixedRegion, /closeRightPanel/);
+  assert.match(fixedRegion, /layout\.expandPanel/);
+  assert.match(fixedRegion, /layout\.closePanel/);
   assert.doesNotMatch(fixedRegion, /handleSidebarToggle/);
   assert.doesNotMatch(fixedRegion, /toggleSideChatPanel/);
   assert.doesNotMatch(fixedRegion, /toggleExplorerPanel/);

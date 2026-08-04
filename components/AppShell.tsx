@@ -1584,80 +1584,6 @@ export function AppShell() {
           background: "var(--bg)",
         } as React.CSSProperties}
       >
-        {rightPanelOpen && (
-          <div
-            style={{
-              height: 36,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "flex-end",
-              gap: 2,
-              padding: "0 8px",
-              borderBottom: "1px solid var(--border)",
-              background: "var(--bg-panel)",
-              flexShrink: 0,
-            }}
-          >
-            <button
-              type="button"
-              onClick={toggleRightPanelMaximized}
-              title={rightPanelMaximized ? "Restore panel width" : "Expand panel"}
-              aria-label={rightPanelMaximized ? "Restore panel width" : "Expand panel"}
-              aria-pressed={rightPanelMaximized}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                width: 28,
-                height: 28,
-                border: "none",
-                borderRadius: 6,
-                background: rightPanelMaximized ? "var(--bg-selected)" : "transparent",
-                color: "var(--text-muted)",
-                cursor: "pointer",
-              }}
-            >
-              {rightPanelMaximized ? (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <polyline points="4 14 10 14 10 20" />
-                  <polyline points="20 10 14 10 14 4" />
-                  <line x1="14" y1="10" x2="21" y2="3" />
-                  <line x1="3" y1="21" x2="10" y2="14" />
-                </svg>
-              ) : (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <polyline points="15 3 21 3 21 9" />
-                  <polyline points="9 21 3 21 3 15" />
-                  <line x1="21" y1="3" x2="14" y2="10" />
-                  <line x1="3" y1="21" x2="10" y2="14" />
-                </svg>
-              )}
-            </button>
-            <button
-              type="button"
-              onClick={closeRightPanel}
-              title="Close panel"
-              aria-label="Close panel"
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                width: 28,
-                height: 28,
-                border: "none",
-                borderRadius: 6,
-                background: "transparent",
-                color: "var(--text-muted)",
-                cursor: "pointer",
-              }}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <line x1="18" y1="6" x2="6" y2="18" />
-                <line x1="6" y1="6" x2="18" y2="18" />
-              </svg>
-            </button>
-          </div>
-        )}
         <WorkspaceFilePanel
           mode={rightPanelMode}
           cwd={activeCwd}
@@ -1685,78 +1611,155 @@ export function AppShell() {
         />
       </div>
     </div>
-    {/* Codex-style top-right: show/hide the RIGHT side panel */}
+    {/* Codex right-panel chrome: floating expand + close cluster (top-right) */}
     <div
+      className="codex-right-panel-controls"
       style={{
         position: "fixed",
-        top: 8,
-        right: "calc(12px + env(safe-area-inset-right))",
-        zIndex: 300,
+        top: 6,
+        right: "calc(10px + env(safe-area-inset-right))",
+        zIndex: 320,
         display: "flex",
         alignItems: "center",
         gap: 6,
         pointerEvents: "none",
       }}
     >
-      {rightPanelMode === "explorer" && changesCount > 0 && (
+      {rightPanelOpen && rightPanelMode === "explorer" && changesCount > 0 && (
         <button
           type="button"
           onClick={() => setChangesCollapsed((value) => !value)}
           title={changesCollapsed ? "Show git changes" : "Hide git changes"}
           aria-label={changesCollapsed ? "Show git changes" : "Hide git changes"}
           aria-pressed={!changesCollapsed}
+          className="codex-panel-chip"
           style={{
             pointerEvents: "auto",
             display: "flex", alignItems: "center", justifyContent: "center",
-            width: 32, height: 32, padding: 0,
+            minWidth: 28, height: 28, padding: "0 8px",
             background: changesCollapsed ? "var(--bg)" : "var(--bg-selected)",
             border: "1px solid var(--border)",
-            borderRadius: "var(--radius-md, 8px)",
+            borderRadius: 999,
             color: changesCollapsed ? "var(--text-dim)" : "var(--accent)",
             cursor: "pointer",
-            boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
+            boxShadow: "0 1px 2px rgba(0,0,0,0.06)",
+            fontSize: 11,
+            fontWeight: 600,
           }}
         >
-          <span style={{ fontSize: 11, fontWeight: 600 }}>{changesCount}</span>
+          {changesCount}
         </button>
       )}
-      <button
-        type="button"
-        onClick={toggleRightPanel}
-        title={`${rightPanelOpen ? translate("layout.hideRightPanel") : translate("layout.showRightPanel")} (Ctrl+Alt+B)`}
-        aria-label={rightPanelOpen ? translate("layout.hideRightPanel") : translate("layout.showRightPanel")}
-        aria-pressed={rightPanelOpen}
-        style={{
-          pointerEvents: "auto",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          width: 32,
-          height: 32,
-          padding: 0,
-          background: rightPanelOpen ? "var(--bg-selected)" : "var(--bg)",
-          border: "1px solid var(--border)",
-          borderRadius: "var(--radius-md, 8px)",
-          color: rightPanelOpen ? "var(--text)" : "var(--text-muted)",
-          cursor: "pointer",
-          boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
-          transition: "color 0.12s, background 0.12s, border-color 0.12s",
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.color = "var(--text)";
-          e.currentTarget.style.background = "var(--bg-hover)";
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.color = rightPanelOpen ? "var(--text)" : "var(--text-muted)";
-          e.currentTarget.style.background = rightPanelOpen ? "var(--bg-selected)" : "var(--bg)";
-        }}
-      >
-        {/* Codex-like side panel glyph: rounded square with RIGHT rail */}
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <rect x="3.5" y="4" width="17" height="16" rx="3" />
-          <path d="M15 4v16" />
-        </svg>
-      </button>
+
+      {rightPanelOpen ? (
+        <div
+          className="codex-panel-control-cluster"
+          style={{
+            pointerEvents: "auto",
+            display: "inline-flex",
+            alignItems: "center",
+            height: 30,
+            padding: 2,
+            gap: 0,
+            background: "var(--bg)",
+            border: "1px solid var(--border)",
+            borderRadius: 999,
+            boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
+          }}
+        >
+          <button
+            type="button"
+            onClick={toggleRightPanelMaximized}
+            title={rightPanelMaximized ? translate("layout.restorePanelWidth") : translate("layout.expandPanel")}
+            aria-label={rightPanelMaximized ? translate("layout.restorePanelWidth") : translate("layout.expandPanel")}
+            aria-pressed={rightPanelMaximized}
+            className="codex-panel-control-btn"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 26,
+              height: 26,
+              border: "none",
+              borderRadius: 999,
+              background: rightPanelMaximized ? "var(--bg-selected)" : "transparent",
+              color: "var(--text-muted)",
+              cursor: "pointer",
+            }}
+          >
+            {rightPanelMaximized ? (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <polyline points="4 14 10 14 10 20" />
+                <polyline points="20 10 14 10 14 4" />
+                <line x1="14" y1="10" x2="21" y2="3" />
+                <line x1="3" y1="21" x2="10" y2="14" />
+              </svg>
+            ) : (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <polyline points="15 3 21 3 21 9" />
+                <polyline points="9 21 3 21 3 15" />
+                <line x1="21" y1="3" x2="14" y2="10" />
+                <line x1="3" y1="21" x2="10" y2="14" />
+              </svg>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={closeRightPanel}
+            title={`${translate("layout.closePanel")} (Ctrl+Alt+B)`}
+            aria-label={translate("layout.closePanel")}
+            className="codex-panel-control-btn"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 26,
+              height: 26,
+              border: "none",
+              borderRadius: 999,
+              background: "transparent",
+              color: "var(--text-muted)",
+              cursor: "pointer",
+            }}
+          >
+            {/* Codex: panel glyph with corner close mark */}
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <rect x="3.5" y="4" width="17" height="16" rx="3" />
+              <path d="M15 4v16" />
+              <path d="M17.2 8.2l3.6-3.6" />
+              <path d="M20.8 8.2l-3.6-3.6" />
+            </svg>
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={toggleRightPanel}
+          title={`${translate("layout.showRightPanel")} (Ctrl+Alt+B)`}
+          aria-label={translate("layout.showRightPanel")}
+          aria-pressed={false}
+          style={{
+            pointerEvents: "auto",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: 30,
+            height: 30,
+            padding: 0,
+            background: "var(--bg)",
+            border: "1px solid var(--border)",
+            borderRadius: 999,
+            color: "var(--text-muted)",
+            cursor: "pointer",
+            boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
+          }}
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <rect x="3.5" y="4" width="17" height="16" rx="3" />
+            <path d="M15 4v16" />
+          </svg>
+        </button>
+      )}
     </div>
     {modelsConfigOpen && <ModelsConfig onClose={() => { setModelsConfigOpen(false); setModelsRefreshKey((k) => k + 1); }} />}
     {projectTrustDialogOpen && projectTrustCwd && (
