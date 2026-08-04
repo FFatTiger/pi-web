@@ -170,6 +170,11 @@ export function getProjectDisplayName(root: string): string {
   return getProjectBasename(root);
 }
 
+/** Normalize project roots so Windows path separators / trailing slashes match. */
+export function normalizeProjectRoot(root: string): string {
+  return root.replace(/[\\/]+$/, "").replace(/\\/g, "/");
+}
+
 export function partitionSidebarProjects(groups: SidebarProjectGroup[]): {
   projects: SidebarProjectGroup[];
   temporary: SidebarProjectGroup[];
@@ -193,11 +198,16 @@ export function groupSidebarProjects(
   sessions: SessionInfo[],
   manualProjects: ManualProject[],
 ): SidebarProjectGroup[] {
-  const manualByRoot = new Map(manualProjects.map((project) => [project.root, project]));
+  const manualByRoot = new Map(
+    manualProjects.map((project) => [normalizeProjectRoot(project.root), {
+      ...project,
+      root: normalizeProjectRoot(project.root),
+    }]),
+  );
   const groups = new Map<string, SidebarProjectGroup>();
 
   for (const session of sessions) {
-    const root = session.projectRoot ?? session.cwd;
+    const root = normalizeProjectRoot(session.projectRoot ?? session.cwd);
     const existing = groups.get(root);
     if (existing) {
       existing.sessions.push(session);
@@ -212,7 +222,7 @@ export function groupSidebarProjects(
     }
   }
 
-  for (const project of manualProjects) {
+  for (const project of manualByRoot.values()) {
     const existing = groups.get(project.root);
     if (existing) {
       existing.manual = true;
@@ -303,14 +313,19 @@ export function upsertManualProject(
   root: string,
   lastOpened: string,
 ): ManualProject[] {
-  return [{ root, lastOpened }, ...projects.filter((project) => project.root !== root)];
+  const normalizedRoot = normalizeProjectRoot(root);
+  return [
+    { root: normalizedRoot, lastOpened },
+    ...projects.filter((project) => normalizeProjectRoot(project.root) !== normalizedRoot),
+  ];
 }
 
 export function removeManualProject(
   projects: ManualProject[],
   root: string,
 ): ManualProject[] {
-  return projects.filter((project) => project.root !== root);
+  const normalizedRoot = normalizeProjectRoot(root);
+  return projects.filter((project) => normalizeProjectRoot(project.root) !== normalizedRoot);
 }
 
 export function parseExpandedProjects(raw: string | null): Set<string> {

@@ -612,9 +612,22 @@ export function SessionSidebar({
   const [projectDialogBusy, setProjectDialogBusy] = useState(false);
   const [projectDialogError, setProjectDialogError] = useState<string | null>(null);
 
-  const deleteProjectSessions = useCallback(async (group: SidebarProjectGroup, errorKey: "sidebar.clearChatsError" | "sidebar.removeProjectError") => {
+  const persistManualProjects = useCallback((projects: ManualProject[]) => {
+    setManualProjects(projects);
+    try {
+      window.localStorage.setItem(MANUAL_PROJECTS_STORAGE_KEY, serializeManualProjects(projects));
+    } catch {
+      // localStorage may be unavailable in privacy mode.
+    }
+  }, []);
+
+  const deleteProjectSessions = useCallback(async (
+    group: SidebarProjectGroup,
+    errorKey: "sidebar.clearChatsError" | "sidebar.removeProjectError",
+    options?: { notifyParent?: boolean },
+  ) => {
     const sessionIds = group.sessions.map((session) => session.id);
-    if (sessionIds.length === 0) return;
+    if (sessionIds.length === 0) return [] as string[];
     const results = await Promise.allSettled(
       sessionIds.map(async (sessionId) => {
         const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
@@ -622,13 +635,25 @@ export function SessionSidebar({
           const body = await response.json().catch(() => ({})) as { error?: string };
           throw new Error(body.error ?? `HTTP ${response.status}`);
         }
-        onSessionDeleted?.(sessionId);
+        return sessionId;
       }),
     );
-    const failed = results.filter((result) => result.status === "rejected").length;
+    const deletedIds: string[] = [];
+    let failed = 0;
+    for (const result of results) {
+      if (result.status === "fulfilled") deletedIds.push(result.value);
+      else failed += 1;
+    }
+    // Notify parent once per deleted session only after bulk delete finishes,
+    // so intermediate refreshKey reloads cannot drop a project that is not yet
+    // pinned in manualProjects.
+    if (options?.notifyParent !== false) {
+      for (const sessionId of deletedIds) onSessionDeleted?.(sessionId);
+    }
     if (failed > 0) {
       throw new Error(`${t(errorKey)} (${failed}/${sessionIds.length})`);
     }
+    return deletedIds;
   }, [onSessionDeleted, t]);
 
   const handleProjectDialogConfirm = useCallback(async () => {
@@ -641,13 +666,22 @@ export function SessionSidebar({
         if (group.sessions.length === 0) {
           throw new Error(t("sidebar.clearChatsEmpty"));
         }
-        await deleteProjectSessions(group, "sidebar.clearChatsError");
-        // Keep the empty project visible by ensuring it stays in manual projects.
-        setManualProjects((previous) => upsertManualProject(previous, group.root, new Date().toISOString()));
+        // Pin the empty project BEFORE deletes. Otherwise each onSessionDeleted
+        // bumps refreshKey, reloads the session list, and the project vanishes
+        // because it only existed via session-backed grouping.
+        const pinned = upsertManualProject(manualProjects, group.root, new Date().toISOString());
+        persistManualProjects(pinned);
         setExpandedProjects((previous) => new Set(previous).add(group.root));
+        // Optimistically clear sessions in UI so the empty project stays visible.
+        setAllSessions((previous) => previous.filter((session) => {
+          const root = session.projectRoot ?? session.cwd;
+          return root !== group.root;
+        }));
+        const deletedIds = await deleteProjectSessions(group, "sidebar.clearChatsError", { notifyParent: false });
+        for (const sessionId of deletedIds) onSessionDeleted?.(sessionId);
       } else {
-        await deleteProjectSessions(group, "sidebar.removeProjectError");
-        setManualProjects((previous) => removeManualProject(previous, group.root));
+        const deletedIds = await deleteProjectSessions(group, "sidebar.removeProjectError", { notifyParent: false });
+        persistManualProjects(removeManualProject(manualProjects, group.root));
         setExpandedProjects((previous) => {
           if (!previous.has(group.root)) return previous;
           const next = new Set(previous);
@@ -660,6 +694,11 @@ export function SessionSidebar({
           next.delete(group.root);
           return next;
         });
+        setAllSessions((previous) => previous.filter((session) => {
+          const root = session.projectRoot ?? session.cwd;
+          return root !== group.root;
+        }));
+        for (const sessionId of deletedIds) onSessionDeleted?.(sessionId);
       }
       await loadSessions(false);
       setProjectDialog(null);
@@ -668,7 +707,7 @@ export function SessionSidebar({
     } finally {
       setProjectDialogBusy(false);
     }
-  }, [deleteProjectSessions, loadSessions, projectDialog, projectDialogBusy, t]);
+  }, [deleteProjectSessions, loadSessions, manualProjects, onSessionDeleted, persistManualProjects, projectDialog, projectDialogBusy, t]);
 
   const renderProjectGroup = (group: SidebarProjectGroup) => {
     const expanded = expandedProjects.has(group.root);
