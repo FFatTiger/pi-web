@@ -954,6 +954,59 @@ pre, code {
   white-space: nowrap;
 }
 
+.file-viewer-breadcrumbs {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.2;
+}
+.file-viewer-breadcrumbs::-webkit-scrollbar { display: none; }
+.file-viewer-breadcrumb-item {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.file-viewer-breadcrumb-sep {
+  margin: 0 4px;
+  color: var(--text-dim);
+}
+.file-viewer-breadcrumb-link {
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: var(--text-muted);
+  cursor: pointer;
+  font: inherit;
+}
+.file-viewer-breadcrumb-link:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
+.file-viewer-breadcrumb-label {
+  color: var(--text-muted);
+}
+.file-viewer-breadcrumb-label.is-current {
+  color: var(--text);
+  font-weight: 600;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .file-viewer-meta {
   flex: 0 1 auto;
   min-width: 0;
@@ -982,7 +1035,6 @@ pre, code {
   height: 24px;
   gap: 4px;
   flex-shrink: 0;
-  order: -1;
 }
 
 .file-viewer-mode-switch {

@@ -32,6 +32,8 @@ interface WorkspaceFilePanelProps {
   onAtMentions: (relativePaths: string[]) => void;
   onMentionLines?: (relativePath: string, startLine: number, endLine: number) => void;
   onChangesCountChange?: (count: number) => void;
+  /** When false, hide the nested file TabBar (top panel chip already shows the name). */
+  showInnerFileTabs?: boolean;
   sideChat?: ReactNode;
 }
 
@@ -56,6 +58,7 @@ export function WorkspaceFilePanel(props: WorkspaceFilePanelProps) {
     onAtMentions,
     onMentionLines,
     onChangesCountChange,
+    showInnerFileTabs = false,
     sideChat,
   } = props;
   const { t } = useI18n();
@@ -118,19 +121,23 @@ export function WorkspaceFilePanel(props: WorkspaceFilePanelProps) {
             <div style={{ display: "flex", flex: 1, minHeight: 0, minWidth: 0 }}>
               {showFilePreview ? (
                 <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
-                  <div style={{ display: "flex", alignItems: "center", flexShrink: 0, background: "var(--bg-panel)", borderBottom: "1px solid var(--border)", height: 36, paddingRight: 8 }}>
-                    <div style={{ flex: 1, overflow: "hidden" }}>
-                      <TabBar tabs={fileTabs} activeTabId={activeFileTabId ?? ""} onSelectTab={onSelectFileTab} onCloseTab={onCloseFileTab} />
+                  {showInnerFileTabs && fileTabs.length > 1 && (
+                    <div style={{ display: "flex", alignItems: "center", flexShrink: 0, background: "var(--bg-panel)", borderBottom: "1px solid var(--border)", height: 36, paddingRight: 8 }}>
+                      <div style={{ flex: 1, overflow: "hidden" }}>
+                        <TabBar tabs={fileTabs} activeTabId={activeFileTabId ?? ""} onSelectTab={onSelectFileTab} onCloseTab={onCloseFileTab} />
+                      </div>
                     </div>
-                  </div>
+                  )}
                   <div style={{ flex: 1, overflow: "hidden" }}>
                     <FileViewer
                       filePath={activeFile!.filePath!}
                       cwd={cwd ?? undefined}
                       sourceSessionId={activeFile!.sourceSessionId}
                       onOpenFile={(filePath) => onOpenFile(filePath, getFileName(filePath), { sourceSessionId: activeFile!.sourceSessionId })}
+                      onRevealPath={(path) => explorerRef.current?.revealPath(path)}
                       onMentionLines={onMentionLines}
                       gitRefreshKey={explorerRefreshKey}
+                      initialDisplayMode={activeFile!.initialDisplayMode}
                     />
                   </div>
                 </div>
