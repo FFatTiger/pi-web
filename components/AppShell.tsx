@@ -1124,31 +1124,33 @@ export function AppShell() {
             </div>
           )}
 
-          {/* Codex: pinned-summary toggle lives on the CENTER toolbar trailing edge,
-              not in the right-panel expand/close cluster. */}
-          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", flexShrink: 0 }}>
-            <button
-              type="button"
-              className="app-toolbar-btn"
-              data-active={threadSummaryOpen || threadSummaryPinned}
-              title={translate("summary.toggle")}
-              aria-label={translate("summary.toggle")}
-              aria-pressed={threadSummaryOpen || threadSummaryPinned}
-              onClick={() => {
-                if (threadSummaryOpen && !threadSummaryPinned) {
-                  setThreadSummaryOpen(false);
-                  return;
-                }
-                setThreadSummaryOpen(true);
-              }}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M12 17v5" />
-                <path d="M9 2h6l1 7H8z" />
-                <path d="M8 9h8v2a4 4 0 0 1-8 0z" />
-              </svg>
-            </button>
-          </div>
+          {/* When the right panel is open, the pin sits on the center toolbar trailing edge.
+              When closed, it sits just left of the fixed "show right panel" button. */}
+          {rightPanelOpen && (
+            <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", flexShrink: 0 }}>
+              <button
+                type="button"
+                className="app-toolbar-btn"
+                data-active={threadSummaryOpen || threadSummaryPinned}
+                title={translate("summary.toggle")}
+                aria-label={translate("summary.toggle")}
+                aria-pressed={threadSummaryOpen || threadSummaryPinned}
+                onClick={() => {
+                  if (threadSummaryOpen && !threadSummaryPinned) {
+                    setThreadSummaryOpen(false);
+                    return;
+                  }
+                  setThreadSummaryOpen(true);
+                }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M12 17v5" />
+                  <path d="M9 2h6l1 7H8z" />
+                  <path d="M8 9h8v2a4 4 0 0 1-8 0z" />
+                </svg>
+              </button>
+            </div>
+          )}
 
           {/* Session statistics moved to the composer footer. The existing
               session panel remains available and is opened from that footer. */}
@@ -1384,6 +1386,60 @@ export function AppShell() {
               </div>
             )
           ) : null}
+
+          {/* Codex ThreadSummary is floating content of the center thread column. */}
+          <ThreadSummaryPanel
+            open={threadSummaryOpen || threadSummaryPinned}
+            pinned={threadSummaryPinned}
+            hasSession={Boolean(selectedSession)}
+            hasWorkspace={Boolean(activeCwd)}
+            cwd={activeCwd}
+            projectRoot={activeProjectRoot}
+            sessionName={selectedSession?.name ?? sessionStats?.sessionName ?? null}
+            changesCount={changesCount}
+            systemPrompt={systemPrompt}
+            branchTree={branchTree}
+            branchActiveLeafId={branchActiveLeafId}
+            autoNameStatus={autoNameStatus}
+            canGenerateTitle={Boolean(
+              selectedSession
+              && (sessionStats?.userMessages ?? selectedSession.messageCount) > 0
+              && autoNameStatus.kind !== "naming",
+            )}
+            generateTitleDisabledReason={
+              !selectedSession
+                ? translate("title.unsaved")
+                : (sessionStats?.userMessages ?? selectedSession.messageCount) <= 0
+                  ? translate("title.noMessages")
+                  : autoNameStatus.kind === "error"
+                    ? autoNameStatus.message
+                    : undefined
+            }
+            onClose={() => {
+              setThreadSummaryOpen(false);
+              if (!threadSummaryPinned) return;
+              setThreadSummaryPinned(false);
+            }}
+            onTogglePinned={() => {
+              setThreadSummaryPinned((value) => {
+                const next = !value;
+                if (next) setThreadSummaryOpen(true);
+                return next;
+              });
+            }}
+            onOpenSideChat={() => {
+              openSideChatShell({ forceNew: true });
+            }}
+            onOpenFiles={() => {
+              if (!activeCwd) return;
+              setExplorerOpen(true);
+              openRightPanelKind("files");
+            }}
+            onViewFullHistory={handleViewFullHistory}
+            onGenerateTitle={() => void handleAutoName()}
+            onBranchLeafChange={handleBranchLeafChange}
+            onCwdChange={(cwd, projectRoot) => activateWorkspace(cwd, projectRoot)}
+          />
         </div>
       </div>
 
@@ -1581,89 +1637,59 @@ export function AppShell() {
           </button>
         </div>
       ) : (
-        <button
-          type="button"
-          onClick={toggleRightPanel}
-          title={`${translate("layout.showRightPanel")} (Ctrl+Alt+B)`}
-          aria-label={translate("layout.showRightPanel")}
-          aria-pressed={false}
-          style={{
-            pointerEvents: "auto",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            width: 30,
-            height: 30,
-            padding: 0,
-            background: "var(--bg)",
-            border: "1px solid var(--border)",
-            borderRadius: 999,
-            color: "var(--text-muted)",
-            cursor: "pointer",
-            boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
-          }}
-        >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <rect x="3.5" y="4" width="17" height="16" rx="3" />
-            <path d="M15 4v16" />
-          </svg>
-        </button>
+        <>
+          {/* Right panel collapsed: pin sits immediately left of the show-panel button. */}
+          <button
+            type="button"
+            className={`thread-summary-entry-btn${threadSummaryOpen || threadSummaryPinned ? " is-active" : ""}`}
+            title={translate("summary.toggle")}
+            aria-label={translate("summary.toggle")}
+            aria-pressed={threadSummaryOpen || threadSummaryPinned}
+            onClick={() => {
+              if (threadSummaryOpen && !threadSummaryPinned) {
+                setThreadSummaryOpen(false);
+                return;
+              }
+              setThreadSummaryOpen(true);
+            }}
+            style={{ pointerEvents: "auto" }}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M12 17v5" />
+              <path d="M9 2h6l1 7H8z" />
+              <path d="M8 9h8v2a4 4 0 0 1-8 0z" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            onClick={toggleRightPanel}
+            title={`${translate("layout.showRightPanel")} (Ctrl+Alt+B)`}
+            aria-label={translate("layout.showRightPanel")}
+            aria-pressed={false}
+            style={{
+              pointerEvents: "auto",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 30,
+              height: 30,
+              padding: 0,
+              background: "var(--bg)",
+              border: "1px solid var(--border)",
+              borderRadius: 999,
+              color: "var(--text-muted)",
+              cursor: "pointer",
+              boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
+            }}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <rect x="3.5" y="4" width="17" height="16" rx="3" />
+              <path d="M15 4v16" />
+            </svg>
+          </button>
+        </>
       )}
     </div>
-
-    <ThreadSummaryPanel
-      open={threadSummaryOpen || threadSummaryPinned}
-      pinned={threadSummaryPinned}
-      hasSession={Boolean(selectedSession)}
-      hasWorkspace={Boolean(activeCwd)}
-      cwd={activeCwd}
-      projectRoot={activeProjectRoot}
-      sessionName={selectedSession?.name ?? sessionStats?.sessionName ?? null}
-      changesCount={changesCount}
-      systemPrompt={systemPrompt}
-      branchTree={branchTree}
-      branchActiveLeafId={branchActiveLeafId}
-      autoNameStatus={autoNameStatus}
-      canGenerateTitle={Boolean(
-        selectedSession
-        && (sessionStats?.userMessages ?? selectedSession.messageCount) > 0
-        && autoNameStatus.kind !== "naming",
-      )}
-      generateTitleDisabledReason={
-        !selectedSession
-          ? translate("title.unsaved")
-          : (sessionStats?.userMessages ?? selectedSession.messageCount) <= 0
-            ? translate("title.noMessages")
-            : autoNameStatus.kind === "error"
-              ? autoNameStatus.message
-              : undefined
-      }
-      onClose={() => {
-        setThreadSummaryOpen(false);
-        if (!threadSummaryPinned) return;
-        // Closing while pinned also clears pin so it does not immediately reappear.
-        setThreadSummaryPinned(false);
-      }}
-      onTogglePinned={() => {
-        setThreadSummaryPinned((value) => {
-          const next = !value;
-          if (next) setThreadSummaryOpen(true);
-          return next;
-        });
-      }}
-      onOpenSideChat={() => {
-        openSideChatShell({ forceNew: true });
-      }}
-      onOpenFiles={() => {
-        if (!activeCwd) return;
-        setExplorerOpen(true);
-        openRightPanelKind("files");
-      }}
-      onViewFullHistory={handleViewFullHistory}
-      onGenerateTitle={() => void handleAutoName()}
-      onBranchLeafChange={handleBranchLeafChange}
-      onCwdChange={(cwd, projectRoot) => activateWorkspace(cwd, projectRoot)}
-    />
 
     {modelsConfigOpen && <ModelsConfig onClose={() => { setModelsConfigOpen(false); setModelsRefreshKey((k) => k + 1); }} />}
     {projectTrustDialogOpen && projectTrustCwd && (
