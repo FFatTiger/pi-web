@@ -18,8 +18,6 @@ interface Props {
   onToggle?: () => void;
   /** Whether a session is currently active (used to show appropriate empty reason) */
   hasSession?: boolean;
-  /** When inline, render icon-only (no text label) to save horizontal space */
-  compact?: boolean;
 }
 
 // Find the visible entry IDs on the path from root to activeLeafId.
@@ -259,7 +257,7 @@ export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, cont
   const hasContent = !noBranchReason && firstNode && firstNode.children.length > 1;
 
   const branchIcon = (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: hasContent ? "var(--accent)" : "var(--text-dim)", flexShrink: 0 }}>
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: hasContent ? "var(--accent)" : "currentColor", flexShrink: 0 }} aria-hidden="true">
       <line x1="6" y1="3" x2="6" y2="15" />
       <circle cx="18" cy="6" r="3" />
       <circle cx="6" cy="18" r="3" />

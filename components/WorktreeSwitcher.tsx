@@ -234,10 +234,12 @@ export function WorktreeSwitcher({ projectRoot, cwd, onCwdChange }: WorktreeSwit
   const worktrees = data?.worktrees ?? [];
 
   return (
-    <div ref={rootRef} style={{ position: "relative", height: "100%", display: "flex", alignItems: "stretch", minWidth: 0, flexShrink: 1 }}>
+    <div ref={rootRef} style={{ position: "relative", height: "100%", display: "flex", alignItems: "center", minWidth: 0, flexShrink: 1 }}>
       <button
         type="button"
         disabled={!enabled}
+        className="app-toolbar-chip"
+        data-active={open}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={enabled ? `Switch worktree: ${label}` : disabledTitle}
@@ -246,36 +248,18 @@ export function WorktreeSwitcher({ projectRoot, cwd, onCwdChange }: WorktreeSwit
           if (!enabled) return;
           setOpen((value) => !value);
         }}
-        style={{
-          height: 30,
-          maxWidth: 200,
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          margin: "0 2px",
-          padding: "0 10px",
-          border: "none",
-          borderRadius: "var(--radius-md, 8px)",
-          background: open ? "var(--bg-selected)" : "transparent",
-          color: enabled ? (open ? "var(--text)" : "var(--text-muted)") : "var(--text-dim)",
-          cursor: enabled ? "pointer" : "not-allowed",
-          fontSize: 12,
-          lineHeight: 1.35,
-          textAlign: "left",
-          opacity: enabled ? 1 : 0.82,
-          transition: "color 0.12s, background 0.12s",
-        }}
+        style={enabled ? undefined : { color: "var(--text-dim)", opacity: 0.82 }}
       >
         <svg
-          width="12"
-          height="12"
+          width="14"
+          height="14"
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
           strokeWidth="2"
           strokeLinecap="round"
           strokeLinejoin="round"
-          style={{ flexShrink: 0, color: current && !current.isMain ? "var(--accent)" : "var(--text-dim)" }}
+          style={{ flexShrink: 0, color: current && !current.isMain ? "var(--accent)" : "currentColor" }}
           aria-hidden="true"
         >
           <line x1="6" y1="3" x2="6" y2="15" />

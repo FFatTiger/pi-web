@@ -1038,7 +1038,7 @@ export function AppShell() {
             aria-pressed={sidebarOpen}
             data-active={sidebarOpen}
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <rect x="3.5" y="4" width="17" height="16" rx="3" />
               <path d="M9 4v16" />
             </svg>
@@ -1052,9 +1052,10 @@ export function AppShell() {
             title={isDark ? "Switch to light mode" : "Switch to dark mode"}
             aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
             aria-pressed={isDark}
+            data-active={isDark}
           >
             {isDark ? (
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <circle cx="12" cy="12" r="5" />
                 <line x1="12" y1="1" x2="12" y2="3" /><line x1="12" y1="21" x2="12" y2="23" />
                 <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" /><line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
@@ -1062,7 +1063,7 @@ export function AppShell() {
                 <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" /><line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
               </svg>
             ) : (
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
               </svg>
             )}
@@ -1076,19 +1077,21 @@ export function AppShell() {
                 setProjectTrustDialogOpen(true);
               }}
               className="app-toolbar-btn"
+              data-tone="warning"
+              data-expanded={!isMobile || undefined}
               title={translate("trust.resourcesNotLoaded")}
               aria-label={translate("trust.resourcesNotLoaded")}
-              style={{ color: "#d97706" }}
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" />
                 <path d="M12 8v4" />
                 <path d="M12 16h.01" />
               </svg>
+              {!isMobile && <span className="app-toolbar-btn-label">{translate("trust.resourcesNotLoaded")}</span>}
             </button>
           )}
           {showChat && (
-            <div style={{ display: "flex", alignItems: "stretch", height: "100%", minWidth: 0, overflow: "hidden" }}>
+            <div style={{ display: "flex", alignItems: "center", height: "100%", minWidth: 0, overflow: "hidden" }}>
               <WorktreeSwitcher
                 projectRoot={activeProjectRoot}
                 cwd={activeCwd}
@@ -1142,6 +1145,9 @@ export function AppShell() {
                       ? autoNameStatus.message
                       : "Generate a session title";
 
+                const showStatusLabel = autoNameStatus.kind !== "idle";
+                const tone = isError ? "error" : isSuccess ? "success" : undefined;
+
                 return (
                   <button
                     type="button"
@@ -1150,26 +1156,32 @@ export function AppShell() {
                     title={title}
                     aria-label={label}
                     className="app-toolbar-btn"
-                    style={{
-                      color: isError ? "#dc2626" : isSuccess ? "var(--accent)" : undefined,
-                    }}
+                    data-tone={tone}
+                    data-expanded={showStatusLabel || undefined}
                   >
                     {autoNameStatus.kind === "naming" ? (
-                      <svg className="animate-spin" width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                         <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" opacity="0.25" />
                         <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
                       </svg>
                     ) : isSuccess ? (
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                         <polyline points="20 6 9 17 4 12" />
                       </svg>
+                    ) : isError ? (
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <circle cx="12" cy="12" r="9" />
+                        <line x1="12" y1="8" x2="12" y2="12" />
+                        <line x1="12" y1="16" x2="12.01" y2="16" />
+                      </svg>
                     ) : (
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                         <path d="m15 4 5 5L7 22l-5-5Z" />
                         <path d="m14 5 5 5" />
                         <path d="M6 4V2M5 3H3M19 19v3M17.5 20.5h3" />
                       </svg>
                     )}
+                    {showStatusLabel && <span className="app-toolbar-btn-label">{label}</span>}
                   </button>
                 );
               })()}

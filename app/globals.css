@@ -1272,6 +1272,7 @@ span.linenumber {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 6px;
   width: 30px;
   height: 30px;
   margin: 0 2px;
@@ -1282,19 +1283,92 @@ span.linenumber {
   color: var(--text-muted);
   cursor: pointer;
   flex-shrink: 0;
-  transition: color 0.12s ease, background 0.12s ease;
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+  transition: color 0.12s ease, background 0.12s ease, width 0.12s ease, padding 0.12s ease;
 }
 .app-toolbar-btn:hover:not(:disabled) {
   color: var(--text);
   background: var(--bg-hover);
 }
+.app-toolbar-btn:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  outline-offset: 1px;
+}
 .app-toolbar-btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
+/* Keep status feedback readable while the action is busy */
+.app-toolbar-btn:disabled[data-expanded="true"] {
+  opacity: 1;
+  cursor: progress;
+}
 .app-toolbar-btn[data-active="true"] {
   color: var(--text);
   background: var(--bg-selected);
+}
+.app-toolbar-btn[data-tone="success"] {
+  color: var(--accent);
+}
+.app-toolbar-btn[data-tone="error"] {
+  color: #dc2626;
+}
+.app-toolbar-btn[data-tone="warning"] {
+  color: #d97706;
+  background: color-mix(in srgb, #d97706 12%, transparent);
+}
+.app-toolbar-btn[data-tone="warning"]:hover:not(:disabled) {
+  color: #b45309;
+  background: color-mix(in srgb, #d97706 18%, transparent);
+}
+/* Expand width when a short status label is present */
+.app-toolbar-btn[data-expanded="true"] {
+  width: auto;
+  min-width: 30px;
+  padding: 0 10px;
+}
+.app-toolbar-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  max-width: 200px;
+  margin: 0 2px;
+  padding: 0 10px;
+  border: none;
+  border-radius: var(--radius-md, 8px);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 1;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: left;
+  transition: color 0.12s ease, background 0.12s ease;
+}
+.app-toolbar-chip:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.app-toolbar-chip:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  outline-offset: 1px;
+}
+.app-toolbar-chip:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.app-toolbar-chip[data-active="true"] {
+  color: var(--text);
+  background: var(--bg-selected);
+}
+.app-toolbar-btn-label {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
 }
 
 /* Codex-aligned sidebar chrome */
