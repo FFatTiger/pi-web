@@ -1318,8 +1318,10 @@ span.linenumber {
 /* Codex ThreadSummaryPanel / pinned summary */
 .thread-summary-panel {
   position: fixed;
+  /* Opens from the center-column pin button (not the right-panel chrome cluster). */
   top: calc(46px + env(safe-area-inset-top) + 8px);
-  right: calc(54px + env(safe-area-inset-right));
+  left: auto;
+  right: max(16px, env(safe-area-inset-right));
   z-index: 340;
   width: min(360px, calc(100vw - 24px));
   max-height: min(72vh, 640px);
@@ -1862,7 +1864,8 @@ span.linenumber {
   box-sizing: border-box;
   height: calc(46px + env(safe-area-inset-top));
   min-height: calc(46px + env(safe-area-inset-top));
-  padding: env(safe-area-inset-top) 84px 0 10px;
+  /* Reserve space for the fixed right-panel expand/close cluster only (no pin here). */
+  padding: env(safe-area-inset-top) 72px 0 10px;
   border-bottom: 1px solid var(--border);
   background: var(--bg);
   gap: 6px;

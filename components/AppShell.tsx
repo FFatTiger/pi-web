@@ -1123,6 +1123,33 @@ export function AppShell() {
               {selectedSession.name}
             </div>
           )}
+
+          {/* Codex: pinned-summary toggle lives on the CENTER toolbar trailing edge,
+              not in the right-panel expand/close cluster. */}
+          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", flexShrink: 0 }}>
+            <button
+              type="button"
+              className="app-toolbar-btn"
+              data-active={threadSummaryOpen || threadSummaryPinned}
+              title={translate("summary.toggle")}
+              aria-label={translate("summary.toggle")}
+              aria-pressed={threadSummaryOpen || threadSummaryPinned}
+              onClick={() => {
+                if (threadSummaryOpen && !threadSummaryPinned) {
+                  setThreadSummaryOpen(false);
+                  return;
+                }
+                setThreadSummaryOpen(true);
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M12 17v5" />
+                <path d="M9 2h6l1 7H8z" />
+                <path d="M8 9h8v2a4 4 0 0 1-8 0z" />
+              </svg>
+            </button>
+          </div>
+
           {/* Session statistics moved to the composer footer. The existing
               session panel remains available and is opened from that footer. */}
           {/* Top panel dropdown — shared, only one active at a time */}
@@ -1582,28 +1609,6 @@ export function AppShell() {
           </svg>
         </button>
       )}
-
-      <button
-        type="button"
-        className={`thread-summary-entry-btn${threadSummaryOpen || threadSummaryPinned ? " is-active" : ""}`}
-        title={`${translate("summary.toggle")}`}
-        aria-label={translate("summary.toggle")}
-        aria-pressed={threadSummaryOpen || threadSummaryPinned}
-        onClick={() => {
-          if (threadSummaryOpen && !threadSummaryPinned) {
-            setThreadSummaryOpen(false);
-            return;
-          }
-          setThreadSummaryOpen(true);
-        }}
-        style={{ pointerEvents: "auto" }}
-      >
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M12 17v5" />
-          <path d="M9 2h6l1 7H8z" />
-          <path d="M8 9h8v2a4 4 0 0 1-8 0z" />
-        </svg>
-      </button>
     </div>
 
     <ThreadSummaryPanel
