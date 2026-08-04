@@ -19,44 +19,74 @@
 }
 
 :root {
+  /* Codex-aligned palette (electron-light) */
+  --gray-0: #ffffff;
+  --gray-100: #ededed;
+  --gray-300: #afafaf;
+  --gray-500: #5d5d5d;
+  --gray-600: #414141;
+  --gray-700: #303030;
+  --gray-800: #212121;
+  --gray-900: #181818;
+
   --bg: #ffffff;
   --bg-secondary: #fafafa;
   --bg-card: #ffffff;
-  --bg-panel: #f5f5f5;
-  --bg-hover: #eeeeee;
-  --bg-selected: #e8e8e8;
+  --bg-panel: #f4f4f4;
+  --bg-hover: color-mix(in srgb, #1a1c1f 6%, transparent);
+  --bg-selected: color-mix(in srgb, #1a1c1f 10%, transparent);
+  --bg-fog: color-mix(in oklab, #1a1c1f 2.5%, transparent);
   --project-row-bg: #eef1f4;
-  --border: #e0e0e0;
-  --text: #1a1a1a;
-  --text-muted: #6b7280;
-  --text-dim: #9ca3af;
-  --accent: #2563eb;
+  --border: color-mix(in oklab, #1a1c1f 8%, transparent);
+  --text: #1a1c1f;
+  --text-muted: color-mix(in srgb, #1a1c1f 65%, transparent);
+  --text-dim: color-mix(in srgb, #1a1c1f 45%, transparent);
+  --accent: #0169cc;
   --accent-blue: var(--accent);
-  --accent-hover: #1d4ed8;
+  --accent-hover: #0285ff;
   --user-bg: #eff6ff;
   --assistant-bg: #ffffff;
   --tool-bg: #f9fafb;
   --bg-subtle: rgba(0,0,0,0.03);
+
+  /* Codex geometry */
+  --radius-xs: 0.25rem;
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.625rem;
+  --radius-xl: 0.75rem;
+  --radius-2xl: 1rem;
+  --radius-3xl: 1.25rem;
+  --radius-row: 10px;
+  --height-row: 30px;
+  --padding-row-x: 8px;
+  --icon-btn: 24px;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-base: 14px;
+  --sidebar-default-width: 275px;
 }
 
 html.dark {
-  --bg: #1a1a1a;
+  /* Codex-aligned palette (electron-dark / gray scale) */
+  --bg: #181818;
   --bg-secondary: #151515;
-  --bg-card: #1e1e1e;
-  --bg-panel: #242424;
-  --bg-hover: #2e2e2e;
-  --bg-selected: #383838;
+  --bg-card: #212121;
+  --bg-panel: #212121;
+  --bg-hover: color-mix(in srgb, #ffffff 8%, transparent);
+  --bg-selected: color-mix(in srgb, #ffffff 12%, transparent);
+  --bg-fog: color-mix(in oklab, #ffffff 2.5%, transparent);
   --project-row-bg: #292929;
-  --border: #3a3a3a;
-  --text: #e8e8e8;
-  --text-muted: #9ca3af;
-  --text-dim: #6b7280;
-  --accent: #60a5fa;
+  --border: color-mix(in oklab, #ffffff 8%, transparent);
+  --text: #ededed;
+  --text-muted: color-mix(in srgb, #ededed 65%, transparent);
+  --text-dim: color-mix(in srgb, #ededed 45%, transparent);
+  --accent: #0285ff;
   --accent-blue: var(--accent);
-  --accent-hover: #93c5fd;
+  --accent-hover: #4da3ff;
   --user-bg: #1e293b;
-  --assistant-bg: #1a1a1a;
-  --tool-bg: #1f2937;
+  --assistant-bg: #181818;
+  --tool-bg: #212121;
   --bg-subtle: rgba(255,255,255,0.04);
 }
 
@@ -1183,6 +1213,56 @@ span.linenumber {
   display: none;
 }
 
+/* Codex-aligned sidebar chrome */
+.sidebar-item {
+  border-radius: var(--radius-row, 10px);
+}
+.sidebar-section-heading {
+  font-size: var(--text-xs, 11px);
+  font-weight: 500;
+  color: var(--text-dim);
+  letter-spacing: 0.01em;
+  user-select: none;
+}
+.sidebar-hover-icon-tint {
+  color: color-mix(in oklab, var(--text) 50%, transparent);
+  transition: color 0.12s ease;
+}
+.sidebar-item:hover .sidebar-hover-icon-tint,
+.sidebar-hover-icon-tint:hover,
+.sidebar-hover-icon-tint:focus-visible {
+  color: var(--text);
+}
+.sidebar-icon-button {
+  width: var(--icon-btn, 24px);
+  height: var(--icon-btn, 24px);
+  border-radius: var(--radius-md, 8px);
+}
+.sidebar-hover-icon-button-tint {
+  color: color-mix(in oklab, var(--text) 50%, transparent);
+  transition: color 0.12s ease, background 0.12s ease;
+}
+.sidebar-hover-icon-button-tint:hover,
+.sidebar-hover-icon-button-tint:focus-visible {
+  color: var(--text);
+}
+/* Top/bottom fade like Codex sidebar scroll mask */
+.sidebar-scroll-stage {
+  --sidebar-scroll-mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 12px,
+    #000 calc(100% - 28px),
+    transparent 100%
+  );
+  -webkit-mask-image: var(--sidebar-scroll-mask-image);
+  mask-image: var(--sidebar-scroll-mask-image);
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+
 /* Desktop sidebar: animate width */
 @media (min-width: 641px) {
   .sidebar-overlay-backdrop {
@@ -1194,8 +1274,8 @@ span.linenumber {
     transition: width 0.2s ease, min-width 0.2s ease;
   }
   .sidebar-container.sidebar-open {
-    width: var(--sidebar-width, 260px);
-    min-width: var(--sidebar-width, 260px);
+    width: var(--sidebar-width, var(--sidebar-default-width, 275px));
+    min-width: var(--sidebar-width, var(--sidebar-default-width, 275px));
   }
   .sidebar-container.sidebar-closed {
     width: 0;
@@ -1204,8 +1284,8 @@ span.linenumber {
   }
   /* keep inner content at fixed width so it doesn't reflow during animation */
   .sidebar-container > * {
-    width: var(--sidebar-width, 260px);
-    min-width: var(--sidebar-width, 260px);
+    width: var(--sidebar-width, var(--sidebar-default-width, 275px));
+    min-width: var(--sidebar-width, var(--sidebar-default-width, 275px));
   }
   .sidebar-container.sidebar-resizing,
   .sidebar-container.sidebar-resizing > * {

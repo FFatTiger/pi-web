@@ -1053,7 +1053,7 @@ export function SessionSidebar({
                 color: sessionRefreshDone ? "#4ade80" : "var(--text-muted)",
                 cursor: "pointer",
                 width: 32, height: 32,
-                borderRadius: 7,
+                borderRadius: "var(--radius-md, 8px)",
                 padding: 0,
                 flexShrink: 0,
                 transition: "background 0.3s, color 0.3s, border-color 0.3s",
@@ -1062,7 +1062,7 @@ export function SessionSidebar({
                 if (sessionRefreshDone) return;
                 e.currentTarget.style.background = "var(--bg-selected)";
                 e.currentTarget.style.color = "var(--accent)";
-                e.currentTarget.style.borderColor = "rgba(37,99,235,0.35)";
+                e.currentTarget.style.borderColor = "color-mix(in srgb, var(--accent) 35%, var(--border))";
               }}
               onMouseLeave={(e) => {
                 if (sessionRefreshDone) return;
@@ -1096,7 +1096,7 @@ export function SessionSidebar({
                 color: directoryOpen ? "var(--accent)" : "var(--text-muted)",
                 cursor: "pointer",
                 width: 32, height: 32,
-                borderRadius: 7,
+                borderRadius: "var(--radius-md, 8px)",
                 padding: 0,
                 flexShrink: 0,
                 transition: "background 0.12s, color 0.12s, border-color 0.12s",
@@ -1104,12 +1104,14 @@ export function SessionSidebar({
               onMouseEnter={(e) => {
                 e.currentTarget.style.background = "var(--bg-selected)";
                 e.currentTarget.style.color = "var(--accent)";
-                e.currentTarget.style.borderColor = "rgba(37,99,235,0.35)";
+                e.currentTarget.style.borderColor = "color-mix(in srgb, var(--accent) 35%, var(--border))";
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.background = directoryOpen ? "var(--bg-selected)" : "var(--bg-hover)";
                 e.currentTarget.style.color = directoryOpen ? "var(--accent)" : "var(--text-muted)";
-                e.currentTarget.style.borderColor = directoryOpen ? "rgba(37,99,235,0.35)" : "var(--border)";
+                e.currentTarget.style.borderColor = directoryOpen
+                  ? "color-mix(in srgb, var(--accent) 35%, var(--border))"
+                  : "var(--border)";
               }}
             >
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -1247,8 +1249,8 @@ export function SessionSidebar({
         </div>
       </div>
 
-      {/* Project / temporary sections */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "6px 0 10px", minHeight: 0 }}>
+      {/* Project / temporary sections — Codex scroll stage with edge fade */}
+      <div className="sidebar-scroll-stage" style={{ flex: 1, overflowY: "auto", padding: "6px 0 10px", minHeight: 0 }}>
         {loading && (
           <div style={{ padding: "16px 14px", color: "var(--text-muted)", fontSize: 12 }}>
             Loading...
@@ -1324,17 +1326,17 @@ export function SessionSidebar({
             left: dragOverlay.x + 12,
             top: dragOverlay.y + 10,
             width: dragOverlay.width,
-            height: 30,
+            height: "var(--height-row, 30px)",
             display: "flex",
             alignItems: "center",
             gap: 8,
-            padding: "0 10px",
-            borderRadius: 999,
+            padding: "0 var(--padding-row-x, 8px)",
+            borderRadius: "var(--radius-row, 10px)",
             border: "1px solid var(--border)",
-            background: "var(--bg)",
+            background: "var(--bg-panel)",
             boxShadow: "0 10px 28px rgba(0,0,0,0.16)",
             color: "var(--text)",
-            fontSize: 13,
+            fontSize: "var(--text-base, 14px)",
             pointerEvents: "none",
             zIndex: 2000,
             opacity: 0.96,
@@ -1361,9 +1363,10 @@ function SidebarSection({ label, children }: { label: string; children: ReactNod
   return (
     <div style={{ marginTop: 4, marginBottom: 8 }}>
       <div
+        className="sidebar-section-heading"
         style={{
           padding: "8px 14px 4px",
-          fontSize: 11,
+          fontSize: "var(--text-xs, 11px)",
           fontWeight: 500,
           color: "var(--text-dim)",
           letterSpacing: "0.01em",
@@ -1526,18 +1529,19 @@ function ProjectGroup({
         title={group.root}
         aria-expanded={expanded}
         aria-label={`Project ${label}`}
+        className="sidebar-item"
         style={{
-          height: 30,
+          height: "var(--height-row, 30px)",
           display: "flex",
           alignItems: "center",
           gap: 8,
-          padding: "0 8px",
+          padding: "0 var(--padding-row-x, 8px)",
           margin: "1px 6px",
           cursor: isDragging ? "grabbing" : "grab",
           background: selected || hovered || menuOpen
             ? "var(--bg-hover)"
             : "transparent",
-          borderRadius: 999,
+          borderRadius: "var(--radius-row, 10px)",
           border: "1px solid transparent",
           opacity: isDragging ? 0.2 : 1,
           transition: "background 0.12s, opacity 0.12s",
@@ -1554,9 +1558,9 @@ function ProjectGroup({
           strokeLinecap="round"
           strokeLinejoin="round"
           aria-hidden="true"
+          className="sidebar-hover-icon-tint"
           style={{
             flexShrink: 0,
-            color: "var(--text-muted)",
           }}
         >
           <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
@@ -1568,7 +1572,7 @@ function ProjectGroup({
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
-            fontSize: 13,
+            fontSize: "var(--text-base, 14px)",
             color: "var(--text)",
             fontWeight: 450,
             letterSpacing: "-0.01em",
@@ -1604,17 +1608,18 @@ function ProjectGroup({
                 aria-label={t("sidebar.projectActions")}
                 aria-haspopup="menu"
                 aria-expanded={menuOpen}
+                className="sidebar-icon-button sidebar-hover-icon-button-tint"
                 style={{
                   display: "inline-flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  width: 22,
-                  height: 22,
+                  width: "var(--icon-btn, 24px)",
+                  height: "var(--icon-btn, 24px)",
                   padding: 0,
                   background: menuOpen ? "var(--bg-selected)" : "transparent",
                   border: "none",
-                  borderRadius: 6,
-                  color: "var(--text-dim)",
+                  borderRadius: "var(--radius-md, 8px)",
+                  color: menuOpen ? "var(--text)" : "color-mix(in oklab, var(--text) 50%, transparent)",
                   cursor: "pointer",
                   transition: "color 0.12s, background 0.12s",
                 }}
@@ -1623,7 +1628,7 @@ function ProjectGroup({
                   e.currentTarget.style.background = "var(--bg-selected)";
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.color = "var(--text-dim)";
+                  e.currentTarget.style.color = menuOpen ? "var(--text)" : "color-mix(in oklab, var(--text) 50%, transparent)";
                   e.currentTarget.style.background = menuOpen ? "var(--bg-selected)" : "transparent";
                 }}
               >
@@ -1956,7 +1961,7 @@ function DropInsertLine() {
         right: 10,
         top: -1,
         height: 2,
-        borderRadius: 999,
+        borderRadius: "var(--radius-row, 10px)",
         background: "var(--accent)",
         boxShadow: "0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent)",
         pointerEvents: "none",
@@ -2098,18 +2103,19 @@ function IconButton({
       type="button"
       title={title}
       aria-label={title}
+      className="sidebar-icon-button sidebar-hover-icon-button-tint"
       onClick={onClick}
       style={{
         display: "inline-flex",
         alignItems: "center",
         justifyContent: "center",
-        width: 22,
-        height: 22,
+        width: "var(--icon-btn, 24px)",
+        height: "var(--icon-btn, 24px)",
         padding: 0,
         border: "none",
-        borderRadius: 6,
+        borderRadius: "var(--radius-md, 8px)",
         background: "transparent",
-        color: "var(--text-dim)",
+        color: "color-mix(in oklab, var(--text) 50%, transparent)",
         cursor: "pointer",
         flexShrink: 0,
         transition: "background 0.12s, color 0.12s",
@@ -2289,13 +2295,14 @@ function SessionItem({
     setConfirmDelete(false);
   }, []);
 
-  // Codex-like compact pill row.
-  const ITEM_HEIGHT = 30;
+  // Codex-like compact row (30px / radius 10px).
+  const ITEM_HEIGHT = "var(--height-row, 30px)";
   const showHoverActions = hovered && !isRunning && !confirmDelete && !renaming && !deleting;
   const showStatus = (isRunning || isUnread) && !showHoverActions;
 
   return (
     <div
+      className="sidebar-item"
       draggable={!confirmDelete && !renaming && !deleting}
       onDragStart={(event) => {
         if (confirmDelete || renaming || deleting) {
@@ -2325,7 +2332,7 @@ function SessionItem({
         alignItems: "center",
         margin: "1px 6px",
         paddingLeft: depth > 0 ? depth * 12 + 28 : 34,
-        paddingRight: 8,
+        paddingRight: "var(--padding-row-x, 8px)",
         cursor: confirmDelete || renaming ? "default" : isDragging ? "grabbing" : "grab",
         userSelect: "none",
         background: confirmDelete
@@ -2333,7 +2340,7 @@ function SessionItem({
           : isSelected || hovered
             ? "var(--bg-hover)"
             : "transparent",
-        borderRadius: 999,
+        borderRadius: "var(--radius-row, 10px)",
         border: "1px solid transparent",
         boxShadow: confirmDelete ? "inset 2px 0 0 #ef4444" : "none",
         transition: "background 0.12s, opacity 0.12s",
@@ -2420,7 +2427,7 @@ function SessionItem({
               style={{
                 flex: 1,
                 minWidth: 0,
-                fontSize: 13,
+                fontSize: "var(--text-base, 14px)",
                 fontWeight: isSelected ? 500 : 400,
                 lineHeight: 1.3,
                 color: isSelected ? "var(--text)" : "var(--text-muted)",

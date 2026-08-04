@@ -25,6 +25,7 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
 
   return (
     <div
+      className="codex-tab-strip"
       style={{
         display: "flex",
         alignItems: "flex-end",
@@ -59,7 +60,7 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
               borderRight: "1px solid var(--border)",
               background: isActive ? "var(--bg)" : "var(--bg-panel)",
               cursor: "pointer",
-              fontSize: 12,
+              fontSize: "var(--text-sm, 12px)",
               color: isActive ? "var(--text)" : "var(--text-muted)",
               whiteSpace: "nowrap",
               maxWidth: 180,
@@ -89,11 +90,11 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
               onMouseLeave={() => setHoveredClose(null)}
               style={{
                 display: "flex", alignItems: "center", justifyContent: "center",
-                width: 24, height: 24,
+                width: "var(--icon-btn, 24px)", height: "var(--icon-btn, 24px)",
                 background: hoveredClose === tab.id ? "var(--bg-hover)" : "transparent",
                 border: "none",
-                borderRadius: 4,
-                color: hoveredClose === tab.id ? "var(--text)" : "var(--text-dim)",
+                borderRadius: "var(--radius-md, 8px)",
+                color: hoveredClose === tab.id ? "var(--text)" : "color-mix(in oklab, var(--text) 50%, transparent)",
                 cursor: "pointer",
                 padding: 0,
                 flexShrink: 0,
