@@ -1704,9 +1704,22 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, [getDistanceFromBottom]);
 
-  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
-    ignoreProgrammaticScrollUntilRef.current = Date.now() + PROGRAMMATIC_SCROLL_IGNORE_MS;
-    completionScrollAllowedRef.current = true;
+  const scrollToBottom = useCallback((
+    behavior: ScrollBehavior = "smooth",
+    options?: { pinFollow?: boolean },
+  ) => {
+    // Only explicit user actions (button / new prompt) re-pin. Auto-follow during
+    // streaming must never force pin, or it fights the user reading history.
+    if (options?.pinFollow) {
+      completionScrollAllowedRef.current = true;
+    }
+    // Short ignore only so our own scrollIntoView doesn't look like user intent.
+    // Do not extend this on every stream tick — that blocked unpin forever.
+    if (options?.pinFollow) {
+      ignoreProgrammaticScrollUntilRef.current = Date.now() + PROGRAMMATIC_SCROLL_IGNORE_MS;
+    } else {
+      ignoreProgrammaticScrollUntilRef.current = Date.now() + 80;
+    }
     messagesEndRef.current?.scrollIntoView({ behavior });
     // Keep button state in sync even if the browser doesn't fire scroll for
     // instant jumps / already-near-bottom cases.
@@ -1715,8 +1728,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   const handleScrollToBottomClick = useCallback(() => {
     // Re-enable auto-follow when the user explicitly returns to the latest output.
-    completionScrollAllowedRef.current = true;
-    scrollToBottom("smooth");
+    scrollToBottom("smooth", { pinFollow: true });
   }, [scrollToBottom]);
 
   const markUserScrollIntent = useCallback((event: Event) => {
@@ -1725,13 +1737,36 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       if (event.target instanceof Element && event.target.closest("input, textarea, [contenteditable='true']")) return;
     }
     userScrollIntentUntilRef.current = Date.now() + USER_SCROLL_INTENT_MS;
-  }, []);
+    // Unpin immediately on real user input. Don't wait for a scroll event that
+    // may be suppressed by programmatic follow / ignore windows.
+    if (event instanceof WheelEvent) {
+      // Scrolling up always means the user wants to read history.
+      if (event.deltaY < 0) {
+        completionScrollAllowedRef.current = false;
+        return;
+      }
+    } else if (event instanceof KeyboardEvent) {
+      if (event.key === "ArrowUp" || event.key === "PageUp" || event.key === "Home") {
+        completionScrollAllowedRef.current = false;
+        return;
+      }
+    } else {
+      // touchstart / pointerdown on the transcript: treat as intent to navigate.
+      // Actual pin/unpin still refined by scroll position handler when possible.
+      const container = scrollContainerRef.current;
+      if (container && getDistanceFromBottom(container) > NEAR_BOTTOM_PX) {
+        completionScrollAllowedRef.current = false;
+      }
+    }
+  }, [getDistanceFromBottom]);
 
   const handleScrollPositionChange = useCallback(() => {
     updateScrollToBottomVisibility();
-    if (Date.now() < ignoreProgrammaticScrollUntilRef.current) return;
-    if (Date.now() > userScrollIntentUntilRef.current) return;
-    // User intentionally scrolled away from the bottom: unpin auto-follow.
+    const now = Date.now();
+    const hasUserIntent = now <= userScrollIntentUntilRef.current;
+    // User intent always wins over short programmatic ignore windows.
+    if (!hasUserIntent && now < ignoreProgrammaticScrollUntilRef.current) return;
+    if (!hasUserIntent) return;
     const container = scrollContainerRef.current;
     if (!container) return;
     if (getDistanceFromBottom(container) > NEAR_BOTTOM_PX) {
@@ -1831,9 +1866,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     if (messages.length > 0) {
       if (!initialScrollDoneRef.current) {
         initialScrollDoneRef.current = true;
-        scrollToBottom("instant");
+        scrollToBottom("instant", { pinFollow: true });
       } else if (completionScrollAllowedRef.current) {
         // Follow latest while pinned, including streaming growth.
+        // Do not re-pin here — user may have scrolled away mid-stream.
         scrollToBottom(agentRunningRef.current ? "instant" : "smooth");
       } else {
         updateScrollToBottomVisibility();
