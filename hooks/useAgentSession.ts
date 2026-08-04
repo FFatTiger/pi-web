@@ -1707,7 +1707,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
     ignoreProgrammaticScrollUntilRef.current = Date.now() + PROGRAMMATIC_SCROLL_IGNORE_MS;
     completionScrollAllowedRef.current = true;
-    messagesEndRef.current?.scrollIntoView({ behavior });
+    const container = scrollContainerRef.current;
+    if (container) {
+      container.scrollTo({ top: container.scrollHeight, behavior });
+    } else {
+      messagesEndRef.current?.scrollIntoView({ behavior });
+    }
     // Keep button state in sync even if the browser doesn't fire scroll for
     // instant jumps / already-near-bottom cases.
     window.requestAnimationFrame(() => updateScrollToBottomVisibility());
