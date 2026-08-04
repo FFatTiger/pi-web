@@ -1265,6 +1265,9 @@ span.linenumber {
 
 /* Codex top toolbar: 46px row, icon buttons, surface tint */
 .app-top-toolbar {
+  box-sizing: border-box;
+  height: calc(46px + env(safe-area-inset-top));
+  min-height: calc(46px + env(safe-area-inset-top));
   background: var(--bg);
   border-bottom: 1px solid var(--border);
 }
@@ -1557,13 +1560,15 @@ span.linenumber {
   opacity: 0.7;
 }
 
-/* Codex multi-tab chip bar */
+/* Codex multi-tab chip bar — match center app-top-toolbar height (46px) */
 .right-panel-tabbar {
   display: flex;
   align-items: center;
   flex-shrink: 0;
-  min-height: 40px;
-  padding: 6px 84px 6px 10px;
+  box-sizing: border-box;
+  height: calc(46px + env(safe-area-inset-top));
+  min-height: calc(46px + env(safe-area-inset-top));
+  padding: env(safe-area-inset-top) 84px 0 10px;
   border-bottom: 1px solid var(--border);
   background: var(--bg);
   gap: 6px;
