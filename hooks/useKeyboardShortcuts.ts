@@ -27,6 +27,8 @@ interface UseGlobalKeyboardShortcutsOptions {
   activeCwd?: string | null;
   /** Codex: Ctrl/Cmd+B toggles the left sidebar. */
   onToggleSidebar?: () => void;
+  /** Codex: Ctrl/Cmd+Alt+B toggles the right side panel. */
+  onToggleRightPanel?: () => void;
   /** Codex-ish: Ctrl/Cmd+Shift+E toggles file explorer panel. */
   onToggleExplorer?: () => void;
   /** Codex: Ctrl/Cmd+Alt+S opens/toggles side chat. */
@@ -49,7 +51,14 @@ interface UseGlobalKeyboardShortcutsOptions {
 export function useGlobalKeyboardShortcuts(
   options: UseGlobalKeyboardShortcutsOptions,
 ): void {
-  const { onNewSession, activeCwd, onToggleSidebar, onToggleExplorer, onToggleSideChat } = options;
+  const {
+    onNewSession,
+    activeCwd,
+    onToggleSidebar,
+    onToggleRightPanel,
+    onToggleExplorer,
+    onToggleSideChat,
+  } = options;
 
   useEffect(() => {
     const handler = (e: KeyboardEvent): void => {
@@ -69,11 +78,19 @@ export function useGlobalKeyboardShortcuts(
       const tag = (e.target as HTMLElement)?.tagName;
       const inEditable = tag === "TEXTAREA" || tag === "INPUT" || (e.target as HTMLElement)?.isContentEditable;
 
-      // ---- Ctrl/Cmd+B: toggle sidebar (Codex) ----
+      // ---- Ctrl/Cmd+B: toggle LEFT sidebar (Codex) ----
       if ((e.key === "b" || e.key === "B") && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
         if (!onToggleSidebar || inEditable) return;
         e.preventDefault();
         onToggleSidebar();
+        return;
+      }
+
+      // ---- Ctrl/Cmd+Alt+B: toggle RIGHT side panel (Codex toggleSidePanel) ----
+      if ((e.key === "b" || e.key === "B") && (e.ctrlKey || e.metaKey) && e.altKey && !e.shiftKey) {
+        if (!onToggleRightPanel || inEditable) return;
+        e.preventDefault();
+        onToggleRightPanel();
         return;
       }
 
@@ -103,5 +120,5 @@ export function useGlobalKeyboardShortcuts(
 
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [activeCwd, onNewSession, onToggleExplorer, onToggleSideChat, onToggleSidebar]);
+  }, [activeCwd, onNewSession, onToggleExplorer, onToggleRightPanel, onToggleSideChat, onToggleSidebar]);
 }

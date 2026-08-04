@@ -733,6 +733,23 @@ export function AppShell() {
     setRightPanelMaximized((value) => !value);
   }, [rightPanelOpen]);
 
+  /** Codex top-right control: show/hide the right side panel (not the left sidebar). */
+  const toggleRightPanel = useCallback(() => {
+    if (rightPanelOpen) {
+      closeRightPanel();
+      return;
+    }
+    if (isMobile) setSidebarOpen(false);
+    // Prefer restoring last files surface; fall back to explorer when available.
+    const nextSurface: FilesSurface | "sideChat" =
+      lastFilesSurfaceRef.current === "file" && fileTabsRef.current.length === 0
+        ? (activeCwd ? "explorer" : "file")
+        : lastFilesSurfaceRef.current;
+    setRightPanelSurface(nextSurface);
+    if (isFilesSurface(nextSurface)) lastFilesSurfaceRef.current = nextSurface;
+    setRightPanelOpen(true);
+  }, [activeCwd, closeRightPanel, isMobile, rightPanelOpen]);
+
   const handleViewFullHistory = useCallback(() => {
     if (!selectedSession) return;
     window.open(
@@ -747,6 +764,7 @@ export function AppShell() {
     onNewSession: (cwd: string) => handleNewSession(`kb-${Date.now()}`, cwd, activeProjectRoot ?? cwd),
     activeCwd,
     onToggleSidebar: handleSidebarToggle,
+    onToggleRightPanel: toggleRightPanel,
     onToggleExplorer: toggleExplorerPanel,
     onToggleSideChat: toggleSideChatPanel,
   });
@@ -1667,7 +1685,7 @@ export function AppShell() {
         />
       </div>
     </div>
-    {/* Codex-style top-right: single sidebar show/hide control */}
+    {/* Codex-style top-right: show/hide the RIGHT side panel */}
     <div
       style={{
         position: "fixed",
@@ -1704,10 +1722,10 @@ export function AppShell() {
       )}
       <button
         type="button"
-        onClick={handleSidebarToggle}
-        title={`${sidebarOpen ? translate("layout.hideSidebar") : translate("layout.showSidebar")} (Ctrl+B)`}
-        aria-label={sidebarOpen ? translate("layout.hideSidebar") : translate("layout.showSidebar")}
-        aria-pressed={sidebarOpen}
+        onClick={toggleRightPanel}
+        title={`${rightPanelOpen ? translate("layout.hideRightPanel") : translate("layout.showRightPanel")} (Ctrl+Alt+B)`}
+        aria-label={rightPanelOpen ? translate("layout.hideRightPanel") : translate("layout.showRightPanel")}
+        aria-pressed={rightPanelOpen}
         style={{
           pointerEvents: "auto",
           display: "flex",
@@ -1716,10 +1734,10 @@ export function AppShell() {
           width: 32,
           height: 32,
           padding: 0,
-          background: "var(--bg)",
+          background: rightPanelOpen ? "var(--bg-selected)" : "var(--bg)",
           border: "1px solid var(--border)",
           borderRadius: "var(--radius-md, 8px)",
-          color: "var(--text-muted)",
+          color: rightPanelOpen ? "var(--text)" : "var(--text-muted)",
           cursor: "pointer",
           boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
           transition: "color 0.12s, background 0.12s, border-color 0.12s",
@@ -1729,14 +1747,14 @@ export function AppShell() {
           e.currentTarget.style.background = "var(--bg-hover)";
         }}
         onMouseLeave={(e) => {
-          e.currentTarget.style.color = "var(--text-muted)";
-          e.currentTarget.style.background = "var(--bg)";
+          e.currentTarget.style.color = rightPanelOpen ? "var(--text)" : "var(--text-muted)";
+          e.currentTarget.style.background = rightPanelOpen ? "var(--bg-selected)" : "var(--bg)";
         }}
       >
-        {/* Codex-like sidebar glyph: rounded square with left rail */}
+        {/* Codex-like side panel glyph: rounded square with RIGHT rail */}
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <rect x="3.5" y="4" width="17" height="16" rx="3" />
-          <path d="M9 4v16" />
+          <path d="M15 4v16" />
         </svg>
       </button>
     </div>
