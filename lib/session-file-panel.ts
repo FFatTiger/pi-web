@@ -1,7 +1,33 @@
 import type { Tab } from "@/components/TabBar";
 
-/** Files surfaces shown in the right panel body (not side chat). */
+/** Files surfaces shown in the right panel body (not side chat / home). */
 export type FilesSurface = "explorer" | "file";
+
+/** Full right-panel body surface including Codex home / review placeholders. */
+export type RightPanelSurface = FilesSurface | "sideChat" | "home" | "review";
+
+export function isRightPanelSurface(value: string | null | undefined): value is RightPanelSurface {
+  return value === "explorer"
+    || value === "file"
+    || value === "sideChat"
+    || value === "home"
+    || value === "review";
+}
+
+/** Prefer a concrete content surface; fall back to Codex blank home. */
+export function resolveOpenRightPanelSurface(input: {
+  lastFilesSurface: FilesSurface;
+  tabCount: number;
+  hasCwd: boolean;
+  preferSideChat?: boolean;
+}): RightPanelSurface {
+  if (input.preferSideChat) return "sideChat";
+  if (input.lastFilesSurface === "explorer" && input.hasCwd) return "explorer";
+  if (input.lastFilesSurface === "file" && input.tabCount > 0) return "file";
+  if (input.hasCwd && input.lastFilesSurface === "explorer") return "explorer";
+  // Empty panel: Codex-style home picker (Review / Files / Side chat).
+  return "home";
+}
 
 /**
  * Codex-style right-panel content scoped to one conversation.
@@ -59,14 +85,14 @@ export function resolveRightPanelViewOnSessionSwitch(input: {
   restored: SessionFilePanelState;
 }): {
   open: boolean;
-  surface: FilesSurface | "sideChat";
+  surface: RightPanelSurface;
 } {
   if (input.sideChatOpen) {
     return { open: true, surface: "sideChat" };
   }
   if (input.restored.filesSurface === "file" && input.restored.tabs.length === 0) {
-    // No files and no side chat — keep panel closed unless explorer was explicit.
-    return { open: false, surface: "file" };
+    // No files and no side chat — keep panel closed; open path shows home.
+    return { open: false, surface: "home" };
   }
   if (input.restored.filesSurface === "explorer") {
     return { open: true, surface: "explorer" };
@@ -74,7 +100,7 @@ export function resolveRightPanelViewOnSessionSwitch(input: {
   if (input.restored.tabs.length > 0) {
     return { open: true, surface: "file" };
   }
-  return { open: false, surface: "file" };
+  return { open: false, surface: "home" };
 }
 
 /** New / blank composer: never carry another session's open files. */
@@ -83,23 +109,27 @@ export function blankPanelAfterLeaveSession(): {
   activeTabId: string | null;
   filesSurface: FilesSurface;
   open: boolean;
-  surface: FilesSurface | "sideChat";
+  surface: RightPanelSurface;
 } {
   return {
     tabs: [],
     activeTabId: null,
     filesSurface: "file",
     open: false,
-    surface: "file",
+    surface: "home",
   };
 }
 
-/** Derive legacy WorkspaceFilePanel mode for rendering. */
+/** Derive WorkspaceFilePanel mode for rendering. */
 export function deriveRightPanelMode(input: {
   open: boolean;
-  surface: FilesSurface | "sideChat";
-}): "closed" | "explorer" | "file" | "chat" {
+  surface: RightPanelSurface;
+  tabCount?: number;
+}): "closed" | "home" | "explorer" | "file" | "chat" | "review" {
   if (!input.open) return "closed";
   if (input.surface === "sideChat") return "chat";
+  if (input.surface === "home") return "home";
+  if (input.surface === "review") return "review";
+  if (input.surface === "file" && (input.tabCount ?? 0) === 0) return "home";
   return input.surface;
 }

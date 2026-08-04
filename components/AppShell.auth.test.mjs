@@ -60,11 +60,10 @@ test("fixed right corner uses Codex expand/close cluster for the RIGHT panel", (
 
 test("Side Chat open state is remembered per main session", () => {
   assert.match(source, /sideChatOpenBySessionRef/);
-  assert.match(source, /rememberSideChatOpen\(selectedSession\.id, true\)/);
-  assert.match(source, /rememberSideChatOpen\(selectedSession\.id, false\)/);
+  assert.match(source, /rememberSideChatOpen\(sessionId, tabs\.some\(\(tab\) => tab\.kind === "sideChat"\)\)/);
   assert.match(source, /applySessionFilePanel\(session\.id\)/);
-  assert.match(source, /resolveRightPanelViewOnSessionSwitch/);
-  assert.match(source, /onClose=\{closeRightPanel\}/);
+  assert.match(source, /rightPanelTabsBySessionRef/);
+  assert.match(source, /openRightPanelKind\("sideChat"\)/);
   assert.match(source, /sideChatOpenBySessionRef\.current\.delete\(sessionId\)/);
   assert.match(source, /handleSessionDeleted[\s\S]*?setRightPanelOpen\(false\)/);
 });
@@ -84,15 +83,18 @@ test("open file tabs are scoped per session like Codex", () => {
   assert.match(source, /filePanelBySessionRef\.current\.delete\(sessionId\)/);
 });
 
-test("right panel chrome is orthogonal open/surface/maximize", () => {
+test("right panel chrome is multi-tab open/maximize (Codex RightPanelTabs)", () => {
   assert.match(source, /const \[rightPanelOpen, setRightPanelOpen\]/);
   assert.match(source, /const \[rightPanelMaximized, setRightPanelMaximized\]/);
-  assert.match(source, /const \[rightPanelSurface, setRightPanelSurface\]/);
-  assert.match(source, /deriveRightPanelMode/);
+  assert.match(source, /const \[rightPanelTabs, setRightPanelTabs\]/);
+  assert.match(source, /const \[activeRightPanelTabId, setActiveRightPanelTabId\]/);
+  assert.match(source, /openOrFocusRightPanelTab/);
+  assert.match(source, /closeRightPanelTab/);
   assert.match(source, /toggleRightPanelMaximized/);
   assert.match(source, /right-panel-maximized/);
-  // Side chat toggles surface without a single-mode enum assignment to "chat" only.
-  assert.match(source, /setRightPanelSurface\("sideChat"\)/);
-  assert.match(source, /setRightPanelSurface\("explorer"\)/);
-  assert.match(source, /setRightPanelSurface\("file"\)/);
+  // Codex multi-tab: side chat / files / review coexist as panel tabs.
+  assert.match(source, /openRightPanelKind\("sideChat"\)/);
+  assert.match(source, /openRightPanelKind\("files"/);
+  assert.match(source, /actionToTabKind/);
+  assert.match(source, /rightPanelTabsBySessionRef/);
 });

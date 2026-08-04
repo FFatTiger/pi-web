@@ -1451,6 +1451,243 @@ span.linenumber {
   }
 }
 
+/* Codex right-panel blank home: pick Review / Files / Side chat */
+/* Codex RightPanelTabsEmptyState + open-tab menu (thread-app-shell-chrome) */
+.right-panel-home {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px 12px;
+  background: var(--bg);
+  user-select: none;
+}
+.right-panel-home-list,
+.right-panel-menu-list {
+  width: min(100%, 36rem);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.right-panel-menu-list {
+  width: 100%;
+  min-width: 220px;
+}
+.right-panel-home-item,
+.right-panel-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: var(--radius-md, 8px);
+  background: color-mix(in srgb, var(--bg-hover) 55%, transparent);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s ease, color 0.12s ease, opacity 0.12s ease;
+}
+.right-panel-menu-item {
+  background: transparent;
+  min-height: 34px;
+  padding: 6px 8px;
+}
+.right-panel-home-item:hover:not(:disabled),
+.right-panel-menu-item:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+.right-panel-home-item:focus-visible,
+.right-panel-menu-item:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  outline-offset: 1px;
+}
+.right-panel-home-item:disabled,
+.right-panel-menu-item:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+  color: var(--text-muted);
+}
+.right-panel-home-item-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.right-panel-home-item-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.right-panel-home-item:hover:not(:disabled) .right-panel-home-item-icon,
+.right-panel-menu-item:hover:not(:disabled) .right-panel-home-item-icon {
+  color: var(--text);
+}
+.right-panel-home-item-label {
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.right-panel-home-item-shortcut {
+  flex-shrink: 0;
+  margin-inline-start: auto;
+  padding-inline-start: 8px;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.right-panel-home-item-shortcut.is-empty {
+  min-width: 0;
+  padding: 0;
+}
+.right-panel-home-item:disabled .right-panel-home-item-shortcut,
+.right-panel-menu-item:disabled .right-panel-home-item-shortcut {
+  opacity: 0.7;
+}
+
+/* Codex multi-tab chip bar */
+.right-panel-tabbar {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  min-height: 40px;
+  padding: 6px 84px 6px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  gap: 6px;
+}
+.right-panel-tabbar-scroll {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.right-panel-tabbar-scroll::-webkit-scrollbar { display: none; }
+.right-panel-tab-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 180px;
+  height: 28px;
+  padding: 0 4px 0 10px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--bg-hover);
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.right-panel-tab-chip.is-active {
+  background: color-mix(in srgb, var(--bg-selected) 88%, var(--bg));
+  border-color: var(--border);
+  color: var(--text);
+}
+.right-panel-tab-chip-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 140px;
+  height: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.right-panel-tab-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 500;
+}
+.right-panel-tab-chip-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-left: 2px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.right-panel-tab-chip-close:hover {
+  background: var(--bg-selected);
+  color: var(--text);
+}
+.right-panel-tabbar-plus-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+.right-panel-tabbar-plus {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 999px;
+  background: var(--bg-hover);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.right-panel-tabbar-plus:hover,
+.right-panel-tabbar-plus[aria-expanded="true"] {
+  background: var(--bg-selected);
+  color: var(--text);
+}
+.right-panel-plus-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+  min-width: 240px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg);
+  box-shadow: 0 10px 28px rgba(0,0,0,0.12);
+}
+.right-panel-review-placeholder {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 32px 24px;
+  text-align: center;
+  color: var(--text-muted);
+}
+.right-panel-review-placeholder strong {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+.right-panel-review-placeholder p {
+  margin: 0;
+  max-width: 280px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 /* Wide desktop file panel: participate in the split layout. */
 @media (min-width: 960px) {
   .right-panel-container {
