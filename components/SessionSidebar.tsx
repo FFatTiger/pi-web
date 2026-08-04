@@ -357,6 +357,9 @@ export function SessionSidebar({
   const directoryPopoverRef = useRef<HTMLDivElement>(null);
   const initializedExpansionRef = useRef(false);
   const [sessionRefreshDone, setSessionRefreshDone] = useState(false);
+  // True after the first successful /api/sessions response. Until then we must
+  // not prune projectOrder — partial roots (manual-only) would wipe drag order.
+  const [sessionsHydrated, setSessionsHydrated] = useState(false);
   const [runningSessionIds, setRunningSessionIds] = useState<Set<string>>(() => new Set());
   const [unreadSessionIds, setUnreadSessionIds] = useState<Set<string>>(() => loadUnreadSessionIds());
   const previousRunningSessionIdsRef = useRef<Set<string>>(new Set());
@@ -373,6 +376,7 @@ export function SessionSidebar({
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json() as { sessions: SessionInfo[]; runningSessionIds?: string[] };
       setAllSessions(data.sessions);
+      setSessionsHydrated(true);
       // Treat the fetched running set as an initial fallback only. Once the
       // lightweight poll is live, a slow session-list fetch cannot overwrite it.
       if (!runningPollAuthoritativeRef.current) {
@@ -538,7 +542,10 @@ export function SessionSidebar({
   );
 
   // Keep projectOrder as a stable superset of currently visible roots, like Codex PROJECT_ORDER.
+  // Only prune after sessions have hydrated — before that, projectGroups may only contain
+  // manualProjects (e.g. avatar-client) and would wipe the rest of the saved drag order.
   useEffect(() => {
+    if (!sessionsHydrated || loading) return;
     const roots = projectGroups.map((group) => group.root);
     setProjectOrder((previous) => {
       const next = mergeProjectOrder(previous, roots);
@@ -547,7 +554,7 @@ export function SessionSidebar({
       }
       return next;
     });
-  }, [projectGroups]);
+  }, [loading, projectGroups, sessionsHydrated]);
   const { projects: regularProjects, temporary: temporaryProjects } = useMemo(
     () => partitionSidebarProjects(projectGroups),
     [projectGroups],
@@ -1258,13 +1265,15 @@ export function SessionSidebar({
           </div>
         )}
 
-        {regularProjects.length > 0 && (
+        {/* Wait until sessions hydrate before painting projects — otherwise
+            manual-only roots (e.g. avatar-client) flash alone at the top. */}
+        {!loading && !error && regularProjects.length > 0 && (
           <SidebarSection label={t("sidebar.projectsSection")}>
             {regularProjects.map((group) => renderProjectGroup(group))}
           </SidebarSection>
         )}
 
-        {(temporaryProjects.length > 0 || temporarySessions.length > 0) && (
+        {!loading && !error && (temporaryProjects.length > 0 || temporarySessions.length > 0) && (
           <SidebarSection label={t("sidebar.temporarySection")}>
             {temporarySessions.length === 0 ? (
               <div style={{ padding: "6px 14px 10px 34px", fontSize: 12, color: "var(--text-dim)" }}>

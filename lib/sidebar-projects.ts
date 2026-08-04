@@ -262,7 +262,11 @@ export function groupSidebarProjects(
  * Codex-style stable project order:
  * - known roots keep their previous relative order
  * - brand-new roots are appended at the end
- * - removed roots are dropped
+ * - roots missing from `roots` are dropped
+ *
+ * Callers must only prune with a complete visible-root set (after sessions
+ * hydrate). Passing a partial set (e.g. manual-only before /api/sessions)
+ * permanently drops the rest of the saved drag order.
  */
 export function mergeProjectOrder(order: string[], roots: string[]): string[] {
   const normalizedRoots = roots.map(normalizeProjectRoot);
