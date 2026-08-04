@@ -8,7 +8,6 @@ import { AuthControls } from "./AuthControls";
 import {
   buildSidebarSessionTree,
   flattenTemporarySessions,
-  getProjectActivity,
   getProjectDisplayName,
   getSidebarSessionVisibility,
   groupSidebarProjects,
@@ -20,7 +19,6 @@ import {
   serializeManualProjects,
   upsertManualProject,
   type ManualProject,
-  type ProjectActivity,
   type SidebarProjectGroup,
   type SidebarSessionTreeNode,
 } from "@/lib/sidebar-projects";
@@ -614,7 +612,6 @@ export function SessionSidebar({
   const renderProjectGroup = (group: SidebarProjectGroup) => {
     const expanded = expandedProjects.has(group.root);
     const selected = activeProjectRoot === group.root;
-    const activity = getProjectActivity(group.sessions, runningSessionIds, unreadSessionIds);
     const fullTree = buildSidebarSessionTree(group.sessions);
     const visibility = getSidebarSessionVisibility(group.sessions, {
       runningSessionIds,
@@ -628,7 +625,6 @@ export function SessionSidebar({
         group={group}
         expanded={expanded}
         selected={selected}
-        activity={activity}
         selectedSessionId={selectedSessionId}
         runningSessionIds={runningSessionIds}
         unreadSessionIds={unreadSessionIds}
@@ -964,7 +960,6 @@ function ProjectGroup({
   group,
   expanded,
   selected,
-  activity,
   selectedSessionId,
   runningSessionIds,
   unreadSessionIds,
@@ -982,7 +977,6 @@ function ProjectGroup({
   group: SidebarProjectGroup;
   expanded: boolean;
   selected: boolean;
-  activity: ProjectActivity;
   selectedSessionId: string | null;
   runningSessionIds: Set<string>;
   unreadSessionIds: Set<string>;
@@ -1212,23 +1206,6 @@ function ProjectGroup({
             </div>
           )}
         </div>
-        <span
-          style={{
-            width: 14,
-            height: 14,
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            flexShrink: 0,
-          }}
-          aria-hidden={activity === "idle"}
-        >
-          {activity === "running" ? (
-            <RunningSessionIndicator />
-          ) : activity === "unread" ? (
-            <UnreadSessionIndicator />
-          ) : null}
-        </span>
       </div>
       {expanded && (
         group.sessions.length === 0 ? (
