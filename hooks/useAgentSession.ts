@@ -157,6 +157,8 @@ export type ThinkingLevelOption = "auto" | "off" | "minimal" | "low" | "medium" 
 
 const PROGRAMMATIC_SCROLL_IGNORE_MS = 700;
 const USER_SCROLL_INTENT_MS = 1200;
+/** Codex-style threshold: farther than this from bottom means "scrolled away". */
+const NEAR_BOTTOM_PX = 24;
 const PROMPT_SETTLE_INITIAL_DELAY_MS = 800;
 const PROMPT_SETTLE_POLL_MS = 600;
 const PROMPT_SETTLE_MAX_MS = 20_000;
@@ -402,6 +404,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const ignoreProgrammaticScrollUntilRef = useRef(0);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const showScrollToBottomRef = useRef(false);
   const ensuringNewSessionRef = useRef<Promise<string | null> | null>(null);
   const newSessionPromotedRef = useRef(false);
   const newSessionModelOverrideRef = useRef<SelectedModel | null>(null);
@@ -1681,10 +1685,42 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, [setToolPresetState]);
 
+  const getDistanceFromBottom = useCallback((container: HTMLElement) => {
+    return Math.max(0, container.scrollHeight - container.clientHeight - container.scrollTop);
+  }, []);
+
+  const updateScrollToBottomVisibility = useCallback(() => {
+    const container = scrollContainerRef.current;
+    if (!container) {
+      if (showScrollToBottomRef.current) {
+        showScrollToBottomRef.current = false;
+        setShowScrollToBottom(false);
+      }
+      return;
+    }
+    const distance = getDistanceFromBottom(container);
+    const hasOverflow = container.scrollHeight > container.clientHeight + 1;
+    const next = hasOverflow && distance > NEAR_BOTTOM_PX;
+    if (next !== showScrollToBottomRef.current) {
+      showScrollToBottomRef.current = next;
+      setShowScrollToBottom(next);
+    }
+  }, [getDistanceFromBottom]);
+
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
     ignoreProgrammaticScrollUntilRef.current = Date.now() + PROGRAMMATIC_SCROLL_IGNORE_MS;
+    completionScrollAllowedRef.current = true;
     messagesEndRef.current?.scrollIntoView({ behavior });
-  }, []);
+    // Keep button state in sync even if the browser doesn't fire scroll for
+    // instant jumps / already-near-bottom cases.
+    window.requestAnimationFrame(() => updateScrollToBottomVisibility());
+  }, [updateScrollToBottomVisibility]);
+
+  const handleScrollToBottomClick = useCallback(() => {
+    // Codex: clicking re-subscribes to latest output (re-enable follow).
+    completionScrollAllowedRef.current = true;
+    scrollToBottom("smooth");
+  }, [scrollToBottom]);
 
   const scrollUserMsgToTop = useCallback(() => {
     const container = scrollContainerRef.current;
@@ -1693,7 +1729,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     const elAbsTop = el.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop;
     ignoreProgrammaticScrollUntilRef.current = Date.now() + PROGRAMMATIC_SCROLL_IGNORE_MS;
     container.scrollTo({ top: elAbsTop - 16, behavior: "smooth" });
-  }, []);
+    window.requestAnimationFrame(() => updateScrollToBottomVisibility());
+  }, [updateScrollToBottomVisibility]);
 
   const markUserScrollIntent = useCallback((event: Event) => {
     if (event instanceof KeyboardEvent) {
@@ -1704,11 +1741,18 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   }, []);
 
   const handleScrollPositionChange = useCallback(() => {
-    if (!agentRunningRef.current) return;
+    updateScrollToBottomVisibility();
     if (Date.now() < ignoreProgrammaticScrollUntilRef.current) return;
     if (Date.now() > userScrollIntentUntilRef.current) return;
-    completionScrollAllowedRef.current = false;
-  }, []);
+    // User intentionally scrolled: unpin auto-follow (Codex static mode).
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    if (getDistanceFromBottom(container) > NEAR_BOTTOM_PX) {
+      completionScrollAllowedRef.current = false;
+    } else {
+      completionScrollAllowedRef.current = true;
+    }
+  }, [getDistanceFromBottom, updateScrollToBottomVisibility]);
 
   // Load session on mount
   useEffect(() => {
@@ -1778,12 +1822,23 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     container.addEventListener("wheel", markUserScrollIntent, { passive: true });
     container.addEventListener("touchstart", markUserScrollIntent, { passive: true });
     container.addEventListener("scroll", handleScrollPositionChange, { passive: true });
+    const onResize = () => updateScrollToBottomVisibility();
+    window.addEventListener("resize", onResize);
+    let resizeObserver: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined") {
+      resizeObserver = new ResizeObserver(() => updateScrollToBottomVisibility());
+      resizeObserver.observe(container);
+      if (container.firstElementChild) resizeObserver.observe(container.firstElementChild);
+    }
+    updateScrollToBottomVisibility();
     return () => {
       container.removeEventListener("wheel", markUserScrollIntent);
       container.removeEventListener("touchstart", markUserScrollIntent);
       container.removeEventListener("scroll", handleScrollPositionChange);
+      window.removeEventListener("resize", onResize);
+      resizeObserver?.disconnect();
     };
-  }, [messages.length, loading, handleScrollPositionChange, markUserScrollIntent]);
+  }, [messages.length, loading, handleScrollPositionChange, markUserScrollIntent, updateScrollToBottomVisibility]);
 
   useEffect(() => {
     if (messages.length > 0) {
@@ -1794,11 +1849,29 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       } else if (!initialScrollDoneRef.current) {
         initialScrollDoneRef.current = true;
         scrollToBottom("instant");
-      } else if (!agentRunningRef.current && completionScrollAllowedRef.current) {
-        scrollToBottom("smooth");
+      } else if (completionScrollAllowedRef.current) {
+        // Follow latest while pinned, including streaming growth.
+        scrollToBottom(agentRunningRef.current ? "instant" : "smooth");
+      } else {
+        updateScrollToBottomVisibility();
       }
+    } else {
+      updateScrollToBottomVisibility();
     }
-  }, [messages.length, agentRunning, scrollToBottom, scrollUserMsgToTop]);
+  }, [messages.length, agentRunning, scrollToBottom, scrollUserMsgToTop, updateScrollToBottomVisibility]);
+
+  // Keep visibility/follow in sync while streaming content grows without a new message row.
+  useEffect(() => {
+    if (!streamState.isStreaming) {
+      updateScrollToBottomVisibility();
+      return;
+    }
+    if (completionScrollAllowedRef.current) {
+      scrollToBottom("instant");
+    } else {
+      updateScrollToBottomVisibility();
+    }
+  }, [streamState.isStreaming, streamState.streamingMessage, scrollToBottom, updateScrollToBottomVisibility]);
 
   // Load model list
   useEffect(() => {
@@ -1850,7 +1923,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     // Refs
     sessionIdRef, eventSourceRef, messagesEndRef, scrollContainerRef,
     lastUserMsgRef, pendingScrollToUserRef, initialScrollDoneRef,
+    showScrollToBottom,
     // Actions
+    handleScrollToBottomClick,
     handleSend, handleAbort, handleFork, handleNavigate, handleModelChange,
     handleCompact, handleSteer, handleFollowUp, handlePromptWithStreamingBehavior, handleAbortCompaction,
     handleRecallQueue,

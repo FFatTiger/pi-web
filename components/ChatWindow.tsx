@@ -209,6 +209,8 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     isNew,
     sessionIdRef, messagesEndRef, scrollContainerRef,
     lastUserMsgRef,
+    showScrollToBottom,
+    handleScrollToBottomClick,
     handleSend, handleAbort, handleFork, handleNavigate, handleModelChange,
     handleCompact, handleSteer, handleFollowUp, handlePromptWithStreamingBehavior, handleAbortCompaction,
     handleRecallQueue,
@@ -754,6 +756,50 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
       </div>
 
       <div className="relative">
+        <div className="relative h-0">
+          <button
+            type="button"
+            onClick={handleScrollToBottomClick}
+            aria-label={t("chat.scrollToBottom")}
+            title={t("chat.scrollToBottom")}
+            tabIndex={showScrollToBottom ? 0 : -1}
+            aria-hidden={!showScrollToBottom}
+            style={{
+              position: "absolute",
+              left: "50%",
+              bottom: 12,
+              transform: "translateX(-50%)",
+              zIndex: 30,
+              width: 32,
+              height: 32,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              borderRadius: 999,
+              border: "1px solid var(--border)",
+              background: "var(--bg)",
+              color: "var(--text-muted)",
+              boxShadow: "0 6px 18px rgba(0,0,0,0.10)",
+              cursor: showScrollToBottom ? "pointer" : "default",
+              opacity: showScrollToBottom ? 1 : 0,
+              pointerEvents: showScrollToBottom ? "auto" : "none",
+              transition: "opacity 0.16s ease",
+            }}
+          >
+            {agentRunning ? (
+              <span aria-hidden="true" style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
+                <span className="scroll-to-bottom-dot" />
+                <span className="scroll-to-bottom-dot" />
+                <span className="scroll-to-bottom-dot" />
+              </span>
+            ) : (
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M8 3v9" />
+                <path d="m4.5 8.5 3.5 3.5 3.5-3.5" />
+              </svg>
+            )}
+          </button>
+        </div>
         <div
           style={{
             padding: `0 ${CHAT_COLUMN_PADDING}px`,
