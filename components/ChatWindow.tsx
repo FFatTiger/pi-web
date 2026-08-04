@@ -241,17 +241,6 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
   const composerFooterRef = useRef<HTMLDivElement>(null);
   const [composerFooterHeight, setComposerFooterHeight] = useState(140);
 
-  // Codex: measure sticky composer footer so scroll padding keeps last messages visible.
-  useEffect(() => {
-    const node = composerFooterRef.current;
-    if (!node) return;
-    const measure = () => setComposerFooterHeight(Math.max(96, node.offsetHeight));
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(node);
-    return () => ro.disconnect();
-  }, []);
-
   // IntersectionObserver on the sentinel div at the top of the message list.
   // When it becomes visible, load the next page of older messages.
   useEffect(() => {
@@ -346,6 +335,18 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
 
   const isEmptyNew = isNew && messages.length === 0 && !streamState.isStreaming && !sessionBusy;
   const messageCwd = session?.cwd ?? newSessionCwd ?? undefined;
+
+  // Codex: measure sticky composer footer so scroll padding keeps last messages visible.
+  useEffect(() => {
+    if (isEmptyNew) return;
+    const node = composerFooterRef.current;
+    if (!node) return;
+    const measure = () => setComposerFooterHeight(Math.max(96, node.offsetHeight));
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(node);
+    return () => ro.disconnect();
+  }, [isEmptyNew]);
 
   const availableThinkingLevels = displayModelValue
     ? (modelThinkingLevels[`${displayModelValue.provider}:${displayModelValue.modelId}`] ?? null)

@@ -735,7 +735,7 @@ pre, code {
   transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease, opacity 120ms ease, transform 120ms cubic-bezier(0.23, 1, 0.32, 1);
 }
 .chat-input-toolbar button {
-  border-radius: 4px !important;
+  border-radius: 999px !important;
   font-size: inherit !important;
 }
 .chat-input-toolbar button:active:not(:disabled),
@@ -771,14 +771,14 @@ pre, code {
 }
 .chat-input-send {
   display: inline-flex;
-  flex: 0 0 24px;
-  width: 24px;
-  height: 24px;
+  flex: 0 0 26px;
+  width: 26px;
+  height: 26px;
   align-items: center;
   justify-content: center;
   padding: 0;
   border: 0;
-  border-radius: 4px;
+  border-radius: 999px;
   background: transparent;
   color: var(--text-dim);
   box-shadow: none;
@@ -825,8 +825,8 @@ pre, code {
 
 /* Composer-aligned session status row. */
 .session-info-bar-wrap {
-  margin-top: -8px;
-  padding: 0 16px 8px;
+  margin-top: -4px;
+  padding: 0 16px 6px;
 }
 /* ChatMinimap is a left overlay; no right-side clearance needed. */
 .session-info-bar-wrap.is-mobile { padding-right: 16px; }
