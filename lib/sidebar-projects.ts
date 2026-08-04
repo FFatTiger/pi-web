@@ -301,6 +301,113 @@ export function serializeProjectOrder(order: readonly string[]): string {
   return JSON.stringify(order.map(normalizeProjectRoot));
 }
 
+export type ProjectSessionOrders = Record<string, string[]>;
+
+export function parseProjectSessionOrders(raw: string | null): ProjectSessionOrders {
+  if (!raw) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const next: ProjectSessionOrders = {};
+    for (const [rawRoot, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (!Array.isArray(value)) continue;
+      const ids = value.filter((item): item is string => typeof item === "string" && item.length > 0);
+      if (ids.length === 0) continue;
+      next[normalizeProjectRoot(rawRoot)] = ids;
+    }
+    return next;
+  } catch {
+    return {};
+  }
+}
+
+export function serializeProjectSessionOrders(orders: ProjectSessionOrders): string {
+  const normalized: ProjectSessionOrders = {};
+  for (const [root, ids] of Object.entries(orders)) {
+    const key = normalizeProjectRoot(root);
+    const unique: string[] = [];
+    const seen = new Set<string>();
+    for (const id of ids) {
+      if (seen.has(id)) continue;
+      unique.push(id);
+      seen.add(id);
+    }
+    if (unique.length > 0) normalized[key] = unique;
+  }
+  return JSON.stringify(normalized);
+}
+
+/** Move `fromId` before/after `toId` inside a stable id list. */
+export function reorderIds(ids: string[], fromId: string, toId: string): string[] {
+  if (fromId === toId) return ids;
+  const fromIndex = ids.indexOf(fromId);
+  const toIndex = ids.indexOf(toId);
+  if (fromIndex < 0 || toIndex < 0) return ids;
+  const next = ids.slice();
+  const [moved] = next.splice(fromIndex, 1);
+  const insertAt = next.indexOf(toId);
+  if (insertAt < 0) return ids;
+  // Dropping onto a later item places after it; onto an earlier item places before it.
+  next.splice(fromIndex < toIndex ? insertAt + 1 : insertAt, 0, moved);
+  return next;
+}
+
+/**
+ * Merge manual session order with the currently visible session ids.
+ * Known ids keep relative manual order; new ids are prepended (newest-first UX).
+ */
+export function mergeSessionOrder(order: string[] | undefined, sessionIds: string[]): string[] {
+  const idSet = new Set(sessionIds);
+  const next: string[] = [];
+  const seen = new Set<string>();
+
+  for (const id of order ?? []) {
+    if (!idSet.has(id) || seen.has(id)) continue;
+    next.push(id);
+    seen.add(id);
+  }
+
+  const missing = sessionIds.filter((id) => !seen.has(id));
+  // Prepend unknown ids so brand-new sessions appear near the top without
+  // reshuffling the user's existing manual arrangement.
+  return [...missing, ...next];
+}
+
+export function applySessionOrderToTree(
+  tree: SidebarSessionTreeNode[],
+  order: string[] | undefined,
+): SidebarSessionTreeNode[] {
+  if (!order || order.length === 0) return tree;
+  const index = new Map(order.map((id, i) => [id, i]));
+  const sortNodes = (nodes: SidebarSessionTreeNode[]): SidebarSessionTreeNode[] => {
+    const sorted = nodes
+      .map((node) => ({
+        ...node,
+        children: sortNodes(node.children),
+      }))
+      .sort((a, b) => {
+        const ai = index.get(a.session.id) ?? Number.MAX_SAFE_INTEGER;
+        const bi = index.get(b.session.id) ?? Number.MAX_SAFE_INTEGER;
+        if (ai !== bi) return ai - bi;
+        return b.session.modified.localeCompare(a.session.modified);
+      });
+    return sorted;
+  };
+  return sortNodes(tree);
+}
+
+export function collectTreeSessionIds(tree: SidebarSessionTreeNode[]): string[] {
+  const ids: string[] = [];
+  const walk = (nodes: SidebarSessionTreeNode[]) => {
+    for (const node of nodes) {
+      ids.push(node.session.id);
+      if (node.children.length > 0) walk(node.children);
+    }
+  };
+  walk(tree);
+  return ids;
+}
+
 export function getProjectActivity(
   sessions: SessionInfo[],
   runningSessionIds: ReadonlySet<string>,

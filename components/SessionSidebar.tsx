@@ -6,22 +6,29 @@ import type { SessionInfo } from "@/lib/types";
 import { useI18n } from "@/hooks/useI18n";
 import { AuthControls } from "./AuthControls";
 import {
+  applySessionOrderToTree,
   buildSidebarSessionTree,
+  collectTreeSessionIds,
   flattenTemporarySessions,
   getProjectDisplayName,
   getSidebarSessionVisibility,
   groupSidebarProjects,
   mergeProjectOrder,
+  mergeSessionOrder,
   parseExpandedProjects,
   parseManualProjects,
   parseProjectOrder,
+  parseProjectSessionOrders,
   partitionSidebarProjects,
   removeManualProject,
+  reorderIds,
   serializeExpandedProjects,
   serializeManualProjects,
   serializeProjectOrder,
+  serializeProjectSessionOrders,
   upsertManualProject,
   type ManualProject,
+  type ProjectSessionOrders,
   type SidebarProjectGroup,
   type SidebarSessionTreeNode,
 } from "@/lib/sidebar-projects";
@@ -52,6 +59,12 @@ const RUNNING_SESSIONS_POLL_MS = 2500;
 const MANUAL_PROJECTS_STORAGE_KEY = "pi-web:manual-projects";
 const EXPANDED_PROJECTS_STORAGE_KEY = "pi-web:expanded-projects";
 const PROJECT_ORDER_STORAGE_KEY = "pi-web:project-order";
+const PROJECT_SESSION_ORDERS_STORAGE_KEY = "pi-web:project-session-orders";
+const DND_MIME = "application/x-pi-sidebar-dnd";
+
+type DragPayload =
+  | { kind: "project"; root: string }
+  | { kind: "session"; projectRoot: string; sessionId: string };
 
 type AnchorRect = { top: number; left: number; right: number; width: number; bottom: number; height: number };
 
@@ -296,6 +309,12 @@ export function SessionSidebar({
     if (typeof window === "undefined") return [];
     return parseProjectOrder(window.localStorage.getItem(PROJECT_ORDER_STORAGE_KEY));
   });
+  const [sessionOrders, setSessionOrders] = useState<ProjectSessionOrders>(() => {
+    if (typeof window === "undefined") return {};
+    return parseProjectSessionOrders(window.localStorage.getItem(PROJECT_SESSION_ORDERS_STORAGE_KEY));
+  });
+  const [dragOverKey, setDragOverKey] = useState<string | null>(null);
+  const [draggingKey, setDraggingKey] = useState<string | null>(null);
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(() => {
     if (typeof window === "undefined") return new Set();
     return parseExpandedProjects(window.localStorage.getItem(EXPANDED_PROJECTS_STORAGE_KEY));
@@ -433,6 +452,17 @@ export function SessionSidebar({
       // localStorage may be unavailable in privacy mode.
     }
   }, [projectOrder]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        PROJECT_SESSION_ORDERS_STORAGE_KEY,
+        serializeProjectSessionOrders(sessionOrders),
+      );
+    } catch {
+      // localStorage may be unavailable in privacy mode.
+    }
+  }, [sessionOrders]);
 
   useEffect(() => {
     try {
@@ -637,6 +667,59 @@ export function SessionSidebar({
     onNewSession?.(tempId, group.root, group.root);
   }, [onNewSession]);
 
+  const readDragPayload = useCallback((event: React.DragEvent): DragPayload | null => {
+    try {
+      const raw = event.dataTransfer.getData(DND_MIME) || event.dataTransfer.getData("text/plain");
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as DragPayload;
+      if (!parsed || typeof parsed !== "object") return null;
+      if (parsed.kind === "project" && typeof parsed.root === "string") return parsed;
+      if (
+        parsed.kind === "session"
+        && typeof parsed.projectRoot === "string"
+        && typeof parsed.sessionId === "string"
+      ) {
+        return parsed;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const writeDragPayload = useCallback((event: React.DragEvent, payload: DragPayload) => {
+    const raw = JSON.stringify(payload);
+    event.dataTransfer.setData(DND_MIME, raw);
+    event.dataTransfer.setData("text/plain", raw);
+    event.dataTransfer.effectAllowed = "move";
+  }, []);
+
+  const reorderProject = useCallback((fromRoot: string, toRoot: string) => {
+    if (fromRoot === toRoot) return;
+    setProjectOrder((previous) => {
+      const roots = previous.length > 0
+        ? previous
+        : regularProjects.map((group) => group.root);
+      const next = reorderIds(roots, fromRoot, toRoot);
+      return next.length === roots.length ? next : previous;
+    });
+  }, [regularProjects]);
+
+  const reorderSessionInProject = useCallback((projectRoot: string, fromId: string, toId: string) => {
+    if (fromId === toId) return;
+    const group = projectGroups.find((item) => item.root === projectRoot);
+    if (!group) return;
+    const baseOrder = mergeSessionOrder(
+      sessionOrders[projectRoot],
+      group.sessions.map((session) => session.id),
+    );
+    const nextOrder = reorderIds(baseOrder, fromId, toId);
+    setSessionOrders((previous) => ({
+      ...previous,
+      [projectRoot]: nextOrder,
+    }));
+  }, [projectGroups, sessionOrders]);
+
   type ProjectDialogMode = "clear" | "remove";
   const [projectDialog, setProjectDialog] = useState<{ group: SidebarProjectGroup; mode: ProjectDialogMode } | null>(null);
   const [projectDialogBusy, setProjectDialogBusy] = useState(false);
@@ -752,6 +835,9 @@ export function SessionSidebar({
       selectedSessionId,
     });
     const showAllSessions = showAllSessionProjects.has(group.root);
+    const baseTree = showAllSessions ? fullTree : visibility.tree;
+    const orderedTree = applySessionOrderToTree(baseTree, sessionOrders[group.root]);
+    const projectDragKey = `project:${group.root}`;
     return (
       <ProjectGroup
         key={group.root}
@@ -761,6 +847,8 @@ export function SessionSidebar({
         selectedSessionId={selectedSessionId}
         runningSessionIds={runningSessionIds}
         unreadSessionIds={unreadSessionIds}
+        isDragging={draggingKey === projectDragKey}
+        isDragOver={dragOverKey === projectDragKey}
         onToggle={() => toggleProject(group)}
         onNewSession={(event) => {
           event.stopPropagation();
@@ -780,10 +868,68 @@ export function SessionSidebar({
           onSessionDeleted?.(id);
           void loadSessions();
         }}
-        tree={showAllSessions ? fullTree : visibility.tree}
+        tree={orderedTree}
         hiddenCount={visibility.hiddenCount}
         showAllSessions={showAllSessions}
         onToggleShowAllSessions={() => toggleShowAllSessions(group.root)}
+        onProjectDragStart={(event) => {
+          writeDragPayload(event, { kind: "project", root: group.root });
+          setDraggingKey(projectDragKey);
+        }}
+        onProjectDragOver={(event) => {
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "move";
+          setDragOverKey(projectDragKey);
+        }}
+        onProjectDragLeave={() => {
+          setDragOverKey((current) => (current === projectDragKey ? null : current));
+        }}
+        onProjectDrop={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const payload = readDragPayload(event);
+          setDragOverKey(null);
+          setDraggingKey(null);
+          if (!payload || payload.kind !== "project") return;
+          reorderProject(payload.root, group.root);
+        }}
+        onProjectDragEnd={() => {
+          setDraggingKey(null);
+          setDragOverKey(null);
+        }}
+        onSessionDragStart={(sessionId, event) => {
+          writeDragPayload(event, {
+            kind: "session",
+            projectRoot: group.root,
+            sessionId,
+          });
+          setDraggingKey(`session:${group.root}:${sessionId}`);
+        }}
+        onSessionDragOver={(sessionId, event) => {
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "move";
+          setDragOverKey(`session:${group.root}:${sessionId}`);
+        }}
+        onSessionDragLeave={(sessionId) => {
+          const key = `session:${group.root}:${sessionId}`;
+          setDragOverKey((current) => (current === key ? null : current));
+        }}
+        onSessionDrop={(sessionId, event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const payload = readDragPayload(event);
+          setDragOverKey(null);
+          setDraggingKey(null);
+          if (!payload || payload.kind !== "session") return;
+          if (payload.projectRoot !== group.root) return; // same-project only
+          reorderSessionInProject(group.root, payload.sessionId, sessionId);
+        }}
+        onSessionDragEnd={() => {
+          setDraggingKey(null);
+          setDragOverKey(null);
+        }}
+        draggingKey={draggingKey}
+        dragOverKey={dragOverKey}
       />
     );
   };
@@ -1101,6 +1247,8 @@ function ProjectGroup({
   selectedSessionId,
   runningSessionIds,
   unreadSessionIds,
+  isDragging = false,
+  isDragOver = false,
   onToggle,
   onNewSession,
   onClearChats,
@@ -1112,6 +1260,18 @@ function ProjectGroup({
   hiddenCount,
   showAllSessions,
   onToggleShowAllSessions,
+  onProjectDragStart,
+  onProjectDragOver,
+  onProjectDragLeave,
+  onProjectDrop,
+  onProjectDragEnd,
+  onSessionDragStart,
+  onSessionDragOver,
+  onSessionDragLeave,
+  onSessionDrop,
+  onSessionDragEnd,
+  draggingKey,
+  dragOverKey,
 }: {
   group: SidebarProjectGroup;
   expanded: boolean;
@@ -1119,6 +1279,8 @@ function ProjectGroup({
   selectedSessionId: string | null;
   runningSessionIds: Set<string>;
   unreadSessionIds: Set<string>;
+  isDragging?: boolean;
+  isDragOver?: boolean;
   onToggle: () => void;
   onNewSession: (event: React.MouseEvent) => void;
   onClearChats: () => void;
@@ -1130,6 +1292,18 @@ function ProjectGroup({
   hiddenCount: number;
   showAllSessions: boolean;
   onToggleShowAllSessions: () => void;
+  onProjectDragStart: (event: React.DragEvent) => void;
+  onProjectDragOver: (event: React.DragEvent) => void;
+  onProjectDragLeave: () => void;
+  onProjectDrop: (event: React.DragEvent) => void;
+  onProjectDragEnd: () => void;
+  onSessionDragStart: (sessionId: string, event: React.DragEvent) => void;
+  onSessionDragOver: (sessionId: string, event: React.DragEvent) => void;
+  onSessionDragLeave: (sessionId: string) => void;
+  onSessionDrop: (sessionId: string, event: React.DragEvent) => void;
+  onSessionDragEnd: () => void;
+  draggingKey: string | null;
+  dragOverKey: string | null;
 }) {
   const { t } = useI18n();
   const [hovered, setHovered] = useState(false);
@@ -1184,6 +1358,20 @@ function ProjectGroup({
       <div
         role="button"
         tabIndex={0}
+        draggable
+        onDragStart={(event) => {
+          // Avoid starting a drag from action buttons.
+          const target = event.target as HTMLElement;
+          if (target.closest("button")) {
+            event.preventDefault();
+            return;
+          }
+          onProjectDragStart(event);
+        }}
+        onDragOver={onProjectDragOver}
+        onDragLeave={onProjectDragLeave}
+        onDrop={onProjectDrop}
+        onDragEnd={onProjectDragEnd}
         onClick={onToggle}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
@@ -1203,15 +1391,19 @@ function ProjectGroup({
           gap: 8,
           padding: "5px 10px 5px 12px",
           margin: "0 6px",
-          cursor: "pointer",
+          cursor: isDragging ? "grabbing" : "grab",
           background: selected
             ? "var(--bg-selected)"
-            : hovered
-              ? "var(--bg-hover)"
-              : "transparent",
+            : isDragOver
+              ? "var(--bg-selected)"
+              : hovered
+                ? "var(--bg-hover)"
+                : "transparent",
           borderRadius: 8,
-          border: "none",
-          transition: "background 0.1s",
+          border: isDragOver ? "1px solid var(--accent)" : "1px solid transparent",
+          opacity: isDragging ? 0.55 : 1,
+          transition: "background 0.1s, border-color 0.1s, opacity 0.1s",
+          userSelect: "none",
         }}
       >
         <svg
@@ -1426,6 +1618,14 @@ function ProjectGroup({
                 onRenamed={onRenamed}
                 onSessionDeleted={onSessionDeleted}
                 depth={0}
+                projectRoot={group.root}
+                draggingKey={draggingKey}
+                dragOverKey={dragOverKey}
+                onSessionDragStart={onSessionDragStart}
+                onSessionDragOver={onSessionDragOver}
+                onSessionDragLeave={onSessionDragLeave}
+                onSessionDrop={onSessionDrop}
+                onSessionDragEnd={onSessionDragEnd}
               />
             ))}
             {hiddenCount > 0 && (
@@ -1590,6 +1790,14 @@ function SessionTreeItem({
   onRenamed,
   onSessionDeleted,
   depth,
+  projectRoot,
+  draggingKey,
+  dragOverKey,
+  onSessionDragStart,
+  onSessionDragOver,
+  onSessionDragLeave,
+  onSessionDrop,
+  onSessionDragEnd,
 }: {
   node: SidebarSessionTreeNode;
   selectedSessionId: string | null;
@@ -1599,9 +1807,18 @@ function SessionTreeItem({
   onRenamed?: () => void;
   onSessionDeleted?: (id: string) => void;
   depth: number;
+  projectRoot: string;
+  draggingKey: string | null;
+  dragOverKey: string | null;
+  onSessionDragStart: (sessionId: string, event: React.DragEvent) => void;
+  onSessionDragOver: (sessionId: string, event: React.DragEvent) => void;
+  onSessionDragLeave: (sessionId: string) => void;
+  onSessionDrop: (sessionId: string, event: React.DragEvent) => void;
+  onSessionDragEnd: () => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const hasChildren = node.children.length > 0;
+  const sessionKey = `session:${projectRoot}:${node.session.id}`;
 
   return (
     <div>
@@ -1628,6 +1845,13 @@ function SessionTreeItem({
           hasChildren={hasChildren}
           collapsed={collapsed}
           onToggleCollapse={() => setCollapsed((v) => !v)}
+          isDragging={draggingKey === sessionKey}
+          isDragOver={dragOverKey === sessionKey}
+          onDragStart={(event) => onSessionDragStart(node.session.id, event)}
+          onDragOver={(event) => onSessionDragOver(node.session.id, event)}
+          onDragLeave={() => onSessionDragLeave(node.session.id)}
+          onDrop={(event) => onSessionDrop(node.session.id, event)}
+          onDragEnd={onSessionDragEnd}
         />
       </div>
       {hasChildren && !collapsed && (
@@ -1643,6 +1867,14 @@ function SessionTreeItem({
               onRenamed={onRenamed}
               onSessionDeleted={onSessionDeleted}
               depth={depth + 1}
+              projectRoot={projectRoot}
+              draggingKey={draggingKey}
+              dragOverKey={dragOverKey}
+              onSessionDragStart={onSessionDragStart}
+              onSessionDragOver={onSessionDragOver}
+              onSessionDragLeave={onSessionDragLeave}
+              onSessionDrop={onSessionDrop}
+              onSessionDragEnd={onSessionDragEnd}
             />
           ))}
         </div>
@@ -1726,6 +1958,13 @@ function SessionItem({
   hasChildren = false,
   collapsed = false,
   onToggleCollapse,
+  isDragging = false,
+  isDragOver = false,
+  onDragStart,
+  onDragOver,
+  onDragLeave,
+  onDrop,
+  onDragEnd,
 }: {
   session: SessionInfo;
   isSelected: boolean;
@@ -1738,6 +1977,13 @@ function SessionItem({
   hasChildren?: boolean;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
+  isDragging?: boolean;
+  isDragOver?: boolean;
+  onDragStart?: (event: React.DragEvent) => void;
+  onDragOver?: (event: React.DragEvent) => void;
+  onDragLeave?: () => void;
+  onDrop?: (event: React.DragEvent) => void;
+  onDragEnd?: () => void;
 }) {
   const [hovered, setHovered] = useState(false);
   const [renaming, setRenaming] = useState(false);
@@ -1806,6 +2052,26 @@ function SessionItem({
 
   return (
     <div
+      draggable={!confirmDelete && !renaming && !deleting}
+      onDragStart={(event) => {
+        if (confirmDelete || renaming || deleting) {
+          event.preventDefault();
+          return;
+        }
+        const target = event.target as HTMLElement;
+        if (target.closest("button, input")) {
+          event.preventDefault();
+          return;
+        }
+        onDragStart?.(event);
+      }}
+      onDragOver={(event) => {
+        if (!onDragOver) return;
+        onDragOver(event);
+      }}
+      onDragLeave={() => onDragLeave?.()}
+      onDrop={(event) => onDrop?.(event)}
+      onDragEnd={() => onDragEnd?.()}
       onClick={confirmDelete || renaming ? undefined : onClick}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => { setHovered(false); }}
@@ -1816,17 +2082,20 @@ function SessionItem({
         margin: "1px 6px",
         paddingLeft: depth > 0 ? depth * 12 + 28 : 34,
         paddingRight: 8,
-        cursor: confirmDelete || renaming ? "default" : "pointer",
+        cursor: confirmDelete || renaming ? "default" : isDragging ? "grabbing" : "grab",
+        userSelect: "none",
         background: confirmDelete
           ? "rgba(239,68,68,0.06)"
-          : isSelected ? "var(--bg-selected)" : hovered ? "var(--bg-hover)" : "transparent",
+          : isDragOver || isSelected
+            ? "var(--bg-selected)"
+            : hovered
+              ? "var(--bg-hover)"
+              : "transparent",
         borderRadius: 8,
-        border: "none",
-        boxShadow: confirmDelete
-          ? "inset 2px 0 0 #ef4444"
-          : "none",
-        transition: "background 0.1s",
-        opacity: deleting ? 0.5 : 1,
+        border: isDragOver ? "1px solid var(--accent)" : "1px solid transparent",
+        boxShadow: confirmDelete ? "inset 2px 0 0 #ef4444" : "none",
+        transition: "background 0.1s, border-color 0.1s, opacity 0.1s",
+        opacity: isDragging ? 0.55 : deleting ? 0.5 : 1,
         gap: 6,
         overflow: "hidden",
       }}
