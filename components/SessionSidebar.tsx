@@ -772,12 +772,16 @@ export function SessionSidebar({
 
   const reorderProject = useCallback((fromRoot: string, toRoot: string, position: DropPosition) => {
     setProjectOrder((previous) => {
-      const roots = previous.length > 0
-        ? previous
-        : regularProjects.map((group) => group.root);
+      // Always merge in the currently visible roots first so the dragged
+      // project is guaranteed to exist in the baseline list (it may be brand
+      // new / missing from the persisted order).
+      const roots = mergeProjectOrder(
+        previous,
+        projectGroups.map((group) => group.root),
+      );
       return reorderIds(roots, fromRoot, toRoot, position);
     });
-  }, [regularProjects]);
+  }, [projectGroups]);
 
   const reorderSessionInProject = useCallback((
     projectRoot: string,
