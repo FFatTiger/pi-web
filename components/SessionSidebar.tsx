@@ -8,8 +8,8 @@ import { AuthControls } from "./AuthControls";
 import {
   applySessionOrderToTree,
   buildSidebarSessionTree,
-  collectTreeSessionIds,
   flattenTemporarySessions,
+  getProjectActivity,
   getProjectDisplayName,
   getSidebarSessionVisibility,
   groupSidebarProjects,
@@ -28,6 +28,7 @@ import {
   serializeProjectSessionOrders,
   upsertManualProject,
   type ManualProject,
+  type ProjectActivity,
   type ProjectSessionOrders,
   type SidebarProjectGroup,
   type SidebarSessionTreeNode,
@@ -828,6 +829,7 @@ export function SessionSidebar({
   const renderProjectGroup = (group: SidebarProjectGroup) => {
     const expanded = expandedProjects.has(group.root);
     const selected = activeProjectRoot === group.root;
+    const activity = getProjectActivity(group.sessions, runningSessionIds, unreadSessionIds);
     const fullTree = buildSidebarSessionTree(group.sessions);
     const visibility = getSidebarSessionVisibility(group.sessions, {
       runningSessionIds,
@@ -844,6 +846,7 @@ export function SessionSidebar({
         group={group}
         expanded={expanded}
         selected={selected}
+        activity={activity}
         selectedSessionId={selectedSessionId}
         runningSessionIds={runningSessionIds}
         unreadSessionIds={unreadSessionIds}
@@ -1244,6 +1247,7 @@ function ProjectGroup({
   group,
   expanded,
   selected,
+  activity,
   selectedSessionId,
   runningSessionIds,
   unreadSessionIds,
@@ -1276,6 +1280,7 @@ function ProjectGroup({
   group: SidebarProjectGroup;
   expanded: boolean;
   selected: boolean;
+  activity: ProjectActivity;
   selectedSessionId: string | null;
   runningSessionIds: Set<string>;
   unreadSessionIds: Set<string>;
@@ -1385,24 +1390,20 @@ function ProjectGroup({
         aria-expanded={expanded}
         aria-label={`Project ${label}`}
         style={{
-          minHeight: 34,
+          height: 30,
           display: "flex",
           alignItems: "center",
           gap: 8,
-          padding: "5px 10px 5px 12px",
-          margin: "0 6px",
+          padding: "0 8px",
+          margin: "1px 6px",
           cursor: isDragging ? "grabbing" : "grab",
-          background: selected
-            ? "var(--bg-selected)"
-            : isDragOver
-              ? "var(--bg-selected)"
-              : hovered
-                ? "var(--bg-hover)"
-                : "transparent",
-          borderRadius: 8,
+          background: isDragOver || selected || hovered || menuOpen
+            ? "var(--bg-hover)"
+            : "transparent",
+          borderRadius: 999,
           border: isDragOver ? "1px solid var(--accent)" : "1px solid transparent",
-          opacity: isDragging ? 0.55 : 1,
-          transition: "background 0.1s, border-color 0.1s, opacity 0.1s",
+          opacity: isDragging ? 0.2 : 1,
+          transition: "background 0.12s, border-color 0.12s, opacity 0.12s",
           userSelect: "none",
         }}
       >
@@ -1418,7 +1419,7 @@ function ProjectGroup({
           aria-hidden="true"
           style={{
             flexShrink: 0,
-            color: selected ? "var(--text)" : "var(--text-muted)",
+            color: "var(--text-muted)",
           }}
         >
           <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
@@ -1431,170 +1432,189 @@ function ProjectGroup({
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
             fontSize: 13,
-            color: selected ? "var(--text)" : "var(--text)",
-            fontWeight: selected ? 550 : 450,
+            color: "var(--text)",
+            fontWeight: 450,
             letterSpacing: "-0.01em",
           }}
         >
           {label}
         </span>
-        <button
-          type="button"
-          onClick={onNewSession}
-          title={t("sidebar.newSessionTitle", { path: group.root })}
-          aria-label={t("sidebar.newSessionTitle", { path: label })}
-          style={{
-            display: hovered || selected || menuOpen ? "flex" : "none",
-            alignItems: "center",
-            justifyContent: "center",
-            width: 22,
-            height: 22,
-            padding: 0,
-            background: "none",
-            border: "none",
-            borderRadius: 6,
-            color: "var(--text-dim)",
-            cursor: "pointer",
-            flexShrink: 0,
-            transition: "color 0.12s, background 0.12s",
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.color = "var(--text)";
-            e.currentTarget.style.background = "var(--bg-hover)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.color = "var(--text-dim)";
-            e.currentTarget.style.background = "none";
-          }}
-        >
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
-            <line x1="6" y1="1" x2="6" y2="11" />
-            <line x1="1" y1="6" x2="11" y2="6" />
-          </svg>
-        </button>
-        <div style={{ position: "relative", flexShrink: 0 }}>
-          <button
-            ref={menuButtonRef}
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation();
-              if (menuOpen) closeMenu();
-              else openMenu();
-            }}
-            title={t("sidebar.projectActions")}
-            aria-label={t("sidebar.projectActions")}
-            aria-haspopup="menu"
-            aria-expanded={menuOpen}
+        {/* Codex trailing slot: status first, else hover actions. */}
+        {activity === "running" && !(hovered || menuOpen) ? (
+          <RunningSessionIndicator />
+        ) : (
+          <div
             style={{
-              display: hovered || selected || menuOpen ? "flex" : "none",
+              display: "flex",
               alignItems: "center",
-              justifyContent: "center",
-              width: 22,
-              height: 22,
-              padding: 0,
-              background: menuOpen ? "var(--bg-hover)" : "none",
-              border: "none",
-              borderRadius: 6,
-              color: "var(--text-dim)",
-              cursor: "pointer",
-              transition: "color 0.12s, background 0.12s",
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.color = "var(--text)";
-              e.currentTarget.style.background = "var(--bg-hover)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.color = "var(--text-dim)";
-              e.currentTarget.style.background = menuOpen ? "var(--bg-hover)" : "none";
+              gap: 2,
+              flexShrink: 0,
+              opacity: hovered || menuOpen ? 1 : 0,
+              pointerEvents: hovered || menuOpen ? "auto" : "none",
+              transition: "opacity 0.12s",
             }}
           >
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-              <circle cx="3.5" cy="8" r="1.3" />
-              <circle cx="8" cy="8" r="1.3" />
-              <circle cx="12.5" cy="8" r="1.3" />
-            </svg>
-          </button>
-          {menuOpen && menuRect && createPortal(
-            <div
-              ref={menuPanelRef}
-              role="menu"
-              style={getProjectMenuStyle(menuRect)}
-            >
+            <div style={{ position: "relative", flexShrink: 0 }}>
               <button
+                ref={menuButtonRef}
                 type="button"
-                role="menuitem"
-                disabled={group.sessions.length === 0}
                 onClick={(event) => {
                   event.stopPropagation();
-                  if (group.sessions.length === 0) return;
-                  closeMenu();
-                  onClearChats();
+                  if (menuOpen) closeMenu();
+                  else openMenu();
                 }}
+                title={t("sidebar.projectActions")}
+                aria-label={t("sidebar.projectActions")}
+                aria-haspopup="menu"
+                aria-expanded={menuOpen}
                 style={{
-                  display: "flex",
+                  display: "inline-flex",
                   alignItems: "center",
-                  gap: 8,
-                  width: "100%",
-                  padding: "8px 10px",
+                  justifyContent: "center",
+                  width: 22,
+                  height: 22,
+                  padding: 0,
+                  background: menuOpen ? "var(--bg-selected)" : "transparent",
                   border: "none",
-                  borderRadius: 7,
-                  background: "transparent",
-                  color: group.sessions.length === 0 ? "var(--text-dim)" : "var(--text)",
-                  cursor: group.sessions.length === 0 ? "not-allowed" : "pointer",
-                  fontSize: 13,
-                  textAlign: "left",
-                  opacity: group.sessions.length === 0 ? 0.55 : 1,
+                  borderRadius: 6,
+                  color: "var(--text-dim)",
+                  cursor: "pointer",
+                  transition: "color 0.12s, background 0.12s",
                 }}
                 onMouseEnter={(e) => {
-                  if (group.sessions.length === 0) return;
-                  e.currentTarget.style.background = "var(--bg-hover)";
+                  e.currentTarget.style.color = "var(--text)";
+                  e.currentTarget.style.background = "var(--bg-selected)";
                 }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.color = "var(--text-dim)";
+                  e.currentTarget.style.background = menuOpen ? "var(--bg-selected)" : "transparent";
+                }}
               >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M3 6h18" />
-                  <path d="M8 6V4h8v2" />
-                  <path d="M19 6l-1 14H6L5 6" />
-                  <path d="M10 11v6" />
-                  <path d="M14 11v6" />
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                  <circle cx="3.5" cy="8" r="1.3" />
+                  <circle cx="8" cy="8" r="1.3" />
+                  <circle cx="12.5" cy="8" r="1.3" />
                 </svg>
-                <span>{t("sidebar.clearChats")}</span>
               </button>
-              <button
-                type="button"
-                role="menuitem"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  closeMenu();
-                  onRemoveProject();
-                }}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  width: "100%",
-                  padding: "8px 10px",
-                  border: "none",
-                  borderRadius: 7,
-                  background: "transparent",
-                  color: "#dc2626",
-                  cursor: "pointer",
-                  fontSize: 13,
-                  textAlign: "left",
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(220,38,38,0.08)"; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M18 6 6 18" />
-                  <path d="m6 6 12 12" />
-                </svg>
-                <span>{t("sidebar.removeProject")}</span>
-              </button>
-            </div>,
-            document.body,
-          )}
-        </div>
+              {menuOpen && menuRect && createPortal(
+                <div
+                  ref={menuPanelRef}
+                  role="menu"
+                  style={getProjectMenuStyle(menuRect)}
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={group.sessions.length === 0}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      if (group.sessions.length === 0) return;
+                      closeMenu();
+                      onClearChats();
+                    }}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      width: "100%",
+                      padding: "8px 10px",
+                      border: "none",
+                      borderRadius: 7,
+                      background: "transparent",
+                      color: group.sessions.length === 0 ? "var(--text-dim)" : "var(--text)",
+                      cursor: group.sessions.length === 0 ? "not-allowed" : "pointer",
+                      fontSize: 13,
+                      textAlign: "left",
+                      opacity: group.sessions.length === 0 ? 0.55 : 1,
+                    }}
+                    onMouseEnter={(e) => {
+                      if (group.sessions.length === 0) return;
+                      e.currentTarget.style.background = "var(--bg-hover)";
+                    }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M3 6h18" />
+                      <path d="M8 6V4h8v2" />
+                      <path d="M19 6l-1 14H6L5 6" />
+                      <path d="M10 11v6" />
+                      <path d="M14 11v6" />
+                    </svg>
+                    <span>{t("sidebar.clearChats")}</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      closeMenu();
+                      onRemoveProject();
+                    }}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      width: "100%",
+                      padding: "8px 10px",
+                      border: "none",
+                      borderRadius: 7,
+                      background: "transparent",
+                      color: "#dc2626",
+                      cursor: "pointer",
+                      fontSize: 13,
+                      textAlign: "left",
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(220,38,38,0.08)"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M18 6 6 18" />
+                      <path d="m6 6 12 12" />
+                    </svg>
+                    <span>{t("sidebar.removeProject")}</span>
+                  </button>
+                </div>,
+                document.body,
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={onNewSession}
+              title={t("sidebar.newSessionTitle", { path: group.root })}
+              aria-label={t("sidebar.newSessionTitle", { path: label })}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: 22,
+                height: 22,
+                padding: 0,
+                background: "transparent",
+                border: "none",
+                borderRadius: 6,
+                color: "var(--text-dim)",
+                cursor: "pointer",
+                flexShrink: 0,
+                transition: "color 0.12s, background 0.12s",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.color = "var(--text)";
+                e.currentTarget.style.background = "var(--bg-selected)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.color = "var(--text-dim)";
+                e.currentTarget.style.background = "transparent";
+              }}
+            >
+              {/* Codex-like external/new action glyph */}
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M6 3H3.5A1.5 1.5 0 0 0 2 4.5v8A1.5 1.5 0 0 0 3.5 14h8A1.5 1.5 0 0 0 13 12.5V10" />
+                <path d="M9 2h5v5" />
+                <path d="M14 2 8 8" />
+              </svg>
+            </button>
+          </div>
+        )}
       </div>
       {expanded && (
         group.sessions.length === 0 ? (
@@ -1883,6 +1903,53 @@ function SessionTreeItem({
   );
 }
 
+function IconButton({
+  title,
+  onClick,
+  children,
+  danger = false,
+}: {
+  title: string;
+  onClick: (event: React.MouseEvent) => void;
+  children: ReactNode;
+  danger?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={title}
+      onClick={onClick}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: 22,
+        height: 22,
+        padding: 0,
+        border: "none",
+        borderRadius: 6,
+        background: "transparent",
+        color: "var(--text-dim)",
+        cursor: "pointer",
+        flexShrink: 0,
+        transition: "background 0.12s, color 0.12s",
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = "var(--bg-hover)";
+        e.currentTarget.style.color = danger ? "#dc2626" : "var(--text)";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = "transparent";
+        e.currentTarget.style.color = "var(--text-dim)";
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+/** Codex-like hollow spinner used on both project and session rows. */
 function RunningSessionIndicator() {
   return (
     <span
@@ -1895,22 +1962,23 @@ function RunningSessionIndicator() {
         alignItems: "center",
         justifyContent: "center",
         flexShrink: 0,
-        color: "var(--accent)",
+        color: "var(--text-dim)",
       }}
     >
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true" style={{ display: "block" }}>
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true" style={{ display: "block" }}>
         <g>
+          <circle cx="7" cy="7" r="5" stroke="currentColor" strokeWidth="1.5" opacity="0.22" />
           <path
-            d="M21 12a9 9 0 1 1-3.8-7.4"
+            d="M12 7a5 5 0 0 0-5-5"
             stroke="currentColor"
-            strokeWidth="2.8"
+            strokeWidth="1.6"
             strokeLinecap="round"
           />
           <animateTransform
             attributeName="transform"
             type="rotate"
-            from="0 12 12"
-            to="360 12 12"
+            from="0 7 7"
+            to="360 7 7"
             dur="0.9s"
             repeatCount="indefinite"
           />
@@ -1932,15 +2000,11 @@ function UnreadSessionIndicator() {
         alignItems: "center",
         justifyContent: "center",
         flexShrink: 0,
-        color: "#0891b2",
+        color: "var(--text-dim)",
       }}
     >
       <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true" style={{ display: "block" }}>
-        <circle cx="7" cy="7" r="2.5" fill="currentColor" />
-        <circle cx="7" cy="7" r="3" stroke="currentColor" strokeWidth="1.4" opacity="0.32">
-          <animate attributeName="r" values="3;6;3" dur="1.6s" repeatCount="indefinite" />
-          <animate attributeName="opacity" values="0.32;0;0.32" dur="1.6s" repeatCount="indefinite" />
-        </circle>
+        <circle cx="7" cy="7" r="2.4" fill="currentColor" />
       </svg>
     </span>
   );
@@ -1985,6 +2049,7 @@ function SessionItem({
   onDrop?: (event: React.DragEvent) => void;
   onDragEnd?: () => void;
 }) {
+  const { t } = useI18n();
   const [hovered, setHovered] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState("");
@@ -2047,8 +2112,10 @@ function SessionItem({
     setConfirmDelete(false);
   }, []);
 
-  // Fixed-height outer wrapper — content swaps in place so the list never reflows
-  const ITEM_HEIGHT = 34;
+  // Codex-like compact pill row.
+  const ITEM_HEIGHT = 30;
+  const showHoverActions = hovered && !isRunning && !confirmDelete && !renaming && !deleting;
+  const showStatus = (isRunning || isUnread) && !showHoverActions;
 
   return (
     <div
@@ -2086,16 +2153,14 @@ function SessionItem({
         userSelect: "none",
         background: confirmDelete
           ? "rgba(239,68,68,0.06)"
-          : isDragOver || isSelected
-            ? "var(--bg-selected)"
-            : hovered
-              ? "var(--bg-hover)"
-              : "transparent",
-        borderRadius: 8,
+          : isDragOver || isSelected || hovered
+            ? "var(--bg-hover)"
+            : "transparent",
+        borderRadius: 999,
         border: isDragOver ? "1px solid var(--accent)" : "1px solid transparent",
         boxShadow: confirmDelete ? "inset 2px 0 0 #ef4444" : "none",
-        transition: "background 0.1s, border-color 0.1s, opacity 0.1s",
-        opacity: isDragging ? 0.55 : deleting ? 0.5 : 1,
+        transition: "background 0.12s, border-color 0.12s, opacity 0.12s",
+        opacity: isDragging ? 0.2 : deleting ? 0.5 : 1,
         gap: 6,
         overflow: "hidden",
       }}
@@ -2180,7 +2245,7 @@ function SessionItem({
                 minWidth: 0,
                 fontSize: 13,
                 fontWeight: isSelected ? 500 : 400,
-                lineHeight: 1.35,
+                lineHeight: 1.3,
                 color: isSelected ? "var(--text)" : "var(--text-muted)",
                 overflow: "hidden",
                 textOverflow: "ellipsis",
@@ -2190,11 +2255,6 @@ function SessionItem({
             >
               {title}
             </div>
-            {(isRunning || isUnread) && (
-              <span style={{ display: "inline-flex", flexShrink: 0 }}>
-                {isRunning ? <RunningSessionIndicator /> : <UnreadSessionIndicator />}
-              </span>
-            )}
           </div>
 
           {hasChildren && (
@@ -2203,7 +2263,7 @@ function SessionItem({
               title={collapsed ? "Expand forks" : "Collapse forks"}
               style={{
                 display: "flex", alignItems: "center", justifyContent: "center",
-                width: 20, height: 20, padding: 0, flexShrink: 0,
+                width: 18, height: 18, padding: 0, flexShrink: 0,
                 background: "none", border: "none",
                 color: "var(--text-dim)", cursor: "pointer",
                 transform: collapsed ? "rotate(-90deg)" : "none",
@@ -2216,64 +2276,29 @@ function SessionItem({
             </button>
           )}
 
-          {hovered && (
-            <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
-              <button
-                onClick={startRename}
-                title="Rename"
-                style={{
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  width: 32, height: 32, padding: 0,
-                  background: "var(--bg-hover)", border: "1px solid var(--border)",
-                  borderRadius: 7, color: "var(--text-muted)",
-                  cursor: "pointer", flexShrink: 0,
-                  transition: "background 0.12s, color 0.12s, border-color 0.12s",
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = "var(--bg-selected)";
-                  e.currentTarget.style.color = "var(--accent)";
-                  e.currentTarget.style.borderColor = "rgba(37,99,235,0.35)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = "var(--bg-hover)";
-                  e.currentTarget.style.color = "var(--text-muted)";
-                  e.currentTarget.style.borderColor = "var(--border)";
-                }}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+          {/* Trailing slot: status wins over hover actions (Codex). */}
+          {showStatus ? (
+            <span style={{ display: "inline-flex", flexShrink: 0, width: 18, justifyContent: "center" }}>
+              {isRunning ? <RunningSessionIndicator /> : <UnreadSessionIndicator />}
+            </span>
+          ) : showHoverActions ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 1, flexShrink: 0 }}>
+              <IconButton title={t("sidebar.rename")} onClick={startRename}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M12 20h9" />
+                  <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
                 </svg>
-              </button>
-              <button
-                onClick={handleDeleteClick}
-                title="Delete"
-                style={{
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  width: 32, height: 32, padding: 0,
-                  background: "var(--bg-hover)", border: "1px solid var(--border)",
-                  borderRadius: 7, color: "var(--text-muted)",
-                  cursor: "pointer", flexShrink: 0,
-                  transition: "background 0.12s, color 0.12s, border-color 0.12s",
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = "rgba(239,68,68,0.08)";
-                  e.currentTarget.style.color = "#ef4444";
-                  e.currentTarget.style.borderColor = "rgba(239,68,68,0.35)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = "var(--bg-hover)";
-                  e.currentTarget.style.color = "var(--text-muted)";
-                  e.currentTarget.style.borderColor = "var(--border)";
-                }}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="3 6 5 6 21 6" />
-                  <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                  <path d="M10 11v6M14 11v6" />
-                  <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+              </IconButton>
+              <IconButton title={t("sidebar.delete")} onClick={handleDeleteClick} danger>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M3 6h18" />
+                  <path d="M8 6V4h8v2" />
+                  <path d="M19 6l-1 14H6L5 6" />
                 </svg>
-              </button>
+              </IconButton>
             </div>
+          ) : (
+            <span style={{ width: 18, flexShrink: 0 }} aria-hidden="true" />
           )}
         </>
       )}
