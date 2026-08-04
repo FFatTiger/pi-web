@@ -22,9 +22,7 @@ function tabLabel(
 ): string {
   if (tab.title) return tab.title;
   if (tab.kind === "sideChat") return t("sideChat.title");
-  if (tab.kind === "files") return t("panelHome.openFiles");
-  if (tab.kind === "review") return t("panelHome.review");
-  return tab.kind;
+  return t("panelHome.openFiles");
 }
 
 function TabKindIcon({ kind }: { kind: RightPanelTab["kind"] }) {
@@ -46,18 +44,10 @@ function TabKindIcon({ kind }: { kind: RightPanelTab["kind"] }) {
       </svg>
     );
   }
-  if (kind === "files") {
-    return (
-      <svg {...common}>
-        <path d="M4 20h16a1 1 0 0 0 1-1V8.5L15.5 3H5a1 1 0 0 0-1 1v15a1 1 0 0 0 1 1Z" />
-        <path d="M15 3v5h5" />
-      </svg>
-    );
-  }
   return (
     <svg {...common}>
-      <path d="M9 11l3 3L22 4" />
-      <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+      <path d="M4 20h16a1 1 0 0 0 1-1V8.5L15.5 3H5a1 1 0 0 0-1 1v15a1 1 0 0 0 1 1Z" />
+      <path d="M15 3v5h5" />
     </svg>
   );
 }

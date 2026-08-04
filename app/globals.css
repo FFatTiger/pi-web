@@ -1668,28 +1668,35 @@ span.linenumber {
   box-shadow: 0 10px 28px rgba(0,0,0,0.16);
   color: var(--text);
 }
-.right-panel-review-placeholder {
+.right-panel-files-empty {
   flex: 1;
+  min-width: 0;
   min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+}
+.right-panel-files-empty-hint {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
   gap: 8px;
-  padding: 32px 24px;
+  padding: 24px;
   text-align: center;
-  color: var(--text-muted);
+  color: var(--text-dim);
 }
-.right-panel-review-placeholder strong {
+.right-panel-files-empty-hint strong {
   color: var(--text);
   font-size: 14px;
   font-weight: 600;
 }
-.right-panel-review-placeholder p {
+.right-panel-files-empty-hint p {
   margin: 0;
-  max-width: 280px;
+  max-width: 220px;
   font-size: 12px;
   line-height: 1.5;
+  color: var(--text-muted);
 }
 
 /* Wide desktop file panel: participate in the split layout. */

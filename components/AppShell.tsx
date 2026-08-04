@@ -46,6 +46,7 @@ import {
   emptyRightPanelTabs,
   findTabByKind,
   openOrFocusRightPanelTab,
+  updateRightPanelTabTitle,
   type RightPanelTab,
   type RightPanelTabAction,
   type RightPanelTabKind,
@@ -103,7 +104,7 @@ export function AppShell() {
   const sideChatOpenBySessionRef = useRef(new Map<string, boolean>());
   // Codex-style: open file tabs are conversation-scoped.
   const filePanelBySessionRef = useRef(new Map<string, SessionFilePanelState>());
-  // Right panel shell tabs (side chat / files / review) per main session.
+  // Right panel shell tabs (side chat / files) per main session.
   const rightPanelTabsBySessionRef = useRef(new Map<string, { tabs: RightPanelTab[]; activeTabId: string | null }>());
   const sidebarWidthRef = useRef(SIDEBAR_DEFAULT_WIDTH);
   const rightPanelWidthRef = useRef(RIGHT_PANEL_FALLBACK_WIDTH);
@@ -309,15 +310,19 @@ export function AppShell() {
   activeRightPanelTabIdRef.current = activeRightPanelTabId;
 
   const activeRightPanelTab = rightPanelTabs.find((tab) => tab.id === activeRightPanelTabId) ?? null;
-  const rightPanelMode = !rightPanelOpen
-    ? "closed"
-    : activeRightPanelTab?.kind === "sideChat"
-      ? "chat"
-      : activeRightPanelTab?.kind === "review"
-        ? "review"
-        : activeRightPanelTab?.kind === "files"
-          ? (fileTabs.length > 0 ? "file" : "explorer")
-          : "home";
+  const filesPanelActive = rightPanelOpen && activeRightPanelTab?.kind === "files";
+  const sideChatPanelActive = rightPanelOpen && activeRightPanelTab?.kind === "sideChat";
+  const activeOpenFileName = fileTabs.find((tab) => tab.id === activeFileTabId)?.label
+    ?? fileTabs[fileTabs.length - 1]?.label
+    ?? null;
+
+  // Keep files-chip title in sync with the active open file.
+  useEffect(() => {
+    setRightPanelTabs((prev) => {
+      if (!findTabByKind(prev, "files")) return prev;
+      return updateRightPanelTabTitle(prev, "files", activeOpenFileName);
+    });
+  }, [activeOpenFileName]);
 
   // Keep the active session's open-files + panel-tabs snapshots fresh.
   useEffect(() => {
@@ -328,7 +333,6 @@ export function AppShell() {
       captureSessionFilePanelState({
         tabs: fileTabs,
         activeTabId: activeFileTabId,
-        filesSurface: "file",
       }),
     );
     persistRightPanelTabs(sessionId, rightPanelTabs, activeRightPanelTabId);
@@ -342,7 +346,6 @@ export function AppShell() {
       captureSessionFilePanelState({
         tabs: fileTabsRef.current,
         activeTabId: activeFileTabIdRef.current,
-        filesSurface: "file",
       }),
     );
     persistRightPanelTabs(sessionId, rightPanelTabsRef.current, activeRightPanelTabIdRef.current);
@@ -555,7 +558,6 @@ export function AppShell() {
       captureSessionFilePanelState({
         tabs: fileTabsRef.current,
         activeTabId: activeFileTabIdRef.current,
-        filesSurface: "file",
       }),
     );
     persistRightPanelTabs(session.id, rightPanelTabsRef.current, activeRightPanelTabIdRef.current);
@@ -613,7 +615,6 @@ export function AppShell() {
       captureSessionFilePanelState({
         tabs: fileTabsRef.current,
         activeTabId: activeFileTabIdRef.current,
-        filesSurface: "file",
       }),
     );
     persistRightPanelTabs(newSessionId, rightPanelTabsRef.current, activeRightPanelTabIdRef.current);
@@ -669,12 +670,9 @@ export function AppShell() {
   }, [isMobile, persistRightPanelTabs]);
 
   const handleOpenRightPanelAction = useCallback((action: RightPanelTabAction) => {
-    if (action === "terminal" || action === "browser") return;
     if (action === "files" && !activeCwd) return;
     if (action === "sideChat" && !selectedSession) return;
-    const kind = actionToTabKind(action);
-    if (!kind) return;
-    openRightPanelKind(kind);
+    openRightPanelKind(actionToTabKind(action));
   }, [activeCwd, openRightPanelKind, selectedSession]);
 
   const handleSelectRightPanelTab = useCallback((tabId: string) => {
@@ -734,13 +732,21 @@ export function AppShell() {
   }, [handleOpenFile, selectedSession?.id]);
 
   const handleCloseFileTab = useCallback((tabId: string) => {
-    setFileTabs((prev) => prev.filter((t) => t.id !== tabId));
-    setActiveFileTabId((cur) => {
-      if (cur !== tabId) return cur;
-      const remaining = fileTabs.filter((t) => t.id !== tabId);
-      return remaining.length > 0 ? remaining[remaining.length - 1].id : null;
+    setFileTabs((prev) => {
+      const next = prev.filter((t) => t.id !== tabId);
+      const nextActive = activeFileTabIdRef.current === tabId
+        ? (next[next.length - 1]?.id ?? null)
+        : activeFileTabIdRef.current;
+      if (activeFileTabIdRef.current === tabId) {
+        setActiveFileTabId(nextActive);
+      }
+      const nextTitle = next.find((tab) => tab.id === nextActive)?.label
+        ?? next[next.length - 1]?.label
+        ?? null;
+      setRightPanelTabs((panelTabs) => updateRightPanelTabTitle(panelTabs, "files", nextTitle));
+      return next;
     });
-  }, [fileTabs]);
+  }, []);
 
   const toggleExplorerPanel = useCallback(() => {
     if (!activeCwd) return;
@@ -1560,12 +1566,12 @@ export function AppShell() {
           onOpenFile={handleOpenFile}
           onAtMention={handleAtMention}
           onAtMentions={handleAtMentions}
-          onMentionLines={rightPanelMode === "file" || rightPanelMode === "explorer" ? handleFileLineMention : undefined}
+          onMentionLines={filesPanelActive ? handleFileLineMention : undefined}
           onChangesCountChange={setChangesCount}
           sideChat={selectedSession ? (
             <SideChatPanel
               key={selectedSession.id}
-              active={rightPanelMode === "chat"}
+              active={sideChatPanelActive}
               mainSession={selectedSession}
               onClose={() => {
                 const tab = findTabByKind(rightPanelTabsRef.current, "sideChat");
@@ -1593,7 +1599,7 @@ export function AppShell() {
         pointerEvents: "none",
       }}
     >
-      {rightPanelOpen && rightPanelMode === "explorer" && changesCount > 0 && (
+      {filesPanelActive && changesCount > 0 && (
         <button
           type="button"
           onClick={() => setChangesCollapsed((value) => !value)}

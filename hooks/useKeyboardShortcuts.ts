@@ -94,8 +94,16 @@ export function useGlobalKeyboardShortcuts(
         return;
       }
 
-      // ---- Ctrl/Cmd+Shift+E: toggle explorer (Codex file tree) ----
+      // ---- Ctrl/Cmd+Shift+E: toggle file tree panel (Codex toggleFileTreePanel) ----
       if ((e.key === "e" || e.key === "E") && (e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey) {
+        if (!onToggleExplorer || inEditable) return;
+        e.preventDefault();
+        onToggleExplorer();
+        return;
+      }
+
+      // ---- Ctrl/Cmd+P: open/toggle Files (Codex searchFiles / side panel Files) ----
+      if ((e.key === "p" || e.key === "P") && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
         if (!onToggleExplorer || inEditable) return;
         e.preventDefault();
         onToggleExplorer();

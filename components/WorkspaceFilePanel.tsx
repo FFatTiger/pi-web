@@ -67,6 +67,7 @@ export function WorkspaceFilePanel(props: WorkspaceFilePanelProps) {
   const activeFile = fileTabs.find((tab) => tab.id === activeFileTabId) ?? null;
   const activePanelTab = tabs.find((tab) => tab.id === activeTabId) ?? null;
   const showEmptyHome = open && tabs.length === 0;
+  const showFilePreview = Boolean(activeFile?.filePath);
 
   useEffect(() => () => {
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
@@ -104,7 +105,7 @@ export function WorkspaceFilePanel(props: WorkspaceFilePanelProps) {
         />
       ) : (
         <>
-          {/* Keep mounted tab bodies so Side Chat / Files state survives switches (Codex multi-tab). */}
+          {/* Keep mounted tab bodies so Side Chat / Files state survives switches. */}
           <div
             style={{
               display: activePanelTab?.kind === "files" ? "flex" : "none",
@@ -115,16 +116,48 @@ export function WorkspaceFilePanel(props: WorkspaceFilePanelProps) {
             }}
           >
             <div style={{ display: "flex", flex: 1, minHeight: 0, minWidth: 0 }}>
+              {showFilePreview ? (
+                <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
+                  <div style={{ display: "flex", alignItems: "center", flexShrink: 0, background: "var(--bg-panel)", borderBottom: "1px solid var(--border)", height: 36, paddingRight: 8 }}>
+                    <div style={{ flex: 1, overflow: "hidden" }}>
+                      <TabBar tabs={fileTabs} activeTabId={activeFileTabId ?? ""} onSelectTab={onSelectFileTab} onCloseTab={onCloseFileTab} />
+                    </div>
+                  </div>
+                  <div style={{ flex: 1, overflow: "hidden" }}>
+                    <FileViewer
+                      filePath={activeFile!.filePath!}
+                      cwd={cwd ?? undefined}
+                      sourceSessionId={activeFile!.sourceSessionId}
+                      onOpenFile={(filePath) => onOpenFile(filePath, getFileName(filePath), { sourceSessionId: activeFile!.sourceSessionId })}
+                      onMentionLines={onMentionLines}
+                      gitRefreshKey={explorerRefreshKey}
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div className="right-panel-files-empty">
+                  <div className="right-panel-files-empty-hint">
+                    <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M4 20h16a1 1 0 0 0 1-1V8.5L15.5 3H5a1 1 0 0 0-1 1v15a1 1 0 0 0 1 1Z" />
+                      <path d="M15 3v5h5" />
+                    </svg>
+                    <strong>{t("panelHome.openFiles")}</strong>
+                    <p>{t("panelHome.openFilesHint")}</p>
+                  </div>
+                </div>
+              )}
+
               <div
                 className="right-panel-files-explorer"
                 style={{
-                  width: activeFile ? "42%" : "100%",
-                  minWidth: activeFile ? 180 : 0,
-                  maxWidth: activeFile ? 420 : undefined,
-                  borderRight: activeFile ? "1px solid var(--border)" : "none",
+                  width: showFilePreview ? "42%" : "min(420px, 48%)",
+                  minWidth: 200,
+                  maxWidth: 420,
+                  borderLeft: "1px solid var(--border)",
                   display: "flex",
                   flexDirection: "column",
                   minHeight: 0,
+                  flexShrink: 0,
                 }}
               >
                 <div style={{ height: 36, display: "flex", alignItems: "center", padding: "0 12px", borderBottom: "1px solid var(--border)", background: "var(--bg-panel)", flexShrink: 0, gap: 6 }}>
@@ -192,44 +225,7 @@ export function WorkspaceFilePanel(props: WorkspaceFilePanelProps) {
                   )}
                 </div>
               </div>
-
-              {activeFile?.filePath ? (
-                <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
-                  <div style={{ display: "flex", alignItems: "center", flexShrink: 0, background: "var(--bg-panel)", borderBottom: "1px solid var(--border)", height: 36, paddingRight: 8 }}>
-                    <div style={{ flex: 1, overflow: "hidden" }}>
-                      <TabBar tabs={fileTabs} activeTabId={activeFileTabId ?? ""} onSelectTab={onSelectFileTab} onCloseTab={onCloseFileTab} />
-                    </div>
-                  </div>
-                  <div style={{ flex: 1, overflow: "hidden" }}>
-                    <FileViewer
-                      filePath={activeFile.filePath}
-                      cwd={cwd ?? undefined}
-                      sourceSessionId={activeFile.sourceSessionId}
-                      onOpenFile={(filePath) => onOpenFile(filePath, getFileName(filePath), { sourceSessionId: activeFile.sourceSessionId })}
-                      onMentionLines={onMentionLines}
-                      gitRefreshKey={explorerRefreshKey}
-                    />
-                  </div>
-                </div>
-              ) : (
-                <div className="right-panel-files-empty" style={{ display: activeFile ? "none" : fileTabs.length > 0 ? "none" : "flex" }}>
-                  {/* When only explorer is open with no file preview, explorer already fills width. */}
-                </div>
-              )}
             </div>
-          </div>
-
-          <div
-            style={{
-              display: activePanelTab?.kind === "review" ? "flex" : "none",
-              flex: 1,
-              minHeight: 0,
-            }}
-            className="right-panel-review-placeholder"
-            role="status"
-          >
-            <strong>{t("panelHome.reviewPlaceholder")}</strong>
-            <p>{t("panelHome.reviewHint")}</p>
           </div>
 
           <div
@@ -248,6 +244,3 @@ export function WorkspaceFilePanel(props: WorkspaceFilePanelProps) {
     </div>
   );
 }
-
-/** @deprecated kept for tests / call-site migration */
-export type RightPanelMode = "closed" | "home" | "explorer" | "file" | "chat" | "review";

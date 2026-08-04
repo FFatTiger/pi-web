@@ -1,27 +1,19 @@
 /**
- * Codex-style right panel multi-tab model.
- * See docs/codex-right-panel-ia.md (extracted from thread-app-shell-chrome).
+ * Codex-style right panel multi-tab model (files + side chat only for now).
+ * See docs/codex-right-panel-ia.md.
  */
 
-export type RightPanelTabKind = "sideChat" | "files" | "review";
+export type RightPanelTabKind = "sideChat" | "files";
 
 export type RightPanelTab = {
   id: string;
   kind: RightPanelTabKind;
-  /** Optional display override (e.g. open file name). */
+  /** Display label override (e.g. current open file name). */
   title?: string;
 };
 
-export type RightPanelTabAction = "review" | "terminal" | "browser" | "files" | "sideChat";
-
-/** Codex git sort order for known actions; others keep insertion order. */
-const ACTION_SORT: Record<string, number> = {
-  review: 0,
-  terminal: 1,
-  browser: 2,
-  files: 3,
-  sideChat: 4,
-};
+/** Actions shown in empty state / + menu. */
+export type RightPanelTabAction = "files" | "sideChat";
 
 export function tabIdForKind(kind: RightPanelTabKind): string {
   return `rp:${kind}`;
@@ -44,21 +36,41 @@ export function findTabByKind(tabs: RightPanelTab[], kind: RightPanelTabKind): R
 
 /**
  * Open or focus a tab of the given kind (Codex openTab: activate existing or append).
+ * Pass `title` to update the chip label (e.g. open file name).
+ * Pass `title: null` to clear an override.
  */
 export function openOrFocusRightPanelTab(
   tabs: RightPanelTab[],
   kind: RightPanelTabKind,
-  title?: string,
+  title?: string | null,
 ): { tabs: RightPanelTab[]; activeTabId: string } {
   const existing = findTabByKind(tabs, kind);
   if (existing) {
-    const nextTabs = title && title !== existing.title
-      ? tabs.map((tab) => (tab.id === existing.id ? { ...tab, title } : tab))
-      : tabs;
+    let nextTabs = tabs;
+    if (title !== undefined) {
+      const nextTitle = title === null ? undefined : title;
+      if (nextTitle !== existing.title) {
+        nextTabs = tabs.map((tab) => (
+          tab.id === existing.id ? { ...tab, title: nextTitle } : tab
+        ));
+      }
+    }
     return { tabs: nextTabs, activeTabId: existing.id };
   }
-  const tab = createRightPanelTab(kind, title);
+  const tab = createRightPanelTab(kind, title === null ? undefined : title);
   return { tabs: [...tabs, tab], activeTabId: tab.id };
+}
+
+export function updateRightPanelTabTitle(
+  tabs: RightPanelTab[],
+  kind: RightPanelTabKind,
+  title: string | null | undefined,
+): RightPanelTab[] {
+  const existing = findTabByKind(tabs, kind);
+  if (!existing) return tabs;
+  const nextTitle = title === null || title === undefined ? undefined : title;
+  if (existing.title === nextTitle) return tabs;
+  return tabs.map((tab) => (tab.id === existing.id ? { ...tab, title: nextTitle } : tab));
 }
 
 /**
@@ -83,41 +95,20 @@ export function closeRightPanelTab(
 export type RightPanelMenuItem = {
   id: RightPanelTabAction;
   enabled: boolean;
-  /** Codex keysLabel — display only */
   shortcut?: string;
-  /** Whether this action can create a real tab in pi-web today */
   available: boolean;
 };
 
 /**
- * Codex empty-state / + menu actions with git-style order.
- * Terminal & Browser stay listed but unavailable until capabilities exist.
+ * Empty-state / + menu: only Files + Side chat for current product scope.
  */
 export function buildRightPanelMenuItems(input: {
   hasWorkspace: boolean;
   hasSession: boolean;
   hasFilesTab?: boolean;
   hasSideChatTab?: boolean;
-  hasReviewTab?: boolean;
 }): RightPanelMenuItem[] {
-  const items: RightPanelMenuItem[] = [
-    {
-      id: "review",
-      enabled: !input.hasReviewTab,
-      available: true,
-      shortcut: "Ctrl+Shift+G",
-    },
-    {
-      id: "terminal",
-      enabled: false,
-      available: false,
-    },
-    {
-      id: "browser",
-      enabled: false,
-      available: false,
-      shortcut: "Ctrl+T",
-    },
+  return [
     {
       id: "files",
       enabled: input.hasWorkspace,
@@ -131,13 +122,8 @@ export function buildRightPanelMenuItems(input: {
       shortcut: "Ctrl+Alt+S",
     },
   ];
-
-  return items.sort((a, b) => (ACTION_SORT[a.id] ?? 99) - (ACTION_SORT[b.id] ?? 99));
 }
 
-export function actionToTabKind(action: RightPanelTabAction): RightPanelTabKind | null {
-  if (action === "review") return "review";
-  if (action === "files") return "files";
-  if (action === "sideChat") return "sideChat";
-  return null;
+export function actionToTabKind(action: RightPanelTabAction): RightPanelTabKind {
+  return action;
 }

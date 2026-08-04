@@ -83,6 +83,7 @@ export const zhCNLocale: LocalePlugin = {
     "panelHome.files": "文件",
     "panelHome.sideChat": "侧边聊天",
     "panelHome.openFiles": "打开文件",
+    "panelHome.openFilesHint": "从工作区目录树中选择文件",
     "panelHome.openTab": "打开侧边面板标签",
     "panelHome.comingSoon": "即将推出",
     "panelHome.filesNeedProject": "请先选择项目以浏览文件",

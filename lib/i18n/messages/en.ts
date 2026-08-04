@@ -83,6 +83,7 @@ export const enLocale: LocalePlugin = {
     "panelHome.files": "Files",
     "panelHome.sideChat": "Side chat",
     "panelHome.openFiles": "Open file",
+    "panelHome.openFilesHint": "Choose a file from the workspace tree",
     "panelHome.openTab": "Open side panel tab",
     "panelHome.comingSoon": "Coming soon",
     "panelHome.filesNeedProject": "Select a project to browse files",
