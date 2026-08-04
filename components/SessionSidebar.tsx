@@ -562,52 +562,68 @@ export function SessionSidebar({
     onNewSession?.(tempId, group.root, group.root);
   }, [onNewSession]);
 
-  const [removeTarget, setRemoveTarget] = useState<SidebarProjectGroup | null>(null);
-  const [removeBusy, setRemoveBusy] = useState(false);
-  const [removeError, setRemoveError] = useState<string | null>(null);
+  type ProjectDialogMode = "clear" | "remove";
+  const [projectDialog, setProjectDialog] = useState<{ group: SidebarProjectGroup; mode: ProjectDialogMode } | null>(null);
+  const [projectDialogBusy, setProjectDialogBusy] = useState(false);
+  const [projectDialogError, setProjectDialogError] = useState<string | null>(null);
 
-  const handleRemoveProject = useCallback(async () => {
-    if (!removeTarget || removeBusy) return;
-    setRemoveBusy(true);
-    setRemoveError(null);
-    try {
-      const sessionIds = removeTarget.sessions.map((session) => session.id);
-      const results = await Promise.allSettled(
-        sessionIds.map(async (sessionId) => {
-          const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
-          if (!response.ok) {
-            const body = await response.json().catch(() => ({})) as { error?: string };
-            throw new Error(body.error ?? `HTTP ${response.status}`);
-          }
-          onSessionDeleted?.(sessionId);
-        }),
-      );
-      const failed = results.filter((result) => result.status === "rejected").length;
-      if (failed > 0) {
-        throw new Error(`${t("sidebar.removeProjectError")} (${failed}/${sessionIds.length})`);
-      }
-
-      setManualProjects((previous) => removeManualProject(previous, removeTarget.root));
-      setExpandedProjects((previous) => {
-        if (!previous.has(removeTarget.root)) return previous;
-        const next = new Set(previous);
-        next.delete(removeTarget.root);
-        return next;
-      });
-      setShowAllSessionProjects((previous) => {
-        if (!previous.has(removeTarget.root)) return previous;
-        const next = new Set(previous);
-        next.delete(removeTarget.root);
-        return next;
-      });
-      await loadSessions(false);
-      setRemoveTarget(null);
-    } catch (error) {
-      setRemoveError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setRemoveBusy(false);
+  const deleteProjectSessions = useCallback(async (group: SidebarProjectGroup, errorKey: "sidebar.clearChatsError" | "sidebar.removeProjectError") => {
+    const sessionIds = group.sessions.map((session) => session.id);
+    if (sessionIds.length === 0) return;
+    const results = await Promise.allSettled(
+      sessionIds.map(async (sessionId) => {
+        const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({})) as { error?: string };
+          throw new Error(body.error ?? `HTTP ${response.status}`);
+        }
+        onSessionDeleted?.(sessionId);
+      }),
+    );
+    const failed = results.filter((result) => result.status === "rejected").length;
+    if (failed > 0) {
+      throw new Error(`${t(errorKey)} (${failed}/${sessionIds.length})`);
     }
-  }, [loadSessions, onSessionDeleted, removeBusy, removeTarget, t]);
+  }, [onSessionDeleted, t]);
+
+  const handleProjectDialogConfirm = useCallback(async () => {
+    if (!projectDialog || projectDialogBusy) return;
+    setProjectDialogBusy(true);
+    setProjectDialogError(null);
+    const { group, mode } = projectDialog;
+    try {
+      if (mode === "clear") {
+        if (group.sessions.length === 0) {
+          throw new Error(t("sidebar.clearChatsEmpty"));
+        }
+        await deleteProjectSessions(group, "sidebar.clearChatsError");
+        // Keep the empty project visible by ensuring it stays in manual projects.
+        setManualProjects((previous) => upsertManualProject(previous, group.root, new Date().toISOString()));
+        setExpandedProjects((previous) => new Set(previous).add(group.root));
+      } else {
+        await deleteProjectSessions(group, "sidebar.removeProjectError");
+        setManualProjects((previous) => removeManualProject(previous, group.root));
+        setExpandedProjects((previous) => {
+          if (!previous.has(group.root)) return previous;
+          const next = new Set(previous);
+          next.delete(group.root);
+          return next;
+        });
+        setShowAllSessionProjects((previous) => {
+          if (!previous.has(group.root)) return previous;
+          const next = new Set(previous);
+          next.delete(group.root);
+          return next;
+        });
+      }
+      await loadSessions(false);
+      setProjectDialog(null);
+    } catch (error) {
+      setProjectDialogError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setProjectDialogBusy(false);
+    }
+  }, [deleteProjectSessions, loadSessions, projectDialog, projectDialogBusy, t]);
 
   const renderProjectGroup = (group: SidebarProjectGroup) => {
     const expanded = expandedProjects.has(group.root);
@@ -633,9 +649,13 @@ export function SessionSidebar({
           event.stopPropagation();
           startProjectSession(group);
         }}
+        onClearChats={() => {
+          setProjectDialogError(null);
+          setProjectDialog({ group, mode: "clear" });
+        }}
         onRemoveProject={() => {
-          setRemoveError(null);
-          setRemoveTarget(group);
+          setProjectDialogError(null);
+          setProjectDialog({ group, mode: "remove" });
         }}
         onSelectSession={onSelectSession}
         onRenamed={loadSessions}
@@ -918,18 +938,19 @@ export function SessionSidebar({
         )}
       </div>
 
-      {removeTarget && (
-        <RemoveProjectDialog
-          projectName={getProjectDisplayName(removeTarget.root)}
-          chatCount={removeTarget.sessions.length}
-          busy={removeBusy}
-          error={removeError}
+      {projectDialog && (
+        <ProjectActionDialog
+          mode={projectDialog.mode}
+          projectName={getProjectDisplayName(projectDialog.group.root)}
+          chatCount={projectDialog.group.sessions.length}
+          busy={projectDialogBusy}
+          error={projectDialogError}
           onCancel={() => {
-            if (removeBusy) return;
-            setRemoveTarget(null);
-            setRemoveError(null);
+            if (projectDialogBusy) return;
+            setProjectDialog(null);
+            setProjectDialogError(null);
           }}
-          onConfirm={() => void handleRemoveProject()}
+          onConfirm={() => void handleProjectDialogConfirm()}
         />
       )}
     </div>
@@ -965,6 +986,7 @@ function ProjectGroup({
   unreadSessionIds,
   onToggle,
   onNewSession,
+  onClearChats,
   onRemoveProject,
   onSelectSession,
   onRenamed,
@@ -982,6 +1004,7 @@ function ProjectGroup({
   unreadSessionIds: Set<string>;
   onToggle: () => void;
   onNewSession: (event: React.MouseEvent) => void;
+  onClearChats: () => void;
   onRemoveProject: () => void;
   onSelectSession: (session: SessionInfo, isRestore?: boolean) => void;
   onRenamed: () => void;
@@ -1164,7 +1187,7 @@ function ProjectGroup({
                 top: "calc(100% + 4px)",
                 right: 0,
                 zIndex: 40,
-                minWidth: 160,
+                minWidth: 168,
                 padding: 4,
                 border: "1px solid var(--border)",
                 borderRadius: 10,
@@ -1172,6 +1195,46 @@ function ProjectGroup({
                 boxShadow: "0 10px 28px rgba(0,0,0,0.12)",
               }}
             >
+              <button
+                type="button"
+                role="menuitem"
+                disabled={group.sessions.length === 0}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  if (group.sessions.length === 0) return;
+                  setMenuOpen(false);
+                  onClearChats();
+                }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  width: "100%",
+                  padding: "8px 10px",
+                  border: "none",
+                  borderRadius: 7,
+                  background: "transparent",
+                  color: group.sessions.length === 0 ? "var(--text-dim)" : "var(--text)",
+                  cursor: group.sessions.length === 0 ? "not-allowed" : "pointer",
+                  fontSize: 13,
+                  textAlign: "left",
+                  opacity: group.sessions.length === 0 ? 0.55 : 1,
+                }}
+                onMouseEnter={(e) => {
+                  if (group.sessions.length === 0) return;
+                  e.currentTarget.style.background = "var(--bg-hover)";
+                }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M3 6h18" />
+                  <path d="M8 6V4h8v2" />
+                  <path d="M19 6l-1 14H6L5 6" />
+                  <path d="M10 11v6" />
+                  <path d="M14 11v6" />
+                </svg>
+                <span>{t("sidebar.clearChats")}</span>
+              </button>
               <button
                 type="button"
                 role="menuitem"
@@ -1262,7 +1325,8 @@ function ProjectGroup({
   );
 }
 
-function RemoveProjectDialog({
+function ProjectActionDialog({
+  mode,
   projectName,
   chatCount,
   busy,
@@ -1270,6 +1334,7 @@ function RemoveProjectDialog({
   onCancel,
   onConfirm,
 }: {
+  mode: "clear" | "remove";
   projectName: string;
   chatCount: number;
   busy: boolean;
@@ -1278,6 +1343,17 @@ function RemoveProjectDialog({
   onConfirm: () => void;
 }) {
   const { t } = useI18n();
+  const isClear = mode === "clear";
+  const title = isClear
+    ? t("sidebar.clearChatsTitle", { name: projectName })
+    : t("sidebar.removeProjectTitle", { name: projectName });
+  const body = isClear
+    ? t("sidebar.clearChatsBody")
+    : t("sidebar.removeProjectBody");
+  const confirmLabel = busy
+    ? (isClear ? t("sidebar.clearingChats") : t("sidebar.removingProject"))
+    : (isClear ? t("sidebar.clearChatsConfirm") : t("sidebar.removeProjectConfirm"));
+
   return createPortal(
     <div
       style={{
@@ -1295,7 +1371,7 @@ function RemoveProjectDialog({
       <div
         role="dialog"
         aria-modal="true"
-        aria-labelledby="remove-project-title"
+        aria-labelledby="project-action-title"
         onClick={(event) => event.stopPropagation()}
         style={{
           width: "min(420px, 100%)",
@@ -1307,11 +1383,11 @@ function RemoveProjectDialog({
         }}
       >
         <div style={{ padding: "16px 18px 8px" }}>
-          <div id="remove-project-title" style={{ fontSize: 15, fontWeight: 650, color: "var(--text)" }}>
-            {t("sidebar.removeProjectTitle", { name: projectName })}
+          <div id="project-action-title" style={{ fontSize: 15, fontWeight: 650, color: "var(--text)" }}>
+            {title}
           </div>
           <div style={{ marginTop: 8, fontSize: 13, lineHeight: 1.55, color: "var(--text-muted)" }}>
-            {t("sidebar.removeProjectBody")}
+            {body}
             {chatCount > 0 ? ` (${chatCount})` : ""}
           </div>
           {error && (
@@ -1362,7 +1438,7 @@ function RemoveProjectDialog({
               opacity: busy ? 0.75 : 1,
             }}
           >
-            {busy ? t("sidebar.removingProject") : t("sidebar.removeProjectConfirm")}
+            {confirmLabel}
           </button>
         </div>
       </div>
