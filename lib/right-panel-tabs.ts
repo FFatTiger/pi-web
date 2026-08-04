@@ -1,26 +1,55 @@
 /**
- * Codex-style right panel multi-tab model (files + side chat only for now).
- * See docs/codex-right-panel-ia.md.
+ * Codex-style right panel multi-tab model.
+ * - sideChat: one side-chat tab
+ * - files: explorer shell (no specific file)
+ * - file: one top-level chip per open file (Codex open-file tabs)
  */
 
-export type RightPanelTabKind = "sideChat" | "files";
+export type RightPanelTabKind = "sideChat" | "files" | "file";
 
 export type RightPanelTab = {
   id: string;
   kind: RightPanelTabKind;
-  /** Display label override (e.g. current open file name). */
+  /** Display label (file name / side chat title). */
   title?: string;
+  /** Absolute path when kind === "file". */
+  filePath?: string;
+  sourceSessionId?: string | null;
+  initialDisplayMode?: "source" | "preview" | "diff";
 };
 
 /** Actions shown in empty state / + menu. */
 export type RightPanelTabAction = "files" | "sideChat";
 
-export function tabIdForKind(kind: RightPanelTabKind): string {
+export function tabIdForKind(kind: Exclude<RightPanelTabKind, "file">): string {
   return `rp:${kind}`;
 }
 
-export function createRightPanelTab(kind: RightPanelTabKind, title?: string): RightPanelTab {
+export function tabIdForFile(filePath: string): string {
+  return `file:${filePath}`;
+}
+
+export function createRightPanelTab(
+  kind: Exclude<RightPanelTabKind, "file">,
+  title?: string,
+): RightPanelTab {
   return { id: tabIdForKind(kind), kind, title };
+}
+
+export function createFilePanelTab(input: {
+  filePath: string;
+  fileName: string;
+  sourceSessionId?: string | null;
+  initialDisplayMode?: "source" | "preview" | "diff";
+}): RightPanelTab {
+  return {
+    id: tabIdForFile(input.filePath),
+    kind: "file",
+    title: input.fileName,
+    filePath: input.filePath,
+    sourceSessionId: input.sourceSessionId,
+    initialDisplayMode: input.initialDisplayMode,
+  };
 }
 
 export function emptyRightPanelTabs(): {
@@ -30,18 +59,27 @@ export function emptyRightPanelTabs(): {
   return { tabs: [], activeTabId: null };
 }
 
-export function findTabByKind(tabs: RightPanelTab[], kind: RightPanelTabKind): RightPanelTab | null {
+export function findTabByKind(
+  tabs: RightPanelTab[],
+  kind: Exclude<RightPanelTabKind, "file">,
+): RightPanelTab | null {
   return tabs.find((tab) => tab.kind === kind) ?? null;
 }
 
+export function findFileTab(tabs: RightPanelTab[], filePath: string): RightPanelTab | null {
+  return tabs.find((tab) => tab.kind === "file" && tab.filePath === filePath) ?? null;
+}
+
+export function listFileTabs(tabs: RightPanelTab[]): RightPanelTab[] {
+  return tabs.filter((tab) => tab.kind === "file" && Boolean(tab.filePath));
+}
+
 /**
- * Open or focus a tab of the given kind (Codex openTab: activate existing or append).
- * Pass `title` to update the chip label (e.g. open file name).
- * Pass `title: null` to clear an override.
+ * Open or focus a non-file tab (sideChat / files shell).
  */
 export function openOrFocusRightPanelTab(
   tabs: RightPanelTab[],
-  kind: RightPanelTabKind,
+  kind: Exclude<RightPanelTabKind, "file">,
   title?: string | null,
 ): { tabs: RightPanelTab[]; activeTabId: string } {
   const existing = findTabByKind(tabs, kind);
@@ -61,9 +99,40 @@ export function openOrFocusRightPanelTab(
   return { tabs: [...tabs, tab], activeTabId: tab.id };
 }
 
+/**
+ * Open or focus a file as its own top-level panel tab (Codex multi open files).
+ */
+export function openOrFocusFilePanelTab(
+  tabs: RightPanelTab[],
+  input: {
+    filePath: string;
+    fileName: string;
+    sourceSessionId?: string | null;
+    initialDisplayMode?: "source" | "preview" | "diff";
+  },
+): { tabs: RightPanelTab[]; activeTabId: string } {
+  const existing = findFileTab(tabs, input.filePath);
+  if (existing) {
+    const nextTabs = tabs.map((tab) => {
+      if (tab.id !== existing.id) return tab;
+      return {
+        ...tab,
+        title: input.fileName,
+        sourceSessionId: input.sourceSessionId ?? tab.sourceSessionId,
+        initialDisplayMode: input.initialDisplayMode ?? tab.initialDisplayMode,
+      };
+    });
+    return { tabs: nextTabs, activeTabId: existing.id };
+  }
+  // Drop empty explorer shell when the first real file opens.
+  const withoutEmptyFilesShell = tabs.filter((tab) => tab.kind !== "files");
+  const tab = createFilePanelTab(input);
+  return { tabs: [...withoutEmptyFilesShell, tab], activeTabId: tab.id };
+}
+
 export function updateRightPanelTabTitle(
   tabs: RightPanelTab[],
-  kind: RightPanelTabKind,
+  kind: Exclude<RightPanelTabKind, "file">,
   title: string | null | undefined,
 ): RightPanelTab[] {
   const existing = findTabByKind(tabs, kind);
@@ -105,8 +174,6 @@ export type RightPanelMenuItem = {
 export function buildRightPanelMenuItems(input: {
   hasWorkspace: boolean;
   hasSession: boolean;
-  hasFilesTab?: boolean;
-  hasSideChatTab?: boolean;
 }): RightPanelMenuItem[] {
   return [
     {
@@ -124,6 +191,6 @@ export function buildRightPanelMenuItems(input: {
   ];
 }
 
-export function actionToTabKind(action: RightPanelTabAction): RightPanelTabKind {
+export function actionToTabKind(action: RightPanelTabAction): Exclude<RightPanelTabKind, "file"> {
   return action;
 }

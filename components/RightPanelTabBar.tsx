@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useI18n } from "@/hooks/useI18n";
 import type { RightPanelTab, RightPanelTabAction } from "@/lib/right-panel-tabs";
+import { getFileIcon } from "./FileIcons";
 import { RightPanelHome } from "./RightPanelHome";
 
 interface RightPanelTabBarProps {
@@ -11,6 +12,8 @@ interface RightPanelTabBarProps {
   activeTabId: string | null;
   hasWorkspace: boolean;
   hasSession: boolean;
+  explorerOpen?: boolean;
+  onToggleExplorer?: () => void;
   onSelectTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => void;
   onOpenAction: (action: RightPanelTabAction) => void;
@@ -22,10 +25,14 @@ function tabLabel(
 ): string {
   if (tab.title) return tab.title;
   if (tab.kind === "sideChat") return t("sideChat.title");
+  if (tab.kind === "file") return tab.filePath?.split(/[\\/]/).pop() ?? t("panelHome.openFiles");
   return t("panelHome.openFiles");
 }
 
-function TabKindIcon({ kind }: { kind: RightPanelTab["kind"] }) {
+function TabKindIcon({ tab }: { tab: RightPanelTab }) {
+  if (tab.kind === "file") {
+    return <>{getFileIcon(tab.title ?? tab.filePath ?? "file", 12)}</>;
+  }
   const common = {
     width: 12,
     height: 12,
@@ -37,7 +44,7 @@ function TabKindIcon({ kind }: { kind: RightPanelTab["kind"] }) {
     strokeLinejoin: "round" as const,
     "aria-hidden": true as const,
   };
-  if (kind === "sideChat") {
+  if (tab.kind === "sideChat") {
     return (
       <svg {...common}>
         <path d="M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
@@ -57,6 +64,8 @@ export function RightPanelTabBar({
   activeTabId,
   hasWorkspace,
   hasSession,
+  explorerOpen = true,
+  onToggleExplorer,
   onSelectTab,
   onCloseTab,
   onOpenAction,
@@ -103,7 +112,6 @@ export function RightPanelTabBar({
       if (event.key === "Escape") setMenuOpen(false);
     };
     const onReposition = () => updateMenuPos();
-    // Use click (not mousedown) so the opening click on + is not raced.
     document.addEventListener("click", onPointer);
     document.addEventListener("keydown", onKey);
     window.addEventListener("resize", onReposition);
@@ -134,7 +142,7 @@ export function RightPanelTabBar({
                 onClick={() => onSelectTab(tab.id)}
                 title={tabLabel(tab, t)}
               >
-                <TabKindIcon kind={tab.kind} />
+                <TabKindIcon tab={tab} />
                 <span className="right-panel-tab-chip-label">{tabLabel(tab, t)}</span>
               </button>
               <button
@@ -177,6 +185,21 @@ export function RightPanelTabBar({
           </svg>
         </button>
       </div>
+
+      {onToggleExplorer && (
+        <button
+          type="button"
+          className={`right-panel-tabbar-explorer-toggle${explorerOpen ? " is-active" : ""}`}
+          title={explorerOpen ? t("files.hideExplorer") : t("files.showExplorer")}
+          aria-label={explorerOpen ? t("files.hideExplorer") : t("files.showExplorer")}
+          aria-pressed={explorerOpen}
+          onClick={onToggleExplorer}
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+          </svg>
+        </button>
+      )}
 
       {menuOpen && menuPos && typeof document !== "undefined" && createPortal(
         <div

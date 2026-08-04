@@ -189,6 +189,8 @@ export const enLocale: LocalePlugin = {
     "files.copyPath": "Copy path",
     "files.revealInExplorer": "Reveal in explorer",
     "files.openInNewTab": "Open in new tab",
+    "files.hideExplorer": "Hide file tree",
+    "files.showExplorer": "Show file tree",
     "sideChat.title": "Side Chat",
     "sideChat.show": "Show Side Chat",
     "sideChat.hide": "Hide Side Chat",

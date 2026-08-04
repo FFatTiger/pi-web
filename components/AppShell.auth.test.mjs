@@ -69,18 +69,17 @@ test("Side Chat open state is remembered per main session", () => {
 });
 
 test("open file tabs are scoped per session like Codex", () => {
-  assert.match(source, /filePanelBySessionRef/);
+  assert.match(source, /rightPanelTabsBySessionRef/);
   assert.match(source, /captureCurrentSessionFilePanel/);
   assert.match(source, /applySessionFilePanel/);
-  assert.match(source, /captureSessionFilePanelState/);
-  assert.match(source, /emptySessionFilePanelState/);
+  assert.match(source, /openOrFocusFilePanelTab/);
   // Leaving A captures before restoring B.
   assert.match(source, /if \(activeSessionIdRef\.current && activeSessionIdRef\.current !== session\.id\)/);
   assert.match(source, /captureCurrentSessionFilePanel\(\)/);
   assert.match(source, /applySessionFilePanel\(session\.id\)/);
   // New / deleted sessions do not keep foreign tabs.
   assert.match(source, /applySessionFilePanel\(null\)/);
-  assert.match(source, /filePanelBySessionRef\.current\.delete\(sessionId\)/);
+  assert.match(source, /rightPanelTabsBySessionRef\.current\.delete\(sessionId\)/);
 });
 
 test("right panel chrome is multi-tab open/maximize (Codex RightPanelTabs)", () => {
@@ -92,9 +91,11 @@ test("right panel chrome is multi-tab open/maximize (Codex RightPanelTabs)", () 
   assert.match(source, /closeRightPanelTab/);
   assert.match(source, /toggleRightPanelMaximized/);
   assert.match(source, /right-panel-maximized/);
-  // Codex multi-tab: side chat / files / review coexist as panel tabs.
+  // Codex multi-tab: side chat / files / open-file chips coexist as panel tabs.
   assert.match(source, /openRightPanelKind\("sideChat"\)/);
   assert.match(source, /openRightPanelKind\("files"/);
+  assert.match(source, /openOrFocusFilePanelTab/);
   assert.match(source, /actionToTabKind/);
   assert.match(source, /rightPanelTabsBySessionRef/);
+  assert.match(source, /explorerOpen/);
 });

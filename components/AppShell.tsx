@@ -5,7 +5,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useGlobalKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { SessionSidebar } from "./SessionSidebar";
 import { ChatWindow } from "./ChatWindow";
-import type { Tab } from "./TabBar";
 import { ModelsConfig } from "./ModelsConfig";
 import { SkillsConfig } from "./SkillsConfig";
 import { PluginsConfig } from "./PluginsConfig";
@@ -35,18 +34,12 @@ import {
   SIDEBAR_MIN_WIDTH,
 } from "@/lib/panel-layout";
 import {
-  blankPanelAfterLeaveSession,
-  captureSessionFilePanelState,
-  emptySessionFilePanelState,
-  type SessionFilePanelState,
-} from "@/lib/session-file-panel";
-import {
   actionToTabKind,
   closeRightPanelTab,
   emptyRightPanelTabs,
   findTabByKind,
+  openOrFocusFilePanelTab,
   openOrFocusRightPanelTab,
-  updateRightPanelTabTitle,
   type RightPanelTab,
   type RightPanelTabAction,
   type RightPanelTabKind,
@@ -102,9 +95,7 @@ export function AppShell() {
   // Side Chat open/closed is remembered per main session so switching A→B
   // does not carry A's panel, and returning to A restores it.
   const sideChatOpenBySessionRef = useRef(new Map<string, boolean>());
-  // Codex-style: open file tabs are conversation-scoped.
-  const filePanelBySessionRef = useRef(new Map<string, SessionFilePanelState>());
-  // Right panel shell tabs (side chat / files) per main session.
+  // Right panel shell tabs (side chat / files / open files) per main session.
   const rightPanelTabsBySessionRef = useRef(new Map<string, { tabs: RightPanelTab[]; activeTabId: string | null }>());
   const sidebarWidthRef = useRef(SIDEBAR_DEFAULT_WIDTH);
   const rightPanelWidthRef = useRef(RIGHT_PANEL_FALLBACK_WIDTH);
@@ -295,77 +286,42 @@ export function AppShell() {
     return () => ro.disconnect();
   }, [activeTopPanel]);
 
-  // File viewer tabs inside the Files panel tab (Codex open files).
-  const [fileTabs, setFileTabs] = useState<Tab[]>([]);
-  const [activeFileTabId, setActiveFileTabId] = useState<string | null>(null);
   const [changesCollapsed, setChangesCollapsed] = useState(true);
   const [changesCount, setChangesCount] = useState(0);
-  const fileTabsRef = useRef<Tab[]>(fileTabs);
-  const activeFileTabIdRef = useRef<string | null>(activeFileTabId);
+  // Codex: folder tree is independently collapsible from the open-file tabs.
+  const [explorerOpen, setExplorerOpen] = useState(true);
   const rightPanelTabsRef = useRef<RightPanelTab[]>(rightPanelTabs);
   const activeRightPanelTabIdRef = useRef<string | null>(activeRightPanelTabId);
-  fileTabsRef.current = fileTabs;
-  activeFileTabIdRef.current = activeFileTabId;
   rightPanelTabsRef.current = rightPanelTabs;
   activeRightPanelTabIdRef.current = activeRightPanelTabId;
 
   const activeRightPanelTab = rightPanelTabs.find((tab) => tab.id === activeRightPanelTabId) ?? null;
-  const filesPanelActive = rightPanelOpen && activeRightPanelTab?.kind === "files";
+  const filesPanelActive = rightPanelOpen
+    && (activeRightPanelTab?.kind === "files" || activeRightPanelTab?.kind === "file");
   const sideChatPanelActive = rightPanelOpen && activeRightPanelTab?.kind === "sideChat";
-  const activeOpenFileName = fileTabs.find((tab) => tab.id === activeFileTabId)?.label
-    ?? fileTabs[fileTabs.length - 1]?.label
-    ?? null;
 
-  // Keep files-chip title in sync with the active open file.
-  useEffect(() => {
-    setRightPanelTabs((prev) => {
-      if (!findTabByKind(prev, "files")) return prev;
-      return updateRightPanelTabTitle(prev, "files", activeOpenFileName);
-    });
-  }, [activeOpenFileName]);
-
-  // Keep the active session's open-files + panel-tabs snapshots fresh.
+  // Keep the active session's panel-tabs snapshot fresh (includes open files).
   useEffect(() => {
     const sessionId = selectedSession?.id;
     if (!sessionId) return;
-    filePanelBySessionRef.current.set(
-      sessionId,
-      captureSessionFilePanelState({
-        tabs: fileTabs,
-        activeTabId: activeFileTabId,
-      }),
-    );
     persistRightPanelTabs(sessionId, rightPanelTabs, activeRightPanelTabId);
-  }, [activeFileTabId, activeRightPanelTabId, fileTabs, persistRightPanelTabs, rightPanelTabs, selectedSession?.id]);
+  }, [activeRightPanelTabId, persistRightPanelTabs, rightPanelTabs, selectedSession?.id]);
 
   const captureCurrentSessionFilePanel = useCallback(() => {
     const sessionId = activeSessionIdRef.current;
     if (!sessionId) return;
-    filePanelBySessionRef.current.set(
-      sessionId,
-      captureSessionFilePanelState({
-        tabs: fileTabsRef.current,
-        activeTabId: activeFileTabIdRef.current,
-      }),
-    );
     persistRightPanelTabs(sessionId, rightPanelTabsRef.current, activeRightPanelTabIdRef.current);
   }, [persistRightPanelTabs]);
 
   const applySessionFilePanel = useCallback((sessionId: string | null) => {
     if (!sessionId) {
-      const blank = blankPanelAfterLeaveSession();
       const emptyTabs = emptyRightPanelTabs();
-      setFileTabs(blank.tabs);
-      setActiveFileTabId(blank.activeTabId);
       setRightPanelTabs(emptyTabs.tabs);
       setActiveRightPanelTabId(emptyTabs.activeTabId);
       setRightPanelOpen(false);
       setRightPanelMaximized(false);
       return;
     }
-    const restored = filePanelBySessionRef.current.get(sessionId) ?? emptySessionFilePanelState();
-    setFileTabs(restored.tabs.map((tab) => ({ ...tab })));
-    setActiveFileTabId(restored.activeTabId);
 
     const savedPanel = rightPanelTabsBySessionRef.current.get(sessionId);
     let nextTabs = savedPanel?.tabs.map((tab) => ({ ...tab })) ?? [];
@@ -375,12 +331,6 @@ export function AppShell() {
       const opened = openOrFocusRightPanelTab(nextTabs, "sideChat");
       nextTabs = opened.tabs;
       nextActive = opened.activeTabId;
-    }
-    // Restore files tab when the session had open files.
-    if (restored.tabs.length > 0 && !findTabByKind(nextTabs, "files")) {
-      const opened = openOrFocusRightPanelTab(nextTabs, "files");
-      nextTabs = opened.tabs;
-      if (!nextActive) nextActive = opened.activeTabId;
     }
     if (nextActive && !nextTabs.some((tab) => tab.id === nextActive)) {
       nextActive = nextTabs[nextTabs.length - 1]?.id ?? null;
@@ -552,14 +502,7 @@ export function AppShell() {
   const handleSessionCreated = useCallback((session: SessionInfo) => {
     setNewSessionCwd(null);
     setSelectedSession(session);
-    // Bind any files / panel tabs opened on the blank composer to the new conversation id.
-    filePanelBySessionRef.current.set(
-      session.id,
-      captureSessionFilePanelState({
-        tabs: fileTabsRef.current,
-        activeTabId: activeFileTabIdRef.current,
-      }),
-    );
+    // Bind any panel tabs opened on the blank composer to the new conversation id.
     persistRightPanelTabs(session.id, rightPanelTabsRef.current, activeRightPanelTabIdRef.current);
     setRefreshKey((k) => k + 1);
     hydrateSelectedSession(session.id);
@@ -610,13 +553,6 @@ export function AppShell() {
   const handleSessionForked = useCallback((newSessionId: string) => {
     // Keep parent's open files under the parent id; fork starts with a copy of the live panel.
     captureCurrentSessionFilePanel();
-    filePanelBySessionRef.current.set(
-      newSessionId,
-      captureSessionFilePanelState({
-        tabs: fileTabsRef.current,
-        activeTabId: activeFileTabIdRef.current,
-      }),
-    );
     persistRightPanelTabs(newSessionId, rightPanelTabsRef.current, activeRightPanelTabIdRef.current);
     setRefreshKey((k) => k + 1);
     setSessionKey((k) => k + 1);
@@ -645,8 +581,6 @@ export function AppShell() {
       setSystemPrompt(null);
       setActiveTopPanel(null);
       // Drop the panel without re-writing the per-session map entry we are about to delete.
-      setFileTabs([]);
-      setActiveFileTabId(null);
       setRightPanelTabs([]);
       setActiveRightPanelTabId(null);
       setRightPanelOpen(false);
@@ -654,11 +588,10 @@ export function AppShell() {
       router.replace("/", { scroll: false });
     }
     sideChatOpenBySessionRef.current.delete(sessionId);
-    filePanelBySessionRef.current.delete(sessionId);
     rightPanelTabsBySessionRef.current.delete(sessionId);
   }, [selectedSession, router]);
 
-  const openRightPanelKind = useCallback((kind: RightPanelTabKind, title?: string) => {
+  const openRightPanelKind = useCallback((kind: Exclude<RightPanelTabKind, "file">, title?: string) => {
     if (isMobile) setSidebarOpen(false);
     setRightPanelTabs((prev) => {
       const next = openOrFocusRightPanelTab(prev, kind, title);
@@ -698,66 +631,37 @@ export function AppShell() {
     fileName: string,
     options?: { sourceSessionId?: string | null; modeHint?: "diff" },
   ) => {
-    const sourceSessionId = options?.sourceSessionId;
-    const modeHint = options?.modeHint;
-    const tabId = `file:${filePath}`;
-    setFileTabs((prev) => {
-      const existing = prev.find((t) => t.id === tabId);
-      if (!existing) {
-        return [...prev, {
-          id: tabId,
-          label: fileName,
-          filePath,
-          sourceSessionId,
-          initialDisplayMode: modeHint,
-        }];
-      }
-      const sourceUnchanged = !sourceSessionId || existing.sourceSessionId === sourceSessionId;
-      const modeUnchanged = !modeHint || existing.initialDisplayMode === modeHint;
-      if (sourceUnchanged && modeUnchanged) return prev;
-      return prev.map((t) => {
-        if (t.id !== tabId) return t;
-        const next: Tab = { ...t };
-        if (sourceSessionId) next.sourceSessionId = sourceSessionId;
-        if (modeHint) next.initialDisplayMode = modeHint;
-        return next;
+    if (isMobile) setSidebarOpen(false);
+    setRightPanelTabs((prev) => {
+      const next = openOrFocusFilePanelTab(prev, {
+        filePath,
+        fileName,
+        sourceSessionId: options?.sourceSessionId,
+        initialDisplayMode: options?.modeHint,
       });
+      setActiveRightPanelTabId(next.activeTabId);
+      persistRightPanelTabs(activeSessionIdRef.current, next.tabs, next.activeTabId);
+      return next.tabs;
     });
-    setActiveFileTabId(tabId);
-    openRightPanelKind("files", fileName);
-  }, [openRightPanelKind]);
+    setRightPanelOpen(true);
+  }, [isMobile, persistRightPanelTabs]);
 
   const handleOpenLinkedFile = useCallback((filePath: string) => {
     handleOpenFile(filePath, getFileName(filePath), { sourceSessionId: selectedSession?.id ?? null });
   }, [handleOpenFile, selectedSession?.id]);
 
-  const handleCloseFileTab = useCallback((tabId: string) => {
-    setFileTabs((prev) => {
-      const next = prev.filter((t) => t.id !== tabId);
-      const nextActive = activeFileTabIdRef.current === tabId
-        ? (next[next.length - 1]?.id ?? null)
-        : activeFileTabIdRef.current;
-      if (activeFileTabIdRef.current === tabId) {
-        setActiveFileTabId(nextActive);
-      }
-      const nextTitle = next.find((tab) => tab.id === nextActive)?.label
-        ?? next[next.length - 1]?.label
-        ?? null;
-      setRightPanelTabs((panelTabs) => updateRightPanelTabTitle(panelTabs, "files", nextTitle));
-      return next;
-    });
-  }, []);
-
   const toggleExplorerPanel = useCallback(() => {
     if (!activeCwd) return;
     if (isMobile) setSidebarOpen(false);
-    const existing = findTabByKind(rightPanelTabsRef.current, "files");
-    if (rightPanelOpen && existing && activeRightPanelTabIdRef.current === existing.id) {
-      handleCloseRightPanelTab(existing.id);
+    // If files surface already open, just toggle the tree. Otherwise open files shell.
+    const hasFilesSurface = rightPanelTabsRef.current.some((tab) => tab.kind === "files" || tab.kind === "file");
+    if (rightPanelOpen && hasFilesSurface) {
+      setExplorerOpen((value) => !value);
       return;
     }
+    setExplorerOpen(true);
     openRightPanelKind("files");
-  }, [activeCwd, handleCloseRightPanelTab, isMobile, openRightPanelKind, rightPanelOpen]);
+  }, [activeCwd, isMobile, openRightPanelKind, rightPanelOpen]);
 
   const toggleSideChatPanel = useCallback(() => {
     if (!selectedSession) return;
@@ -1553,16 +1457,14 @@ export function AppShell() {
           tabs={rightPanelTabs}
           activeTabId={activeRightPanelTabId}
           cwd={activeCwd}
-          fileTabs={fileTabs}
-          activeFileTabId={activeFileTabId}
           explorerRefreshKey={explorerRefreshKey}
           changesCollapsed={changesCollapsed}
+          explorerOpen={explorerOpen}
           canOpenSideChat={Boolean(selectedSession)}
           onSelectPanelTab={handleSelectRightPanelTab}
           onClosePanelTab={handleCloseRightPanelTab}
           onOpenAction={handleOpenRightPanelAction}
-          onSelectFileTab={setActiveFileTabId}
-          onCloseFileTab={handleCloseFileTab}
+          onToggleExplorer={() => setExplorerOpen((value) => !value)}
           onOpenFile={handleOpenFile}
           onAtMention={handleAtMention}
           onAtMentions={handleAtMentions}

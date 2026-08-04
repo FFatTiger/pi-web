@@ -189,6 +189,8 @@ export const zhCNLocale: LocalePlugin = {
     "files.copyPath": "复制路径",
     "files.revealInExplorer": "在资源树中显示",
     "files.openInNewTab": "在新标签页打开",
+    "files.hideExplorer": "隐藏文件树",
+    "files.showExplorer": "显示文件树",
     "sideChat.title": "侧边聊天",
     "sideChat.show": "显示侧边聊天",
     "sideChat.hide": "隐藏侧边聊天",
