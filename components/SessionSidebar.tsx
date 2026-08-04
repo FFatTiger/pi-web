@@ -49,6 +49,51 @@ const RUNNING_SESSIONS_POLL_MS = 2500;
 const MANUAL_PROJECTS_STORAGE_KEY = "pi-web:manual-projects";
 const EXPANDED_PROJECTS_STORAGE_KEY = "pi-web:expanded-projects";
 
+type AnchorRect = { top: number; left: number; right: number; width: number; bottom: number; height: number };
+
+function getViewportSize() {
+  return {
+    width: window.visualViewport?.width ?? window.innerWidth,
+    height: window.visualViewport?.height ?? window.innerHeight,
+  };
+}
+
+function getAnchorRect(node: HTMLElement): AnchorRect {
+  const rect = node.getBoundingClientRect();
+  return {
+    top: rect.top,
+    left: rect.left,
+    right: rect.right,
+    width: rect.width,
+    bottom: rect.bottom,
+    height: rect.height,
+  };
+}
+
+/** Fixed project menu that can open below or above the trigger to avoid clipping. */
+function getProjectMenuStyle(anchor: AnchorRect): CSSProperties {
+  const viewport = getViewportSize();
+  const width = Math.min(180, viewport.width - 16);
+  const estimatedHeight = 92;
+  const gap = 6;
+  const spaceBelow = viewport.height - anchor.bottom - 8;
+  const openUpward = spaceBelow < estimatedHeight && anchor.top > spaceBelow;
+  const left = Math.max(8, Math.min(anchor.right - width, viewport.width - width - 8));
+  return {
+    position: "fixed",
+    top: openUpward ? undefined : Math.min(anchor.bottom + gap, viewport.height - estimatedHeight - 8),
+    bottom: openUpward ? Math.max(8, viewport.height - anchor.top + gap) : undefined,
+    left,
+    width,
+    zIndex: 1200,
+    padding: 4,
+    border: "1px solid var(--border)",
+    borderRadius: 10,
+    background: "var(--bg)",
+    boxShadow: "0 10px 28px rgba(0,0,0,0.14)",
+  };
+}
+
 function loadUnreadSessionIds(): Set<string> {
   if (typeof window === "undefined") return new Set();
   try {
@@ -1017,26 +1062,50 @@ function ProjectGroup({
   const { t } = useI18n();
   const [hovered, setHovered] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const [menuRect, setMenuRect] = useState<AnchorRect | null>(null);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const menuPanelRef = useRef<HTMLDivElement>(null);
   const label = getProjectDisplayName(group.root);
+
+  const closeMenu = useCallback(() => {
+    setMenuOpen(false);
+    setMenuRect(null);
+  }, []);
+
+  const openMenu = useCallback(() => {
+    const button = menuButtonRef.current;
+    if (!button) return;
+    setMenuRect(getAnchorRect(button));
+    setMenuOpen(true);
+  }, []);
 
   useEffect(() => {
     if (!menuOpen) return;
     const onPointerDown = (event: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setMenuOpen(false);
-      }
+      const target = event.target as Node;
+      if (menuButtonRef.current?.contains(target)) return;
+      if (menuPanelRef.current?.contains(target)) return;
+      closeMenu();
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setMenuOpen(false);
+      if (event.key === "Escape") closeMenu();
+    };
+    const onReposition = () => {
+      const button = menuButtonRef.current;
+      if (!button) return;
+      setMenuRect(getAnchorRect(button));
     };
     document.addEventListener("mousedown", onPointerDown);
     document.addEventListener("keydown", onKeyDown);
+    window.addEventListener("resize", onReposition);
+    window.addEventListener("scroll", onReposition, true);
     return () => {
       document.removeEventListener("mousedown", onPointerDown);
       document.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("resize", onReposition);
+      window.removeEventListener("scroll", onReposition, true);
     };
-  }, [menuOpen]);
+  }, [closeMenu, menuOpen]);
 
   return (
     <div style={{ marginBottom: 2 }}>
@@ -1139,12 +1208,14 @@ function ProjectGroup({
             <line x1="1" y1="6" x2="11" y2="6" />
           </svg>
         </button>
-        <div ref={menuRef} style={{ position: "relative", flexShrink: 0 }}>
+        <div style={{ position: "relative", flexShrink: 0 }}>
           <button
+            ref={menuButtonRef}
             type="button"
             onClick={(event) => {
               event.stopPropagation();
-              setMenuOpen((open) => !open);
+              if (menuOpen) closeMenu();
+              else openMenu();
             }}
             title={t("sidebar.projectActions")}
             aria-label={t("sidebar.projectActions")}
@@ -1179,21 +1250,11 @@ function ProjectGroup({
               <circle cx="12.5" cy="8" r="1.3" />
             </svg>
           </button>
-          {menuOpen && (
+          {menuOpen && menuRect && createPortal(
             <div
+              ref={menuPanelRef}
               role="menu"
-              style={{
-                position: "absolute",
-                top: "calc(100% + 4px)",
-                right: 0,
-                zIndex: 40,
-                minWidth: 168,
-                padding: 4,
-                border: "1px solid var(--border)",
-                borderRadius: 10,
-                background: "var(--bg)",
-                boxShadow: "0 10px 28px rgba(0,0,0,0.12)",
-              }}
+              style={getProjectMenuStyle(menuRect)}
             >
               <button
                 type="button"
@@ -1202,7 +1263,7 @@ function ProjectGroup({
                 onClick={(event) => {
                   event.stopPropagation();
                   if (group.sessions.length === 0) return;
-                  setMenuOpen(false);
+                  closeMenu();
                   onClearChats();
                 }}
                 style={{
@@ -1240,7 +1301,7 @@ function ProjectGroup({
                 role="menuitem"
                 onClick={(event) => {
                   event.stopPropagation();
-                  setMenuOpen(false);
+                  closeMenu();
                   onRemoveProject();
                 }}
                 style={{
@@ -1266,7 +1327,8 @@ function ProjectGroup({
                 </svg>
                 <span>{t("sidebar.removeProject")}</span>
               </button>
-            </div>
+            </div>,
+            document.body,
           )}
         </div>
       </div>
