@@ -247,22 +247,23 @@ export function WorktreeSwitcher({ projectRoot, cwd, onCwdChange }: WorktreeSwit
           setOpen((value) => !value);
         }}
         style={{
-          height: "100%",
-          maxWidth: 220,
+          height: 30,
+          maxWidth: 200,
           display: "flex",
           alignItems: "center",
           gap: 6,
-          padding: "0 12px",
+          margin: "0 2px",
+          padding: "0 10px",
           border: "none",
-          borderTop: open ? "2px solid var(--accent)" : "2px solid transparent",
-          borderRight: "1px solid var(--border)",
-          background: open ? "var(--bg-selected)" : "none",
-          color: enabled ? "var(--text-muted)" : "var(--text-dim)",
+          borderRadius: "var(--radius-md, 8px)",
+          background: open ? "var(--bg-selected)" : "transparent",
+          color: enabled ? (open ? "var(--text)" : "var(--text-muted)") : "var(--text-dim)",
           cursor: enabled ? "pointer" : "not-allowed",
           fontSize: 12,
           lineHeight: 1.35,
           textAlign: "left",
           opacity: enabled ? 1 : 0.82,
+          transition: "color 0.12s, background 0.12s",
         }}
       >
         <svg

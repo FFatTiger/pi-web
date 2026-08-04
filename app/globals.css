@@ -1263,6 +1263,40 @@ span.linenumber {
   backdrop-filter: blur(8px);
 }
 
+/* Codex top toolbar: 46px row, icon buttons, surface tint */
+.app-top-toolbar {
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+.app-toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  margin: 0 2px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-md, 8px);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: color 0.12s ease, background 0.12s ease;
+}
+.app-toolbar-btn:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.app-toolbar-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.app-toolbar-btn[data-active="true"] {
+  color: var(--text);
+  background: var(--bg-selected);
+}
+
 /* Codex-aligned sidebar chrome */
 .sidebar-item {
   border-radius: var(--radius-row, 10px);

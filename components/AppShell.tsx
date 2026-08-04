@@ -1028,21 +1028,15 @@ export function AppShell() {
 
       {/* Center: chat */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
-        {/* Top bar with sidebar toggle */}
-        <div ref={topBarRef} style={{ display: "flex", alignItems: "center", flexShrink: 0, borderBottom: "1px solid var(--border)", height: "calc(36px + env(safe-area-inset-top))", paddingTop: "env(safe-area-inset-top)", background: "var(--bg-panel)" }}>
+        {/* Codex toolbar: 46px row with icon buttons */}
+        <div ref={topBarRef} className="app-top-toolbar" style={{ display: "flex", alignItems: "center", flexShrink: 0, height: "calc(46px + env(safe-area-inset-top))", paddingTop: "env(safe-area-inset-top)", paddingInline: 8, gap: 2 }}>
           <button
             onClick={handleSidebarToggle}
+            className="app-toolbar-btn"
             title={`${sidebarOpen ? translate("layout.hideSidebar") : translate("layout.showSidebar")} (Ctrl+B)`}
             aria-label={sidebarOpen ? translate("layout.hideSidebar") : translate("layout.showSidebar")}
             aria-pressed={sidebarOpen}
-            style={{
-              display: "flex", alignItems: "center", justifyContent: "center",
-              width: 36, height: 36, padding: 0,
-              background: "none", border: "none", borderRight: "1px solid var(--border)",
-              color: "var(--text-muted)", cursor: "pointer", flexShrink: 0, transition: "color 0.12s",
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; }}
+            data-active={sidebarOpen}
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <rect x="3.5" y="4" width="17" height="16" rx="3" />
@@ -1054,17 +1048,10 @@ export function AppShell() {
               const rect = e.currentTarget.getBoundingClientRect();
               toggleTheme({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
             }}
+            className="app-toolbar-btn"
             title={isDark ? "Switch to light mode" : "Switch to dark mode"}
             aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
             aria-pressed={isDark}
-            style={{
-              display: "flex", alignItems: "center", justifyContent: "center",
-              width: 36, height: 36, padding: 0,
-              background: "none", border: "none", borderRight: "1px solid var(--border)",
-              color: "var(--text-muted)", cursor: "pointer", flexShrink: 0, transition: "color 0.12s",
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; }}
           >
             {isDark ? (
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1088,30 +1075,16 @@ export function AppShell() {
                 setProjectTrustError(null);
                 setProjectTrustDialogOpen(true);
               }}
+              className="app-toolbar-btn"
               title={translate("trust.resourcesNotLoaded")}
               aria-label={translate("trust.resourcesNotLoaded")}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                height: "100%",
-                padding: isMobile ? "0 10px" : "0 12px",
-                background: "none",
-                border: "none",
-                borderRight: "1px solid var(--border)",
-                color: "#d97706",
-                cursor: "pointer",
-                flexShrink: 0,
-                fontSize: 11,
-                whiteSpace: "nowrap",
-              }}
+              style={{ color: "#d97706" }}
             >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" />
                 <path d="M12 8v4" />
                 <path d="M12 16h.01" />
               </svg>
-              {!isMobile && <span>{translate("trust.resourcesNotLoaded")}</span>}
             </button>
           )}
           {showChat && (
@@ -1125,55 +1098,25 @@ export function AppShell() {
                 <button
                   onClick={handleViewFullHistory}
                   disabled={!selectedSession}
+                  className="app-toolbar-btn"
                   title={selectedSession ? "View full history" : "Full history is available after the session is saved"}
                   aria-label="View full history"
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 6,
-                    height: "100%",
-                    padding: "0 12px",
-                    background: "none",
-                    border: "none",
-                    borderTop: "2px solid transparent",
-                    borderRight: "1px solid var(--border)",
-                    color: selectedSession ? "var(--text-muted)" : "var(--text-dim)",
-                    cursor: selectedSession ? "pointer" : "not-allowed",
-                    opacity: selectedSession ? 1 : 0.45,
-                    flexShrink: 0,
-                    fontSize: 11,
-                    whiteSpace: "nowrap",
-                    transition: "color 0.1s, background 0.1s, opacity 0.1s",
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!selectedSession) return;
-                    e.currentTarget.style.color = "var(--text)";
-                    e.currentTarget.style.background = "var(--bg-hover)";
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.color = selectedSession ? "var(--text-muted)" : "var(--text-dim)";
-                    e.currentTarget.style.background = "none";
-                  }}
                 >
                   <svg
-                    width="12"
-                    height="12"
+                    width="14"
+                    height="14"
                     viewBox="0 0 24 24"
                     fill="none"
                     stroke="currentColor"
                     strokeWidth="2"
                     strokeLinecap="round"
                     strokeLinejoin="round"
-                    style={{
-                      color: selectedSession ? "var(--text-muted)" : "var(--text-dim)",
-                      flexShrink: 0,
-                    }}
+                    aria-hidden="true"
                   >
                     <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
                     <path d="M3 3v5h5" />
                     <path d="M12 7v5l3 2" />
                   </svg>
-                  <span>Full history</span>
                 </button>
               )}
               {!isMobile && (() => {
@@ -1206,26 +1149,9 @@ export function AppShell() {
                     disabled={disabled}
                     title={title}
                     aria-label={label}
+                    className="app-toolbar-btn"
                     style={{
-                      display: "flex", alignItems: "center", gap: 6,
-                      height: "100%", padding: "0 12px",
-                      background: "none", border: "none",
-                      borderTop: "2px solid transparent",
-                      borderRight: "1px solid var(--border)",
-                      color: isError ? "#dc2626" : isSuccess ? "var(--accent)" : disabled ? "var(--text-dim)" : "var(--text-muted)",
-                      cursor: disabled ? "not-allowed" : "pointer",
-                      opacity: disabled && autoNameStatus.kind !== "naming" ? 0.45 : 1,
-                      flexShrink: 0, fontSize: 11, whiteSpace: "nowrap",
-                      transition: "color 0.1s, background 0.1s, opacity 0.1s",
-                    }}
-                    onMouseEnter={(e) => {
-                      if (disabled) return;
-                      e.currentTarget.style.color = isError ? "#dc2626" : "var(--text)";
-                      e.currentTarget.style.background = "var(--bg-hover)";
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.color = isError ? "#dc2626" : isSuccess ? "var(--accent)" : disabled ? "var(--text-dim)" : "var(--text-muted)";
-                      e.currentTarget.style.background = "none";
+                      color: isError ? "#dc2626" : isSuccess ? "var(--accent)" : undefined,
                     }}
                   >
                     {autoNameStatus.kind === "naming" ? (
@@ -1244,7 +1170,6 @@ export function AppShell() {
                         <path d="M6 4V2M5 3H3M19 19v3M17.5 20.5h3" />
                       </svg>
                     )}
-                    <span>{label}</span>
                   </button>
                 );
               })()}
@@ -1253,7 +1178,6 @@ export function AppShell() {
                 activeLeafId={branchActiveLeafId}
                 onLeafChange={handleBranchLeafChange}
                 inline
-                compact={isMobile}
                 containerRef={topBarRef}
                 open={activeTopPanel === "branches"}
                 onToggle={() => toggleTopPanel("branches")}
@@ -1263,30 +1187,18 @@ export function AppShell() {
                 <button
                   ref={systemBtnRef}
                   onClick={() => toggleTopPanel("system")}
+                  className="app-toolbar-btn"
                   title="System prompt"
                   aria-label="System prompt"
                   aria-pressed={activeTopPanel === "system"}
-                  style={{
-                    display: "flex", alignItems: "center", gap: 6,
-                    height: "100%", padding: "0 12px",
-                    background: activeTopPanel === "system" ? "var(--bg-selected)" : "none",
-                    border: "none",
-                    borderTop: activeTopPanel === "system" ? "2px solid var(--accent)" : "2px solid transparent",
-                    borderRight: "1px solid var(--border)",
-                    cursor: "pointer",
-                    color: activeTopPanel === "system" ? "var(--text)" : "var(--text-muted)",
-                    fontSize: 11, whiteSpace: "nowrap", transition: "color 0.1s, background 0.1s",
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.color = activeTopPanel === "system" ? "var(--text)" : "var(--text-muted)"; }}
+                  data-active={activeTopPanel === "system"}
                 >
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: systemPrompt ? "var(--accent)" : "var(--text-dim)", flexShrink: 0 }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: systemPrompt ? "var(--accent)" : "currentColor", flexShrink: 0 }}>
                     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
                     <polyline points="14 2 14 8 20 8" />
                     <line x1="8" y1="13" x2="16" y2="13" />
                     <line x1="8" y1="17" x2="13" y2="17" />
                   </svg>
-                  <span>System</span>
                 </button>
               )}
             </div>

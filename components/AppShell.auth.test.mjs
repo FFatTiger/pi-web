@@ -7,7 +7,7 @@ const source = readFileSync(new URL("./AppShell.tsx", import.meta.url), "utf8");
 const sidebarContentStart = source.indexOf("const sidebarContent = (");
 const sidebarContentEnd = source.indexOf("return (", sidebarContentStart + 1);
 const sidebarBlock = source.slice(sidebarContentStart, sidebarContentEnd);
-const topBarStart = source.indexOf("{/* Top bar with sidebar toggle */}");
+const topBarStart = source.indexOf("{/* Codex toolbar: 46px row with icon buttons */}");
 const topBarEnd = source.indexOf("{/* Top panel dropdown — shared, only one active at a time */}");
 const topBarBlock = source.slice(topBarStart, topBarEnd);
 
