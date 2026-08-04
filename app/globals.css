@@ -100,36 +100,17 @@ body {
 }
 
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 4px;
+  height: 4px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: transparent;
-  border-radius: 3px;
-}
-
-/* Chat scroll area: Codex-like right scrollbar, faint until hovered. */
-.pi-chat-scroll {
-  scrollbar-width: thin;
-  scrollbar-color: transparent transparent;
-}
-.pi-chat-scroll:hover {
-  scrollbar-color: var(--border) transparent;
-}
-.pi-chat-scroll::-webkit-scrollbar {
-  width: 8px;
-}
-.pi-chat-scroll::-webkit-scrollbar-thumb {
-  background: transparent;
-}
-.pi-chat-scroll:hover::-webkit-scrollbar-thumb {
   background: var(--border);
-  border-radius: 4px;
+  border-radius: 2px;
 }
-.pi-chat-scroll:hover::-webkit-scrollbar-thumb:hover {
+::-webkit-scrollbar-thumb:hover {
   background: var(--text-dim);
 }
 
