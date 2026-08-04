@@ -57,11 +57,26 @@ test("fixed right corner exposes Side Chat and Explorer entries", () => {
 
 test("Side Chat open state is remembered per main session", () => {
   assert.match(source, /sideChatOpenBySessionRef/);
-  assert.match(source, /rememberSideChatOpen\(selectedSession\.id, next === "chat"\)/);
-  assert.match(source, /const sideChatOpen = sideChatOpenBySessionRef\.current\.get\(session\.id\) === true/);
-  assert.match(source, /if \(sideChatOpen\) return "chat"/);
-  assert.match(source, /if \(current === "chat"\) return "closed"/);
+  assert.match(source, /rememberSideChatOpen\(selectedSession\.id, true\)/);
+  assert.match(source, /rememberSideChatOpen\(selectedSession\.id, false\)/);
+  assert.match(source, /applySessionFilePanel\(session\.id\)/);
+  assert.match(source, /resolveRightPanelModeOnSessionSwitch/);
   assert.match(source, /onClose=\{closeRightPanel\}/);
   assert.match(source, /sideChatOpenBySessionRef\.current\.delete\(sessionId\)/);
   assert.match(source, /handleSessionDeleted[\s\S]*?setRightPanelMode\("closed"\)/);
+});
+
+test("open file tabs are scoped per session like Codex", () => {
+  assert.match(source, /filePanelBySessionRef/);
+  assert.match(source, /captureCurrentSessionFilePanel/);
+  assert.match(source, /applySessionFilePanel/);
+  assert.match(source, /captureSessionFilePanelState/);
+  assert.match(source, /emptySessionFilePanelState/);
+  // Leaving A captures before restoring B.
+  assert.match(source, /if \(activeSessionIdRef\.current && activeSessionIdRef\.current !== session\.id\)/);
+  assert.match(source, /captureCurrentSessionFilePanel\(\)/);
+  assert.match(source, /applySessionFilePanel\(session\.id\)/);
+  // New / deleted sessions do not keep foreign tabs.
+  assert.match(source, /applySessionFilePanel\(null\)/);
+  assert.match(source, /filePanelBySessionRef\.current\.delete\(sessionId\)/);
 });

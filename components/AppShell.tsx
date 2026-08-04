@@ -34,6 +34,15 @@ import {
   SIDEBAR_MAX_WIDTH,
   SIDEBAR_MIN_WIDTH,
 } from "@/lib/panel-layout";
+import {
+  blankPanelAfterLeaveSession,
+  captureSessionFilePanelState,
+  emptySessionFilePanelState,
+  isFilePanelSurfaceMode,
+  resolveRightPanelModeOnSessionSwitch,
+  type FilePanelSurfaceMode,
+  type SessionFilePanelState,
+} from "@/lib/session-file-panel";
 import type { SessionInfo, SessionTreeNode } from "@/lib/types";
 import type { ProjectTrustStatus } from "@/lib/api-types";
 import type { ChatInputHandle } from "./ChatInput";
@@ -81,6 +90,8 @@ export function AppShell() {
   // Side Chat open/closed is remembered per main session so switching A→B
   // does not carry A's panel, and returning to A restores it.
   const sideChatOpenBySessionRef = useRef(new Map<string, boolean>());
+  // Codex-style: open file tabs + last non-chat surface are conversation-scoped.
+  const filePanelBySessionRef = useRef(new Map<string, SessionFilePanelState>());
   const sidebarWidthRef = useRef(SIDEBAR_DEFAULT_WIDTH);
   const rightPanelWidthRef = useRef(RIGHT_PANEL_FALLBACK_WIDTH);
   const getResponsiveRightPanelWidth = useCallback(
@@ -264,6 +275,69 @@ export function AppShell() {
   const [activeFileTabId, setActiveFileTabId] = useState<string | null>(null);
   const [changesCollapsed, setChangesCollapsed] = useState(true);
   const [changesCount, setChangesCount] = useState(0);
+  const fileTabsRef = useRef<Tab[]>(fileTabs);
+  const activeFileTabIdRef = useRef<string | null>(activeFileTabId);
+  const rightPanelModeRef = useRef<RightPanelMode>(rightPanelMode);
+  // Last explorer/file/closed surface while Side Chat may be covering it.
+  const lastFileSurfaceModeRef = useRef<FilePanelSurfaceMode>("closed");
+  fileTabsRef.current = fileTabs;
+  activeFileTabIdRef.current = activeFileTabId;
+  rightPanelModeRef.current = rightPanelMode;
+
+  useEffect(() => {
+    if (isFilePanelSurfaceMode(rightPanelMode)) {
+      lastFileSurfaceModeRef.current = rightPanelMode;
+    }
+  }, [rightPanelMode]);
+
+  // Keep the active session's open-files snapshot fresh (Codex openFilesByConversationId).
+  useEffect(() => {
+    const sessionId = selectedSession?.id;
+    if (!sessionId) return;
+    filePanelBySessionRef.current.set(
+      sessionId,
+      captureSessionFilePanelState({
+        tabs: fileTabs,
+        activeTabId: activeFileTabId,
+        rightPanelMode,
+        previousSurfaceMode: lastFileSurfaceModeRef.current,
+      }),
+    );
+  }, [activeFileTabId, fileTabs, rightPanelMode, selectedSession?.id]);
+
+  const captureCurrentSessionFilePanel = useCallback(() => {
+    const sessionId = activeSessionIdRef.current;
+    if (!sessionId) return;
+    filePanelBySessionRef.current.set(
+      sessionId,
+      captureSessionFilePanelState({
+        tabs: fileTabsRef.current,
+        activeTabId: activeFileTabIdRef.current,
+        rightPanelMode: rightPanelModeRef.current,
+        previousSurfaceMode: lastFileSurfaceModeRef.current,
+      }),
+    );
+  }, []);
+
+  const applySessionFilePanel = useCallback((sessionId: string | null) => {
+    if (!sessionId) {
+      const blank = blankPanelAfterLeaveSession(rightPanelModeRef.current);
+      setFileTabs(blank.tabs);
+      setActiveFileTabId(blank.activeTabId);
+      setRightPanelMode(blank.mode);
+      if (isFilePanelSurfaceMode(blank.mode)) lastFileSurfaceModeRef.current = blank.mode;
+      return;
+    }
+    const restored = filePanelBySessionRef.current.get(sessionId) ?? emptySessionFilePanelState();
+    setFileTabs(restored.tabs.map((tab) => ({ ...tab })));
+    setActiveFileTabId(restored.activeTabId);
+    const sideChatOpen = sideChatOpenBySessionRef.current.get(sessionId) === true;
+    const nextMode = resolveRightPanelModeOnSessionSwitch({ sideChatOpen, restored });
+    setRightPanelMode(nextMode);
+    lastFileSurfaceModeRef.current = restored.surfaceMode === "file" && restored.tabs.length === 0
+      ? "closed"
+      : restored.surfaceMode;
+  }, []);
 
   // Same @mention format as the chat input's @ autocomplete, so the agent's
   // read tool resolves it the same way (it strips the @ prefix).
@@ -359,6 +433,10 @@ export function AppShell() {
 
   const handleSelectSession = useCallback((session: SessionInfo, isRestore = false) => {
     const projectRoot = session.projectRoot ?? session.cwd;
+    // Persist the session we're leaving before swapping open files (Codex).
+    if (activeSessionIdRef.current && activeSessionIdRef.current !== session.id) {
+      captureCurrentSessionFilePanel();
+    }
     setActiveProjectRoot(projectRoot);
     setActiveCwd(session.cwd);
     setProjectCwds((previous) => {
@@ -371,13 +449,8 @@ export function AppShell() {
     setSessionKey((k) => k + 1);
     setSystemPrompt(null);
     setInitialSessionRestored(true);
-    // Restore this session's Side Chat preference; never carry another session's chat panel.
-    const sideChatOpen = sideChatOpenBySessionRef.current.get(session.id) === true;
-    setRightPanelMode((current) => {
-      if (sideChatOpen) return "chat";
-      if (current === "chat") return "closed";
-      return current;
-    });
+    // Restore this session's Side Chat + open-file panel; never carry another session's files.
+    applySessionFilePanel(session.id);
     // On mobile, collapse the overlay drawer so the chat is revealed after pick.
     if (isMobile && !isRestore) setSidebarOpen(false);
     // Skip router.replace when restoring from URL — the param is already correct
@@ -386,12 +459,13 @@ export function AppShell() {
     if (!isRestore) {
       router.replace(`?session=${encodeURIComponent(session.id)}`, { scroll: false });
     }
-  }, [router, isMobile]);
+  }, [applySessionFilePanel, captureCurrentSessionFilePanel, router, isMobile]);
 
   const handleNewSession = useCallback((_sessionId: string, fallbackCwd: string, projectRoot = fallbackCwd) => {
     // Resolve remembered cwd immediately from the ref so project-row + uses the
     // last worktree without waiting for React state.
     const cwd = projectCwdsRef.current.get(projectRoot) ?? fallbackCwd;
+    captureCurrentSessionFilePanel();
     setActiveProjectRoot(projectRoot);
     setActiveCwd(cwd);
     setProjectCwds((previous) => new Map(previous).set(projectRoot, cwd));
@@ -402,10 +476,11 @@ export function AppShell() {
     setBranchActiveLeafId(null);
     setSystemPrompt(null);
     setActiveTopPanel(null);
-    setRightPanelMode((current) => (current === "chat" ? "closed" : current));
+    // New composer is not a conversation yet — drop open files (Codex blank thread).
+    applySessionFilePanel(null);
     if (isMobile) setSidebarOpen(false);
     router.replace("/", { scroll: false });
-  }, [isMobile, router]);
+  }, [applySessionFilePanel, captureCurrentSessionFilePanel, isMobile, router]);
 
   // Global keyboard shortcuts (handles Esc, Ctrl+Alt+N etc.)
   useGlobalKeyboardShortcuts({
@@ -431,6 +506,16 @@ export function AppShell() {
   const handleSessionCreated = useCallback((session: SessionInfo) => {
     setNewSessionCwd(null);
     setSelectedSession(session);
+    // Bind any files opened on the blank composer to the new conversation id.
+    filePanelBySessionRef.current.set(
+      session.id,
+      captureSessionFilePanelState({
+        tabs: fileTabsRef.current,
+        activeTabId: activeFileTabIdRef.current,
+        rightPanelMode: rightPanelModeRef.current,
+        previousSurfaceMode: lastFileSurfaceModeRef.current,
+      }),
+    );
     setRefreshKey((k) => k + 1);
     hydrateSelectedSession(session.id);
     router.replace(`?session=${encodeURIComponent(session.id)}`, { scroll: false });
@@ -478,6 +563,17 @@ export function AppShell() {
   }, [selectedSession?.id]);
 
   const handleSessionForked = useCallback((newSessionId: string) => {
+    // Keep parent's open files under the parent id; fork starts with a copy of the live panel.
+    captureCurrentSessionFilePanel();
+    filePanelBySessionRef.current.set(
+      newSessionId,
+      captureSessionFilePanelState({
+        tabs: fileTabsRef.current,
+        activeTabId: activeFileTabIdRef.current,
+        rightPanelMode: rightPanelModeRef.current,
+        previousSurfaceMode: lastFileSurfaceModeRef.current,
+      }),
+    );
     setRefreshKey((k) => k + 1);
     setSessionKey((k) => k + 1);
     setNewSessionCwd(null);
@@ -487,7 +583,7 @@ export function AppShell() {
     }));
     hydrateSelectedSession(newSessionId);
     router.replace(`?session=${encodeURIComponent(newSessionId)}`, { scroll: false });
-  }, [router, hydrateSelectedSession]);
+  }, [captureCurrentSessionFilePanel, router, hydrateSelectedSession]);
 
   const handleInitialRestoreDone = useCallback(() => {
     setInitialSessionRestored(true);
@@ -505,10 +601,14 @@ export function AppShell() {
       setSystemPrompt(null);
       setActiveTopPanel(null);
       // Drop the panel without re-writing the per-session map entry we are about to delete.
+      setFileTabs([]);
+      setActiveFileTabId(null);
       setRightPanelMode("closed");
+      lastFileSurfaceModeRef.current = "closed";
       router.replace("/", { scroll: false });
     }
     sideChatOpenBySessionRef.current.delete(sessionId);
+    filePanelBySessionRef.current.delete(sessionId);
   }, [selectedSession, router]);
 
   const handleOpenFile = useCallback((
@@ -576,9 +676,18 @@ export function AppShell() {
     if (!selectedSession) return;
     if (isMobile) setSidebarOpen(false);
     setRightPanelMode((mode) => {
-      const next = mode === "chat" ? "closed" : "chat";
-      rememberSideChatOpen(selectedSession.id, next === "chat");
-      return next;
+      if (mode === "chat") {
+        rememberSideChatOpen(selectedSession.id, false);
+        // Restore the last non-chat surface for this session (file/explorer).
+        const restored = filePanelBySessionRef.current.get(selectedSession.id);
+        const surface = restored?.surfaceMode ?? lastFileSurfaceModeRef.current;
+        if (surface === "file" && (restored?.tabs.length ?? fileTabsRef.current.length) === 0) {
+          return "closed";
+        }
+        return surface;
+      }
+      rememberSideChatOpen(selectedSession.id, true);
+      return "chat";
     });
   }, [isMobile, rememberSideChatOpen, selectedSession]);
 
