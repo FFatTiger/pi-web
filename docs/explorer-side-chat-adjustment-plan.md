@@ -81,3 +81,12 @@ npm run dev
 ```
 
 开发验证不执行 `next build`。
+
+
+## Codex alignment (2026-08)
+
+1. **Multi side-chat tabs** — right panel uses `sidechat:{sessionId}` chips; `+` / shortcut mints a new tab.
+2. **Ephemeral + TTL** — side chats are ephemeral by default; idle > 1h surfaces expired UI + recreate.
+3. **No turn copy + boundary** — create empty session, inject `Side conversation boundary` custom message; use `peek_main` for main progress.
+4. **Read-only default** — tools default to inspection-only; explicit Edit mode unlocks write/edit.
+5. **Composer → Side Chat** — main `ChatInput` can send the current draft into a new side chat.

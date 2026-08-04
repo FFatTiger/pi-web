@@ -250,6 +250,7 @@ export function WorkspaceFilePanel(props: WorkspaceFilePanelProps) {
               minWidth: 0,
               minHeight: 0,
               flexDirection: "column",
+              position: "relative",
             }}
           >
             {sideChat}

@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAgentSession } from "@/hooks/useAgentSession";
 import { useI18n } from "@/hooks/useI18n";
+import type { SideChatSessionMetadata, SideChatToolMode } from "@/lib/side-chat-metadata";
 import type { AgentMessage, SessionInfo, ToolResultMessage } from "@/lib/types";
 import { ChatInput, type ChatInputHandle } from "./ChatInput";
 import { ExtensionCustomPanel, ExtensionDialog } from "./ChatWindow";
@@ -11,41 +12,70 @@ import { MessageView } from "./MessageView";
 interface SideChatPanelProps {
   active: boolean;
   mainSession: SessionInfo;
+  /** Existing side session to open/reuse; omit to create a new one. */
+  sideSessionId?: string | null;
+  /** When true, always mint a new side chat (Codex + menu / send-to-side). */
+  forceNew?: boolean;
+  /** Optional first message to send after open/create. */
+  initialMessage?: string | null;
   onClose: () => void;
   onAgentEnd?: () => void;
   onOpenFile?: (filePath: string) => void;
+  /** Notify shell when the bound side session changes (create/refork/clear). */
+  onSessionChange?: (session: SessionInfo, metadata: SideChatSessionMetadata) => void;
 }
 
 type SideChatApiResult = {
   session: SessionInfo;
+  metadata: SideChatSessionMetadata;
+  expired?: boolean;
+  created?: boolean;
   error?: string;
 };
 
-async function requestSideChat(
-  mainSessionId: string,
-  action: "open" | "refork" | "clear",
-  signal?: AbortSignal,
-): Promise<SideChatApiResult> {
+async function requestSideChat(body: {
+  mainSessionId: string;
+  action: "open" | "create" | "refork" | "clear" | "set_mode" | "touch" | "send";
+  sideSessionId?: string;
+  toolMode?: SideChatToolMode;
+  message?: string;
+  forceNew?: boolean;
+}, signal?: AbortSignal): Promise<SideChatApiResult> {
   const response = await fetch("/api/side-chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ mainSessionId, action }),
+    body: JSON.stringify(body),
     signal,
   });
-  const body = await response.json() as SideChatApiResult;
-  if (!response.ok || body.error) throw new Error(body.error ?? `HTTP ${response.status}`);
-  return body;
+  const payload = await response.json() as SideChatApiResult;
+  if (!response.ok || payload.error) throw new Error(payload.error ?? `HTTP ${response.status}`);
+  return payload;
 }
 
-export function SideChatPanel({ active, mainSession, onClose, onAgentEnd, onOpenFile }: SideChatPanelProps) {
+export function SideChatPanel({
+  active,
+  mainSession,
+  sideSessionId,
+  forceNew = false,
+  initialMessage,
+  onClose,
+  onAgentEnd,
+  onOpenFile,
+  onSessionChange,
+}: SideChatPanelProps) {
   const { t } = useI18n();
   const [sideSession, setSideSession] = useState<SessionInfo | null>(null);
+  const [metadata, setMetadata] = useState<SideChatSessionMetadata | null>(null);
+  const [expired, setExpired] = useState(false);
   const [loading, setLoading] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [compact, setCompact] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
+  const openedKeyRef = useRef<string | null>(null);
+  const initialMessageRef = useRef(initialMessage);
+  initialMessageRef.current = initialMessage;
 
   useEffect(() => {
     const panel = panelRef.current;
@@ -55,41 +85,80 @@ export function SideChatPanel({ active, mainSession, onClose, onAgentEnd, onOpen
     return () => observer.disconnect();
   }, []);
 
+  const applyResult = useCallback((result: SideChatApiResult) => {
+    setSideSession(result.session);
+    setMetadata(result.metadata);
+    setExpired(Boolean(result.expired));
+    onSessionChange?.(result.session, result.metadata);
+  }, [onSessionChange]);
+
   useEffect(() => {
-    if (!active || sideSession) return;
+    if (!active) return;
+    const key = `${mainSession.id}:${sideSessionId ?? "new"}:${forceNew ? "force" : "reuse"}`;
+    if (openedKeyRef.current === key && sideSession) return;
+
     const controller = new AbortController();
     setLoading(true);
     setError(null);
-    requestSideChat(mainSession.id, "open", controller.signal)
+    openedKeyRef.current = key;
+
+    const firstMessage = initialMessageRef.current?.trim() || "";
+    const request = firstMessage
+      ? requestSideChat({
+        mainSessionId: mainSession.id,
+        action: "send",
+        ...(sideSessionId ? { sideSessionId } : {}),
+        message: firstMessage,
+        forceNew: forceNew || !sideSessionId,
+      }, controller.signal)
+      : requestSideChat({
+        mainSessionId: mainSession.id,
+        action: forceNew || !sideSessionId ? "create" : "open",
+        ...(sideSessionId ? { sideSessionId } : {}),
+        forceNew: forceNew || !sideSessionId,
+      }, controller.signal);
+
+    request
       .then((result) => {
-        setSideSession(result.session);
+        applyResult(result);
       })
       .catch((requestError) => {
         if (requestError instanceof DOMException && requestError.name === "AbortError") return;
+        openedKeyRef.current = null;
         setError(requestError instanceof Error ? requestError.message : String(requestError));
       })
       .finally(() => setLoading(false));
-    return () => controller.abort();
-  }, [active, mainSession.id, sideSession]);
 
-  const runAction = useCallback(async (action: "refork" | "clear") => {
+    return () => controller.abort();
+  }, [active, applyResult, forceNew, mainSession.id, sideSession, sideSessionId]);
+
+  const runAction = useCallback(async (
+    action: "refork" | "clear" | "set_mode" | "create",
+    toolMode?: SideChatToolMode,
+  ) => {
     if (actionBusy) return;
     setActionBusy(true);
     setMenuOpen(false);
     setError(null);
     try {
-      const result = await requestSideChat(mainSession.id, action);
-      setSideSession(result.session);
+      const result = await requestSideChat({
+        mainSessionId: mainSession.id,
+        action,
+        ...(sideSession ? { sideSessionId: sideSession.id } : {}),
+        ...(toolMode ? { toolMode } : {}),
+        forceNew: action === "create",
+      });
+      openedKeyRef.current = `${mainSession.id}:${result.session.id}:reuse`;
+      applyResult(result);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : String(requestError));
     } finally {
       setActionBusy(false);
     }
-  }, [actionBusy, mainSession.id]);
+  }, [actionBusy, applyResult, mainSession.id, sideSession]);
 
-  const controlsDisabled = actionBusy || !sideSession;
-  // Inline styles: panel-header buttons elsewhere in the app do the same so
-  // Tailwind preflight / CSS load order cannot strip the chrome.
+  const toolMode: SideChatToolMode = metadata?.toolMode === "edit" ? "edit" : "readonly";
+  const controlsDisabled = actionBusy || (!sideSession && !expired);
   const headerIconBtnStyle = useMemo((): React.CSSProperties => ({
     display: "inline-flex",
     alignItems: "center",
@@ -105,6 +174,8 @@ export function SideChatPanel({ active, mainSession, onClose, onAgentEnd, onOpen
     opacity: controlsDisabled ? 0.4 : 1,
     flexShrink: 0,
   }), [controlsDisabled]);
+
+  const title = metadata?.title?.trim() || t("sideChat.title");
 
   return (
     <div
@@ -143,28 +214,40 @@ export function SideChatPanel({ active, mainSession, onClose, onAgentEnd, onOpen
             textTransform: "uppercase",
             color: "var(--text-muted)",
           }}
+          title={title}
         >
-          {t("sideChat.title")}
+          {title}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 1, flexShrink: 0 }}>
+          {!expired && sideSession && (
+            <button
+              type="button"
+              disabled={controlsDisabled}
+              onClick={() => void runAction("set_mode", toolMode === "readonly" ? "edit" : "readonly")}
+              title={toolMode === "readonly" ? t("sideChat.editTitle") : t("sideChat.readonlyTitle")}
+              aria-label={toolMode === "readonly" ? t("sideChat.edit") : t("sideChat.readonly")}
+              style={{
+                ...headerIconBtnStyle,
+                width: "auto",
+                padding: "0 7px",
+                fontSize: 10,
+                fontWeight: 600,
+                letterSpacing: "0.03em",
+                color: toolMode === "edit" ? "var(--accent)" : "var(--text-muted)",
+              }}
+            >
+              {toolMode === "readonly" ? t("sideChat.readonly") : t("sideChat.edit")}
+            </button>
+          )}
           {compact ? (
             <div style={{ position: "relative" }}>
               <button
                 type="button"
-                disabled={controlsDisabled}
+                disabled={controlsDisabled && !expired}
                 onClick={() => setMenuOpen((open) => !open)}
                 aria-label={t("sideChat.actions")}
                 aria-expanded={menuOpen}
                 style={headerIconBtnStyle}
-                onMouseEnter={(e) => {
-                  if (controlsDisabled) return;
-                  e.currentTarget.style.background = "var(--bg-hover)";
-                  e.currentTarget.style.color = "var(--text)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = "transparent";
-                  e.currentTarget.style.color = "var(--text-muted)";
-                }}
               >
                 <MoreIcon />
               </button>
@@ -184,11 +267,28 @@ export function SideChatPanel({ active, mainSession, onClose, onAgentEnd, onOpen
                     boxShadow: "0 8px 24px rgba(0, 0, 0, 0.14)",
                   }}
                 >
-                  <MenuButton label={t("sideChat.refork")} onClick={() => void runAction("refork")} />
-                  <MenuButton label={t("sideChat.clear")} onClick={() => void runAction("clear")} />
+                  {expired ? (
+                    <MenuButton label={t("sideChat.startNew")} onClick={() => void runAction("create")} />
+                  ) : (
+                    <>
+                      <MenuButton label={t("sideChat.refork")} onClick={() => void runAction("refork")} />
+                      <MenuButton label={t("sideChat.clear")} onClick={() => void runAction("clear")} />
+                    </>
+                  )}
                 </div>
               )}
             </div>
+          ) : expired ? (
+            <button
+              type="button"
+              disabled={actionBusy}
+              onClick={() => void runAction("create")}
+              title={t("sideChat.startNew")}
+              aria-label={t("sideChat.startNew")}
+              style={headerIconBtnStyle}
+            >
+              <RefreshIcon />
+            </button>
           ) : (
             <>
               <button
@@ -198,15 +298,6 @@ export function SideChatPanel({ active, mainSession, onClose, onAgentEnd, onOpen
                 title={t("sideChat.reforkTitle")}
                 aria-label={t("sideChat.refork")}
                 style={headerIconBtnStyle}
-                onMouseEnter={(e) => {
-                  if (controlsDisabled) return;
-                  e.currentTarget.style.background = "var(--bg-hover)";
-                  e.currentTarget.style.color = "var(--text)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = "transparent";
-                  e.currentTarget.style.color = "var(--text-muted)";
-                }}
               >
                 <RefreshIcon />
               </button>
@@ -217,15 +308,6 @@ export function SideChatPanel({ active, mainSession, onClose, onAgentEnd, onOpen
                 title={t("sideChat.clearTitle")}
                 aria-label={t("sideChat.clear")}
                 style={headerIconBtnStyle}
-                onMouseEnter={(e) => {
-                  if (controlsDisabled) return;
-                  e.currentTarget.style.background = "var(--bg-hover)";
-                  e.currentTarget.style.color = "var(--text)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = "transparent";
-                  e.currentTarget.style.color = "var(--text-muted)";
-                }}
               >
                 <ClearIcon />
               </button>
@@ -241,14 +323,6 @@ export function SideChatPanel({ active, mainSession, onClose, onAgentEnd, onOpen
             aria-label={t("sideChat.close")}
             title={t("sideChat.close")}
             style={{ ...headerIconBtnStyle, color: "var(--text-dim)", cursor: "pointer", opacity: 1 }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = "var(--bg-hover)";
-              e.currentTarget.style.color = "var(--text)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = "transparent";
-              e.currentTarget.style.color = "var(--text-dim)";
-            }}
           >
             <CloseIcon />
           </button>
@@ -256,8 +330,31 @@ export function SideChatPanel({ active, mainSession, onClose, onAgentEnd, onOpen
       </header>
 
       {error && <div role="alert" style={{ padding: "7px 10px", borderBottom: "1px solid var(--border)", color: "#dc2626", fontSize: 11 }}>{error}</div>}
-      {loading && !sideSession ? (
+      {loading && !sideSession && !expired ? (
         <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 12 }}>{t("sideChat.opening")}</div>
+      ) : expired ? (
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, padding: 24, textAlign: "center" }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>{t("sideChat.expiredTitle")}</div>
+          <div style={{ fontSize: 12, color: "var(--text-muted)", maxWidth: 280, lineHeight: 1.5 }}>{t("sideChat.expiredDescription")}</div>
+          <button
+            type="button"
+            disabled={actionBusy}
+            onClick={() => void runAction("create")}
+            style={{
+              marginTop: 4,
+              padding: "7px 14px",
+              border: "1px solid var(--border)",
+              borderRadius: 8,
+              background: "var(--bg-panel)",
+              color: "var(--text)",
+              cursor: actionBusy ? "not-allowed" : "pointer",
+              fontSize: 12,
+              fontWeight: 600,
+            }}
+          >
+            {t("sideChat.startNew")}
+          </button>
+        </div>
       ) : sideSession ? (
         <SideChatConversation
           key={sideSession.id}

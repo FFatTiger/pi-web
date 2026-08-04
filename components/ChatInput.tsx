@@ -115,6 +115,8 @@ interface Props {
   /** Session working directory — enables the @ file autocomplete menu */
   cwd?: string | null;
   messagePlaceholder?: string;
+  /** Open a Side Chat with the current draft (main composer only). */
+  onSendToSideChat?: (message: string) => void;
 }
 
 export interface ChatInputHandle {
@@ -368,6 +370,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   draftKey,
   cwd,
   messagePlaceholder,
+  onSendToSideChat,
 }: Props, ref) {
   const { t } = useI18n();
   const isMobile = useIsMobile();
@@ -2275,19 +2278,59 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           </div>
 
           {!isStreaming && (
-            <button
-              type="button"
-              onClick={handleSend}
-              disabled={!value.trim() && !attachedImages.length}
-              className="chat-input-send"
-              title={t("chat.send")}
-              aria-label={t("chat.send")}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="m22 2-7 20-4-9-9-4Z" />
-                <path d="M22 2 11 13" />
-              </svg>
-            </button>
+            <>
+              {onSendToSideChat && (
+                <button
+                  type="button"
+                  className="chat-input-toolbar-sidechat"
+                  disabled={!value.trim()}
+                  onClick={() => {
+                    const msg = value.trim();
+                    if (!msg) return;
+                    onSendToSideChat(msg);
+                    clearInput();
+                  }}
+                  title={t("sideChat.sendFromComposer")}
+                  aria-label={t("sideChat.sendFromComposer")}
+                  style={{
+                    flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+                    width: 28, height: 28, padding: 0,
+                    background: "none", border: "none", borderRadius: 8,
+                    color: value.trim() ? "var(--text-muted)" : "var(--text-dim)",
+                    cursor: value.trim() ? "pointer" : "not-allowed",
+                    opacity: value.trim() ? 1 : 0.45,
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!value.trim()) return;
+                    e.currentTarget.style.background = "var(--bg-hover)";
+                    e.currentTarget.style.color = "var(--text)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "none";
+                    e.currentTarget.style.color = value.trim() ? "var(--text-muted)" : "var(--text-dim)";
+                  }}
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                    <path d="M13 8h5" />
+                    <path d="M15.5 5.5v5" />
+                  </svg>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleSend}
+                disabled={!value.trim() && !attachedImages.length}
+                className="chat-input-send"
+                title={t("chat.send")}
+                aria-label={t("chat.send")}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="m22 2-7 20-4-9-9-4Z" />
+                  <path d="M22 2 11 13" />
+                </svg>
+              </button>
+            </>
           )}
 
         </div>
