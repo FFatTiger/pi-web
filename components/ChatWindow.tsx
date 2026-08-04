@@ -246,24 +246,11 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
   useEffect(() => {
     const node = composerWrapRef.current;
     if (!node) return;
-    let raf = 0;
     const measure = () => setComposerHeight(node.offsetHeight);
-    const onFrame = () => {
-      measure();
-    };
-    // Measure after layout settles (mount effects run before paint).
-    raf = window.requestAnimationFrame(() => {
-      raf = window.requestAnimationFrame(onFrame);
-    });
+    measure();
     const observer = new ResizeObserver(measure);
     observer.observe(node);
-    // ChatInput height can change internally without the wrapper resizing
-    // observer firing first (textarea growth, model row wrap, …).
-    for (const child of node.children) observer.observe(child);
-    return () => {
-      window.cancelAnimationFrame(raf);
-      observer.disconnect();
-    };
+    return () => observer.disconnect();
   }, []);
 
   // IntersectionObserver on the sentinel div at the top of the message list.
@@ -769,11 +756,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
         ) : null}
       </div>
 
-      <div
-        ref={composerWrapRef}
-        className="absolute inset-x-0 bottom-0 z-20"
-        style={{ background: "var(--bg)" }}
-      >
+      <div ref={composerWrapRef} className="absolute inset-x-0 bottom-0 z-20">
         <div className="relative h-0">
           <button
             type="button"
