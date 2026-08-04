@@ -337,18 +337,23 @@ export function serializeProjectSessionOrders(orders: ProjectSessionOrders): str
   return JSON.stringify(normalized);
 }
 
-/** Move `fromId` before/after `toId` inside a stable id list. */
-export function reorderIds(ids: string[], fromId: string, toId: string): string[] {
+/** Move `fromId` relative to `toId` inside a stable id list. */
+export function reorderIds(
+  ids: string[],
+  fromId: string,
+  toId: string,
+  position: "before" | "after" = "after",
+): string[] {
   if (fromId === toId) return ids;
   const fromIndex = ids.indexOf(fromId);
   const toIndex = ids.indexOf(toId);
   if (fromIndex < 0 || toIndex < 0) return ids;
   const next = ids.slice();
   const [moved] = next.splice(fromIndex, 1);
-  const insertAt = next.indexOf(toId);
+  let insertAt = next.indexOf(toId);
   if (insertAt < 0) return ids;
-  // Dropping onto a later item places after it; onto an earlier item places before it.
-  next.splice(fromIndex < toIndex ? insertAt + 1 : insertAt, 0, moved);
+  if (position === "after") insertAt += 1;
+  next.splice(insertAt, 0, moved);
   return next;
 }
 

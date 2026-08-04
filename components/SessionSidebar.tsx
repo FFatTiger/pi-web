@@ -67,7 +67,37 @@ type DragPayload =
   | { kind: "project"; root: string }
   | { kind: "session"; projectRoot: string; sessionId: string };
 
+type DropPosition = "before" | "after";
+
+type DragOverlayState = {
+  kind: "project" | "session";
+  label: string;
+  x: number;
+  y: number;
+  width: number;
+};
+
 type AnchorRect = { top: number; left: number; right: number; width: number; bottom: number; height: number };
+
+function getDropPosition(event: React.DragEvent, element: Element | null): DropPosition {
+  if (!element) return "after";
+  const rect = element.getBoundingClientRect();
+  const mid = rect.top + rect.height / 2;
+  return event.clientY < mid ? "before" : "after";
+}
+
+function setTransparentDragImage(event: React.DragEvent) {
+  const ghost = document.createElement("div");
+  ghost.style.width = "1px";
+  ghost.style.height = "1px";
+  ghost.style.opacity = "0";
+  ghost.style.position = "fixed";
+  ghost.style.top = "-1000px";
+  ghost.style.left = "-1000px";
+  document.body.appendChild(ghost);
+  event.dataTransfer.setDragImage(ghost, 0, 0);
+  window.setTimeout(() => ghost.remove(), 0);
+}
 
 function getViewportSize() {
   return {
@@ -315,7 +345,9 @@ export function SessionSidebar({
     return parseProjectSessionOrders(window.localStorage.getItem(PROJECT_SESSION_ORDERS_STORAGE_KEY));
   });
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
+  const [dragOverPosition, setDragOverPosition] = useState<DropPosition | null>(null);
   const [draggingKey, setDraggingKey] = useState<string | null>(null);
+  const [dragOverlay, setDragOverlay] = useState<DragOverlayState | null>(null);
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(() => {
     if (typeof window === "undefined") return new Set();
     return parseExpandedProjects(window.localStorage.getItem(EXPANDED_PROJECTS_STORAGE_KEY));
@@ -693,28 +725,73 @@ export function SessionSidebar({
     event.dataTransfer.setData(DND_MIME, raw);
     event.dataTransfer.setData("text/plain", raw);
     event.dataTransfer.effectAllowed = "move";
+    setTransparentDragImage(event);
   }, []);
 
-  const reorderProject = useCallback((fromRoot: string, toRoot: string) => {
-    if (fromRoot === toRoot) return;
+  const clearDragUi = useCallback(() => {
+    setDraggingKey(null);
+    setDragOverKey(null);
+    setDragOverPosition(null);
+    setDragOverlay(null);
+  }, []);
+
+  const startDragOverlay = useCallback((
+    event: React.DragEvent,
+    kind: "project" | "session",
+    label: string,
+  ) => {
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    setDragOverlay({
+      kind,
+      label,
+      x: event.clientX,
+      y: event.clientY,
+      width: Math.max(140, Math.min(rect.width, 280)),
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!dragOverlay) return;
+    const onMove = (event: DragEvent) => {
+      setDragOverlay((current) => (
+        current
+          ? { ...current, x: event.clientX, y: event.clientY }
+          : current
+      ));
+    };
+    const onEnd = () => clearDragUi();
+    window.addEventListener("dragover", onMove);
+    window.addEventListener("dragend", onEnd);
+    window.addEventListener("drop", onEnd);
+    return () => {
+      window.removeEventListener("dragover", onMove);
+      window.removeEventListener("dragend", onEnd);
+      window.removeEventListener("drop", onEnd);
+    };
+  }, [clearDragUi, dragOverlay]);
+
+  const reorderProject = useCallback((fromRoot: string, toRoot: string, position: DropPosition) => {
     setProjectOrder((previous) => {
       const roots = previous.length > 0
         ? previous
         : regularProjects.map((group) => group.root);
-      const next = reorderIds(roots, fromRoot, toRoot);
-      return next.length === roots.length ? next : previous;
+      return reorderIds(roots, fromRoot, toRoot, position);
     });
   }, [regularProjects]);
 
-  const reorderSessionInProject = useCallback((projectRoot: string, fromId: string, toId: string) => {
-    if (fromId === toId) return;
+  const reorderSessionInProject = useCallback((
+    projectRoot: string,
+    fromId: string,
+    toId: string,
+    position: DropPosition,
+  ) => {
     const group = projectGroups.find((item) => item.root === projectRoot);
     if (!group) return;
     const baseOrder = mergeSessionOrder(
       sessionOrders[projectRoot],
       group.sessions.map((session) => session.id),
     );
-    const nextOrder = reorderIds(baseOrder, fromId, toId);
+    const nextOrder = reorderIds(baseOrder, fromId, toId, position);
     setSessionOrders((previous) => ({
       ...previous,
       [projectRoot]: nextOrder,
@@ -851,7 +928,7 @@ export function SessionSidebar({
         runningSessionIds={runningSessionIds}
         unreadSessionIds={unreadSessionIds}
         isDragging={draggingKey === projectDragKey}
-        isDragOver={dragOverKey === projectDragKey}
+        dropPosition={dragOverKey === projectDragKey ? dragOverPosition : null}
         onToggle={() => toggleProject(group)}
         onNewSession={(event) => {
           event.stopPropagation();
@@ -878,61 +955,67 @@ export function SessionSidebar({
         onProjectDragStart={(event) => {
           writeDragPayload(event, { kind: "project", root: group.root });
           setDraggingKey(projectDragKey);
+          startDragOverlay(event, "project", getProjectDisplayName(group.root));
         }}
         onProjectDragOver={(event) => {
           event.preventDefault();
           event.dataTransfer.dropEffect = "move";
           setDragOverKey(projectDragKey);
+          setDragOverPosition(getDropPosition(event, event.currentTarget));
         }}
         onProjectDragLeave={() => {
           setDragOverKey((current) => (current === projectDragKey ? null : current));
+          setDragOverPosition((current) => (dragOverKey === projectDragKey ? null : current));
         }}
         onProjectDrop={(event) => {
           event.preventDefault();
           event.stopPropagation();
           const payload = readDragPayload(event);
-          setDragOverKey(null);
-          setDraggingKey(null);
+          const position = getDropPosition(event, event.currentTarget);
+          clearDragUi();
           if (!payload || payload.kind !== "project") return;
-          reorderProject(payload.root, group.root);
+          reorderProject(payload.root, group.root, position);
         }}
         onProjectDragEnd={() => {
-          setDraggingKey(null);
-          setDragOverKey(null);
+          clearDragUi();
         }}
-        onSessionDragStart={(sessionId, event) => {
+        onSessionDragStart={(sessionId, event, label) => {
           writeDragPayload(event, {
             kind: "session",
             projectRoot: group.root,
             sessionId,
           });
           setDraggingKey(`session:${group.root}:${sessionId}`);
+          startDragOverlay(event, "session", label);
         }}
         onSessionDragOver={(sessionId, event) => {
           event.preventDefault();
           event.dataTransfer.dropEffect = "move";
-          setDragOverKey(`session:${group.root}:${sessionId}`);
+          const key = `session:${group.root}:${sessionId}`;
+          setDragOverKey(key);
+          setDragOverPosition(getDropPosition(event, event.currentTarget));
         }}
         onSessionDragLeave={(sessionId) => {
           const key = `session:${group.root}:${sessionId}`;
           setDragOverKey((current) => (current === key ? null : current));
+          setDragOverPosition((current) => (dragOverKey === key ? null : current));
         }}
         onSessionDrop={(sessionId, event) => {
           event.preventDefault();
           event.stopPropagation();
           const payload = readDragPayload(event);
-          setDragOverKey(null);
-          setDraggingKey(null);
+          const position = getDropPosition(event, event.currentTarget);
+          clearDragUi();
           if (!payload || payload.kind !== "session") return;
           if (payload.projectRoot !== group.root) return; // same-project only
-          reorderSessionInProject(group.root, payload.sessionId, sessionId);
+          reorderSessionInProject(group.root, payload.sessionId, sessionId, position);
         }}
         onSessionDragEnd={() => {
-          setDraggingKey(null);
-          setDragOverKey(null);
+          clearDragUi();
         }}
         draggingKey={draggingKey}
         dragOverKey={dragOverKey}
+        dragOverPosition={dragOverPosition}
       />
     );
   };
@@ -1219,6 +1302,44 @@ export function SessionSidebar({
           onConfirm={() => void handleProjectDialogConfirm()}
         />
       )}
+
+      {dragOverlay && createPortal(
+        <div
+          aria-hidden="true"
+          style={{
+            position: "fixed",
+            left: dragOverlay.x + 12,
+            top: dragOverlay.y + 10,
+            width: dragOverlay.width,
+            height: 30,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "0 10px",
+            borderRadius: 999,
+            border: "1px solid var(--border)",
+            background: "var(--bg)",
+            boxShadow: "0 10px 28px rgba(0,0,0,0.16)",
+            color: "var(--text)",
+            fontSize: 13,
+            pointerEvents: "none",
+            zIndex: 2000,
+            opacity: 0.96,
+          }}
+        >
+          {dragOverlay.kind === "project" ? (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
+            </svg>
+          ) : (
+            <span style={{ width: 6, height: 6, borderRadius: 999, background: "var(--text-dim)", flexShrink: 0 }} />
+          )}
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {dragOverlay.label}
+          </span>
+        </div>,
+        document.body,
+      )}
     </div>
   );
 }
@@ -1252,7 +1373,7 @@ function ProjectGroup({
   runningSessionIds,
   unreadSessionIds,
   isDragging = false,
-  isDragOver = false,
+  dropPosition = null,
   onToggle,
   onNewSession,
   onClearChats,
@@ -1276,6 +1397,7 @@ function ProjectGroup({
   onSessionDragEnd,
   draggingKey,
   dragOverKey,
+  dragOverPosition,
 }: {
   group: SidebarProjectGroup;
   expanded: boolean;
@@ -1285,7 +1407,7 @@ function ProjectGroup({
   runningSessionIds: Set<string>;
   unreadSessionIds: Set<string>;
   isDragging?: boolean;
-  isDragOver?: boolean;
+  dropPosition?: DropPosition | null;
   onToggle: () => void;
   onNewSession: (event: React.MouseEvent) => void;
   onClearChats: () => void;
@@ -1302,13 +1424,14 @@ function ProjectGroup({
   onProjectDragLeave: () => void;
   onProjectDrop: (event: React.DragEvent) => void;
   onProjectDragEnd: () => void;
-  onSessionDragStart: (sessionId: string, event: React.DragEvent) => void;
+  onSessionDragStart: (sessionId: string, event: React.DragEvent, label: string) => void;
   onSessionDragOver: (sessionId: string, event: React.DragEvent) => void;
   onSessionDragLeave: (sessionId: string) => void;
   onSessionDrop: (sessionId: string, event: React.DragEvent) => void;
   onSessionDragEnd: () => void;
   draggingKey: string | null;
   dragOverKey: string | null;
+  dragOverPosition: DropPosition | null;
 }) {
   const { t } = useI18n();
   const [hovered, setHovered] = useState(false);
@@ -1359,7 +1482,8 @@ function ProjectGroup({
   }, [closeMenu, menuOpen]);
 
   return (
-    <div style={{ marginBottom: 2 }}>
+    <div style={{ marginBottom: 2, position: "relative" }}>
+      {dropPosition === "before" && <DropInsertLine />}
       <div
         role="button"
         tabIndex={0}
@@ -1397,13 +1521,13 @@ function ProjectGroup({
           padding: "0 8px",
           margin: "1px 6px",
           cursor: isDragging ? "grabbing" : "grab",
-          background: isDragOver || selected || hovered || menuOpen
+          background: selected || hovered || menuOpen
             ? "var(--bg-hover)"
             : "transparent",
           borderRadius: 999,
-          border: isDragOver ? "1px solid var(--accent)" : "1px solid transparent",
+          border: "1px solid transparent",
           opacity: isDragging ? 0.2 : 1,
-          transition: "background 0.12s, border-color 0.12s, opacity 0.12s",
+          transition: "background 0.12s, opacity 0.12s",
           userSelect: "none",
         }}
       >
@@ -1616,6 +1740,13 @@ function ProjectGroup({
           </div>
         )}
       </div>
+      {dropPosition === "after" && (
+        <div style={{ position: "relative", height: 0 }}>
+          <div style={{ position: "absolute", left: 0, right: 0, top: -1 }}>
+            <DropInsertLine />
+          </div>
+        </div>
+      )}
       {expanded && (
         group.sessions.length === 0 ? (
           <div style={{
@@ -1641,6 +1772,7 @@ function ProjectGroup({
                 projectRoot={group.root}
                 draggingKey={draggingKey}
                 dragOverKey={dragOverKey}
+                dragOverPosition={dragOverPosition}
                 onSessionDragStart={onSessionDragStart}
                 onSessionDragOver={onSessionDragOver}
                 onSessionDragLeave={onSessionDragLeave}
@@ -1801,6 +1933,26 @@ function ProjectActionDialog({
   );
 }
 
+function DropInsertLine() {
+  return (
+    <div
+      aria-hidden="true"
+      style={{
+        position: "absolute",
+        left: 10,
+        right: 10,
+        top: -1,
+        height: 2,
+        borderRadius: 999,
+        background: "var(--accent)",
+        boxShadow: "0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent)",
+        pointerEvents: "none",
+        zIndex: 2,
+      }}
+    />
+  );
+}
+
 function SessionTreeItem({
   node,
   selectedSessionId,
@@ -1813,6 +1965,7 @@ function SessionTreeItem({
   projectRoot,
   draggingKey,
   dragOverKey,
+  dragOverPosition,
   onSessionDragStart,
   onSessionDragOver,
   onSessionDragLeave,
@@ -1830,7 +1983,8 @@ function SessionTreeItem({
   projectRoot: string;
   draggingKey: string | null;
   dragOverKey: string | null;
-  onSessionDragStart: (sessionId: string, event: React.DragEvent) => void;
+  dragOverPosition: DropPosition | null;
+  onSessionDragStart: (sessionId: string, event: React.DragEvent, label: string) => void;
   onSessionDragOver: (sessionId: string, event: React.DragEvent) => void;
   onSessionDragLeave: (sessionId: string) => void;
   onSessionDrop: (sessionId: string, event: React.DragEvent) => void;
@@ -1839,6 +1993,10 @@ function SessionTreeItem({
   const [collapsed, setCollapsed] = useState(false);
   const hasChildren = node.children.length > 0;
   const sessionKey = `session:${projectRoot}:${node.session.id}`;
+  const dropPosition = dragOverKey === sessionKey ? dragOverPosition : null;
+  const title = node.session.name
+    || node.session.firstMessage.slice(0, 50)
+    || node.session.id.slice(0, 12);
 
   return (
     <div>
@@ -1853,6 +2011,7 @@ function SessionTreeItem({
             pointerEvents: "none",
           }} />
         )}
+        {dropPosition === "before" && <DropInsertLine />}
         <SessionItem
           session={node.session}
           isSelected={node.session.id === selectedSessionId}
@@ -1866,13 +2025,20 @@ function SessionTreeItem({
           collapsed={collapsed}
           onToggleCollapse={() => setCollapsed((v) => !v)}
           isDragging={draggingKey === sessionKey}
-          isDragOver={dragOverKey === sessionKey}
-          onDragStart={(event) => onSessionDragStart(node.session.id, event)}
+          dropPosition={dropPosition}
+          onDragStart={(event) => onSessionDragStart(node.session.id, event, title)}
           onDragOver={(event) => onSessionDragOver(node.session.id, event)}
           onDragLeave={() => onSessionDragLeave(node.session.id)}
           onDrop={(event) => onSessionDrop(node.session.id, event)}
           onDragEnd={onSessionDragEnd}
         />
+        {dropPosition === "after" && (
+          <div style={{ position: "relative", height: 0 }}>
+            <div style={{ position: "absolute", left: 0, right: 0, top: -1 }}>
+              <DropInsertLine />
+            </div>
+          </div>
+        )}
       </div>
       {hasChildren && !collapsed && (
         <div>
@@ -1890,6 +2056,7 @@ function SessionTreeItem({
               projectRoot={projectRoot}
               draggingKey={draggingKey}
               dragOverKey={dragOverKey}
+              dragOverPosition={dragOverPosition}
               onSessionDragStart={onSessionDragStart}
               onSessionDragOver={onSessionDragOver}
               onSessionDragLeave={onSessionDragLeave}
@@ -2023,7 +2190,7 @@ function SessionItem({
   collapsed = false,
   onToggleCollapse,
   isDragging = false,
-  isDragOver = false,
+  dropPosition = null,
   onDragStart,
   onDragOver,
   onDragLeave,
@@ -2042,7 +2209,7 @@ function SessionItem({
   collapsed?: boolean;
   onToggleCollapse?: () => void;
   isDragging?: boolean;
-  isDragOver?: boolean;
+  dropPosition?: DropPosition | null;
   onDragStart?: (event: React.DragEvent) => void;
   onDragOver?: (event: React.DragEvent) => void;
   onDragLeave?: () => void;
@@ -2153,13 +2320,13 @@ function SessionItem({
         userSelect: "none",
         background: confirmDelete
           ? "rgba(239,68,68,0.06)"
-          : isDragOver || isSelected || hovered
+          : isSelected || hovered
             ? "var(--bg-hover)"
             : "transparent",
         borderRadius: 999,
-        border: isDragOver ? "1px solid var(--accent)" : "1px solid transparent",
+        border: "1px solid transparent",
         boxShadow: confirmDelete ? "inset 2px 0 0 #ef4444" : "none",
-        transition: "background 0.12s, border-color 0.12s, opacity 0.12s",
+        transition: "background 0.12s, opacity 0.12s",
         opacity: isDragging ? 0.2 : deleting ? 0.5 : 1,
         gap: 6,
         overflow: "hidden",
