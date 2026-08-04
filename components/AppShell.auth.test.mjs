@@ -63,7 +63,7 @@ test("Side Chat open state is remembered per main session", () => {
   assert.match(source, /rememberSideChatOpen\(sessionId, tabs\.some\(\(tab\) => tab\.kind === "sideChat"\)\)/);
   assert.match(source, /applySessionFilePanel\(session\.id\)/);
   assert.match(source, /rightPanelTabsBySessionRef/);
-  assert.match(source, /openRightPanelKind\("sideChat"\)/);
+  assert.match(source, /openSideChatShell/);
   assert.match(source, /sideChatOpenBySessionRef\.current\.delete\(sessionId\)/);
   assert.match(source, /handleSessionDeleted[\s\S]*?setRightPanelOpen\(false\)/);
 });
@@ -92,10 +92,11 @@ test("right panel chrome is multi-tab open/maximize (Codex RightPanelTabs)", () 
   assert.match(source, /toggleRightPanelMaximized/);
   assert.match(source, /right-panel-maximized/);
   // Codex multi-tab: side chat / files / open-file chips coexist as panel tabs.
-  assert.match(source, /openRightPanelKind\("sideChat"\)/);
+  assert.match(source, /openSideChatShell/);
   assert.match(source, /openRightPanelKind\("files"/);
   assert.match(source, /openOrFocusFilePanelTab/);
-  assert.match(source, /actionToTabKind/);
+  assert.match(source, /openOrFocusSideChatPanelTab/);
   assert.match(source, /rightPanelTabsBySessionRef/);
   assert.match(source, /explorerOpen/);
+  assert.match(source, /ThreadSummaryPanel/);
 });
