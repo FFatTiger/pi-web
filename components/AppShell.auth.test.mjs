@@ -41,17 +41,18 @@ test("session stats are no longer duplicated in the top bar", () => {
   assert.doesNotMatch(topBarBlock, /\{fmt\(t\.input\)\}/);
 });
 
-test("fixed right corner exposes Side Chat and Explorer entries", () => {
-  const explorerGroupStart = source.indexOf("{/* Fixed right-corner control: side chat + explorer");
-  assert.ok(explorerGroupStart >= 0, "explorer fixed group marker missing");
-  const explorerGroupEnd = source.indexOf("{modelsConfigOpen &&", explorerGroupStart);
-  assert.ok(explorerGroupEnd > explorerGroupStart, "explorer fixed group end missing");
-  const fixedRegion = source.slice(explorerGroupStart, explorerGroupEnd);
+test("fixed right corner exposes Codex-style sidebar toggle", () => {
+  const groupStart = source.indexOf("{/* Codex-style top-right: single sidebar show/hide control */}");
+  assert.ok(groupStart >= 0, "top-right sidebar toggle marker missing");
+  const groupEnd = source.indexOf("{modelsConfigOpen &&", groupStart);
+  assert.ok(groupEnd > groupStart, "top-right control group end missing");
+  const fixedRegion = source.slice(groupStart, groupEnd);
   assert.equal(fixedRegion.includes("<AuthControls"), false);
-  assert.match(fixedRegion, /rightPanelMode === "explorer"/);
-  assert.match(fixedRegion, /rightPanelMode === "chat"/);
-  assert.match(fixedRegion, /toggleSideChatPanel/);
-  assert.doesNotMatch(fixedRegion, /rightPanelMode === "file"/);
+  assert.match(fixedRegion, /handleSidebarToggle/);
+  assert.match(fixedRegion, /layout\.hideSidebar/);
+  assert.match(fixedRegion, /layout\.showSidebar/);
+  assert.doesNotMatch(fixedRegion, /toggleSideChatPanel/);
+  assert.doesNotMatch(fixedRegion, /toggleExplorerPanel/);
   assert.doesNotMatch(fixedRegion, /toggleFilePanel/);
 });
 

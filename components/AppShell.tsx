@@ -498,12 +498,6 @@ export function AppShell() {
     router.replace("/", { scroll: false });
   }, [applySessionFilePanel, captureCurrentSessionFilePanel, isMobile, router]);
 
-  // Global keyboard shortcuts (handles Esc, Ctrl+Alt+N etc.)
-  useGlobalKeyboardShortcuts({
-    onNewSession: (cwd: string) => handleNewSession(`kb-${Date.now()}`, cwd, activeProjectRoot ?? cwd),
-    activeCwd,
-  });
-
   // Client-built transient SessionInfo (new session / fork) lacks server-computed
   // metadata such as projectRoot. Hydrate it from the session list so later
   // session/project UI has the full record without needing activateWorkspace.
@@ -747,6 +741,15 @@ export function AppShell() {
       "noopener,noreferrer",
     );
   }, [selectedSession]);
+
+  // Global keyboard shortcuts (Esc / new session / Codex panel toggles)
+  useGlobalKeyboardShortcuts({
+    onNewSession: (cwd: string) => handleNewSession(`kb-${Date.now()}`, cwd, activeProjectRoot ?? cwd),
+    activeCwd,
+    onToggleSidebar: handleSidebarToggle,
+    onToggleExplorer: toggleExplorerPanel,
+    onToggleSideChat: toggleSideChatPanel,
+  });
 
   // Chat appears only for a selected session or an explicitly requested new session.
   const effectiveNewSessionCwd = newSessionCwd;
@@ -1011,8 +1014,9 @@ export function AppShell() {
         <div ref={topBarRef} style={{ display: "flex", alignItems: "center", flexShrink: 0, borderBottom: "1px solid var(--border)", height: "calc(36px + env(safe-area-inset-top))", paddingTop: "env(safe-area-inset-top)", background: "var(--bg-panel)" }}>
           <button
             onClick={handleSidebarToggle}
-            title={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
-            aria-label={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
+            title={`${sidebarOpen ? translate("layout.hideSidebar") : translate("layout.showSidebar")} (Ctrl+B)`}
+            aria-label={sidebarOpen ? translate("layout.hideSidebar") : translate("layout.showSidebar")}
+            aria-pressed={sidebarOpen}
             style={{
               display: "flex", alignItems: "center", justifyContent: "center",
               width: 36, height: 36, padding: 0,
@@ -1022,15 +1026,10 @@ export function AppShell() {
             onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
             onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; }}
           >
-            {sidebarOpen ? (
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="3" width="18" height="18" rx="2" /><line x1="9" y1="3" x2="9" y2="21" />
-              </svg>
-            ) : (
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
-              </svg>
-            )}
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <rect x="3.5" y="4" width="17" height="16" rx="3" />
+              <path d="M9 4v16" />
+            </svg>
           </button>
           <button
             onClick={(e) => {
@@ -1668,14 +1667,17 @@ export function AppShell() {
         />
       </div>
     </div>
-    {/* Fixed right-corner control: side chat + explorer (Codex panel toggles) */}
+    {/* Codex-style top-right: single sidebar show/hide control */}
     <div
       style={{
         position: "fixed",
-        top: 0,
-        right: "env(safe-area-inset-right)",
+        top: 8,
+        right: "calc(12px + env(safe-area-inset-right))",
         zIndex: 300,
         display: "flex",
+        alignItems: "center",
+        gap: 6,
+        pointerEvents: "none",
       }}
     >
       {rightPanelMode === "explorer" && changesCount > 0 && (
@@ -1686,66 +1688,55 @@ export function AppShell() {
           aria-label={changesCollapsed ? "Show git changes" : "Hide git changes"}
           aria-pressed={!changesCollapsed}
           style={{
+            pointerEvents: "auto",
             display: "flex", alignItems: "center", justifyContent: "center",
-            width: 36, height: 36, padding: 0,
-            background: changesCollapsed ? "var(--bg-panel)" : "var(--bg-selected)",
-            border: "none",
-            borderLeft: "1px solid var(--border)", borderBottom: "1px solid var(--border)",
+            width: 32, height: 32, padding: 0,
+            background: changesCollapsed ? "var(--bg)" : "var(--bg-selected)",
+            border: "1px solid var(--border)",
+            borderRadius: "var(--radius-md, 8px)",
             color: changesCollapsed ? "var(--text-dim)" : "var(--accent)",
             cursor: "pointer",
+            boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
           }}
         >
           <span style={{ fontSize: 11, fontWeight: 600 }}>{changesCount}</span>
         </button>
       )}
       <button
-        onClick={toggleSideChatPanel}
-        disabled={!selectedSession}
-        title={rightPanelMode === "chat" ? translate("sideChat.hide") : translate("sideChat.show")}
-        aria-label={rightPanelMode === "chat" ? translate("sideChat.hide") : translate("sideChat.show")}
-        aria-pressed={rightPanelMode === "chat"}
+        type="button"
+        onClick={handleSidebarToggle}
+        title={`${sidebarOpen ? translate("layout.hideSidebar") : translate("layout.showSidebar")} (Ctrl+B)`}
+        aria-label={sidebarOpen ? translate("layout.hideSidebar") : translate("layout.showSidebar")}
+        aria-pressed={sidebarOpen}
         style={{
-          display: "flex", alignItems: "center", justifyContent: "center",
-          width: 36, height: 36, padding: 0,
-          background: "var(--bg-panel)", border: "none",
-          borderLeft: "1px solid var(--border)", borderBottom: "1px solid var(--border)",
-          color: rightPanelMode === "chat" ? "var(--text)" : "var(--text-muted)",
-          cursor: !selectedSession ? "not-allowed" : "pointer",
-          opacity: !selectedSession ? 0.4 : 1,
-          transition: "color 0.12s, opacity 0.12s",
+          pointerEvents: "auto",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: 32,
+          height: 32,
+          padding: 0,
+          background: "var(--bg)",
+          border: "1px solid var(--border)",
+          borderRadius: "var(--radius-md, 8px)",
+          color: "var(--text-muted)",
+          cursor: "pointer",
+          boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
+          transition: "color 0.12s, background 0.12s, border-color 0.12s",
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.color = "var(--text)";
+          e.currentTarget.style.background = "var(--bg-hover)";
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.color = "var(--text-muted)";
+          e.currentTarget.style.background = "var(--bg)";
         }}
       >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" />
-          <path d="M8 9h8" />
-          <path d="M8 13h5" />
-        </svg>
-      </button>
-      <button
-        onClick={toggleExplorerPanel}
-        disabled={!activeCwd}
-        title={rightPanelMode === "explorer" ? "Hide file explorer" : "Show file explorer"}
-        aria-label={rightPanelMode === "explorer" ? "Hide file explorer" : "Show file explorer"}
-        aria-pressed={rightPanelMode === "explorer"}
-        style={{
-          display: "flex", alignItems: "center", justifyContent: "center",
-          width: 36, height: 36, padding: 0,
-          background: "var(--bg-panel)", border: "none",
-          borderLeft: "1px solid var(--border)", borderBottom: "1px solid var(--border)",
-          color: rightPanelMode === "explorer" ? "var(--text)" : "var(--text-muted)",
-          cursor: !activeCwd ? "not-allowed" : "pointer",
-          opacity: !activeCwd ? 0.4 : 1,
-          transition: "color 0.12s, opacity 0.12s",
-        }}
-        onMouseEnter={(e) => { if (activeCwd) e.currentTarget.style.color = "var(--text)"; }}
-        onMouseLeave={(e) => { e.currentTarget.style.color = rightPanelMode === "explorer" ? "var(--text)" : "var(--text-muted)"; }}
-      >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M4 4h6v6H4z" />
-          <path d="M14 4h6v6h-6z" />
-          <path d="M4 14h6v6H4z" />
-          <path d="M17 14v6" />
-          <path d="M14 17h6" />
+        {/* Codex-like sidebar glyph: rounded square with left rail */}
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <rect x="3.5" y="4" width="17" height="16" rx="3" />
+          <path d="M9 4v16" />
         </svg>
       </button>
     </div>

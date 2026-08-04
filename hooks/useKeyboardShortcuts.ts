@@ -25,6 +25,12 @@ interface UseGlobalKeyboardShortcutsOptions {
   onNewSession?: (cwd: string) => void;
   /** The currently selected project directory (sidebar cwd). */
   activeCwd?: string | null;
+  /** Codex: Ctrl/Cmd+B toggles the left sidebar. */
+  onToggleSidebar?: () => void;
+  /** Codex-ish: Ctrl/Cmd+Shift+E toggles file explorer panel. */
+  onToggleExplorer?: () => void;
+  /** Codex: Ctrl/Cmd+Alt+S opens/toggles side chat. */
+  onToggleSideChat?: () => void;
 }
 
 /**
@@ -33,6 +39,7 @@ interface UseGlobalKeyboardShortcutsOptions {
  * Shortcuts handled here:
  *   Esc          – stop the running agent (via module-level abort handler)
  *   Ctrl+Alt+N   – create a new session in the active project directory
+ *   Ctrl/Cmd+B   – toggle left sidebar (Codex toggleSidebar)
  *
  * Note: Esc inside <textarea> or <input> is deliberately NOT handled here.
  * ChatInput manages its own Esc logic (closing slash / @ file menus, stopping
@@ -42,7 +49,7 @@ interface UseGlobalKeyboardShortcutsOptions {
 export function useGlobalKeyboardShortcuts(
   options: UseGlobalKeyboardShortcutsOptions,
 ): void {
-  const { onNewSession, activeCwd } = options;
+  const { onNewSession, activeCwd, onToggleSidebar, onToggleExplorer, onToggleSideChat } = options;
 
   useEffect(() => {
     const handler = (e: KeyboardEvent): void => {
@@ -59,6 +66,33 @@ export function useGlobalKeyboardShortcuts(
         return;
       }
 
+      const tag = (e.target as HTMLElement)?.tagName;
+      const inEditable = tag === "TEXTAREA" || tag === "INPUT" || (e.target as HTMLElement)?.isContentEditable;
+
+      // ---- Ctrl/Cmd+B: toggle sidebar (Codex) ----
+      if ((e.key === "b" || e.key === "B") && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
+        if (!onToggleSidebar || inEditable) return;
+        e.preventDefault();
+        onToggleSidebar();
+        return;
+      }
+
+      // ---- Ctrl/Cmd+Shift+E: toggle explorer (Codex file tree) ----
+      if ((e.key === "e" || e.key === "E") && (e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey) {
+        if (!onToggleExplorer || inEditable) return;
+        e.preventDefault();
+        onToggleExplorer();
+        return;
+      }
+
+      // ---- Ctrl/Cmd+Alt+S: toggle side chat (Codex openSideChat) ----
+      if ((e.key === "s" || e.key === "S") && (e.ctrlKey || e.metaKey) && e.altKey && !e.shiftKey) {
+        if (!onToggleSideChat || inEditable) return;
+        e.preventDefault();
+        onToggleSideChat();
+        return;
+      }
+
       // ---- Ctrl+Alt+N: new session ----
       if (e.key === "n" && e.ctrlKey && e.altKey) {
         if (!activeCwd || !onNewSession) return;
@@ -69,5 +103,5 @@ export function useGlobalKeyboardShortcuts(
 
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [activeCwd, onNewSession]);
+  }, [activeCwd, onNewSession, onToggleExplorer, onToggleSideChat, onToggleSidebar]);
 }
