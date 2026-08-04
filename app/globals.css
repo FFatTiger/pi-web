@@ -1224,6 +1224,12 @@ span.linenumber {
     width: var(--right-panel-width, clamp(360px, 42vw, 640px));
     min-width: 300px;
   }
+  /* Codex expand panel: take most of the main row while keeping a slim chat column. */
+  .right-panel-container.right-panel-open.right-panel-maximized {
+    width: min(100%, max(420px, calc(100% - 320px)));
+    min-width: min(100%, max(420px, calc(100% - 320px)));
+    flex: 1 1 auto;
+  }
   .right-panel-container.right-panel-closed {
     width: 0;
     min-width: 0;
@@ -1233,6 +1239,10 @@ span.linenumber {
   .right-panel-container > * {
     width: var(--right-panel-width, clamp(360px, 42vw, 640px));
     min-width: 300px;
+  }
+  .right-panel-container.right-panel-open.right-panel-maximized > * {
+    width: 100%;
+    min-width: 0;
   }
   .right-panel-container.right-panel-resizing,
   .right-panel-container.right-panel-resizing > * {

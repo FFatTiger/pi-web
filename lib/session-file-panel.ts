@@ -1,44 +1,45 @@
 import type { Tab } from "@/components/TabBar";
-import type { RightPanelMode } from "@/components/WorkspaceFilePanel";
 
-/** Non-chat right-panel surfaces that should be restored per session. */
-export type FilePanelSurfaceMode = "closed" | "explorer" | "file";
+/** Files surfaces shown in the right panel body (not side chat). */
+export type FilesSurface = "explorer" | "file";
 
 /**
- * Codex-style open-files state scoped to one conversation/session.
- * Side Chat open/closed is tracked separately; this only owns file tabs +
- * the last non-chat surface (explorer/file/closed).
+ * Codex-style right-panel content scoped to one conversation.
+ * Layout chrome (open/maximized/width) is window-level; this snapshot is
+ * the session's open files + last files surface.
  */
 export type SessionFilePanelState = {
   tabs: Tab[];
   activeTabId: string | null;
-  surfaceMode: FilePanelSurfaceMode;
+  /** Last non-chat surface for this session (explorer or file). */
+  filesSurface: FilesSurface;
 };
 
+/** @deprecated use FilesSurface — kept for call-site migration */
+export type FilePanelSurfaceMode = "closed" | FilesSurface;
+
 export function emptySessionFilePanelState(): SessionFilePanelState {
-  return { tabs: [], activeTabId: null, surfaceMode: "closed" };
+  return { tabs: [], activeTabId: null, filesSurface: "file" };
 }
 
-export function isFilePanelSurfaceMode(mode: RightPanelMode): mode is FilePanelSurfaceMode {
-  return mode === "closed" || mode === "explorer" || mode === "file";
+export function isFilesSurface(value: string | null | undefined): value is FilesSurface {
+  return value === "explorer" || value === "file";
 }
 
 /**
- * Snapshot the file panel for the session being left.
- * When Side Chat is open, keep the previous non-chat surface (or infer file
- * if tabs exist) so returning without side-chat restores explorer/file.
+ * Snapshot file tabs + last files surface for the session being left.
+ * Side-chat open state is stored separately (sideChatOpenBySessionRef).
  */
 export function captureSessionFilePanelState(input: {
   tabs: Tab[];
   activeTabId: string | null;
-  rightPanelMode: RightPanelMode;
-  /** Last known non-chat surface while Side Chat is showing. */
-  previousSurfaceMode?: FilePanelSurfaceMode | null;
+  filesSurface: FilesSurface;
+  /** When side chat is showing, pass the last files surface underneath. */
+  previousFilesSurface?: FilesSurface | null;
 }): SessionFilePanelState {
-  const surfaceMode: FilePanelSurfaceMode = input.rightPanelMode === "chat"
-    ? (input.previousSurfaceMode
-      ?? (input.tabs.length > 0 ? "file" : "closed"))
-    : input.rightPanelMode;
+  const filesSurface = input.previousFilesSurface && isFilesSurface(input.previousFilesSurface)
+    ? input.previousFilesSurface
+    : input.filesSurface;
 
   const activeTabId = input.activeTabId
     && input.tabs.some((tab) => tab.id === input.activeTabId)
@@ -48,28 +49,57 @@ export function captureSessionFilePanelState(input: {
   return {
     tabs: input.tabs.map((tab) => ({ ...tab })),
     activeTabId,
-    surfaceMode: surfaceMode === "file" && input.tabs.length === 0 ? "closed" : surfaceMode,
+    filesSurface: filesSurface === "file" && input.tabs.length === 0 ? "file" : filesSurface,
   };
 }
 
-/** Resolve panel mode when entering a session (Side Chat wins over file surface). */
-export function resolveRightPanelModeOnSessionSwitch(input: {
+/** Resolve visible right-panel body when entering a session. */
+export function resolveRightPanelViewOnSessionSwitch(input: {
   sideChatOpen: boolean;
   restored: SessionFilePanelState;
-}): RightPanelMode {
-  if (input.sideChatOpen) return "chat";
-  if (input.restored.surfaceMode === "file" && input.restored.tabs.length === 0) {
-    return "closed";
+}): {
+  open: boolean;
+  surface: FilesSurface | "sideChat";
+} {
+  if (input.sideChatOpen) {
+    return { open: true, surface: "sideChat" };
   }
-  return input.restored.surfaceMode;
+  if (input.restored.filesSurface === "file" && input.restored.tabs.length === 0) {
+    // No files and no side chat — keep panel closed unless explorer was explicit.
+    return { open: false, surface: "file" };
+  }
+  if (input.restored.filesSurface === "explorer") {
+    return { open: true, surface: "explorer" };
+  }
+  if (input.restored.tabs.length > 0) {
+    return { open: true, surface: "file" };
+  }
+  return { open: false, surface: "file" };
 }
 
 /** New / blank composer: never carry another session's open files. */
-export function blankPanelAfterLeaveSession(currentMode: RightPanelMode): {
+export function blankPanelAfterLeaveSession(): {
   tabs: Tab[];
   activeTabId: string | null;
-  mode: RightPanelMode;
+  filesSurface: FilesSurface;
+  open: boolean;
+  surface: FilesSurface | "sideChat";
 } {
-  const mode = currentMode === "file" || currentMode === "chat" ? "closed" : currentMode;
-  return { tabs: [], activeTabId: null, mode };
+  return {
+    tabs: [],
+    activeTabId: null,
+    filesSurface: "file",
+    open: false,
+    surface: "file",
+  };
+}
+
+/** Derive legacy WorkspaceFilePanel mode for rendering. */
+export function deriveRightPanelMode(input: {
+  open: boolean;
+  surface: FilesSurface | "sideChat";
+}): "closed" | "explorer" | "file" | "chat" {
+  if (!input.open) return "closed";
+  if (input.surface === "sideChat") return "chat";
+  return input.surface;
 }

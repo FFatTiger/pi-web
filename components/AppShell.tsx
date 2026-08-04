@@ -12,7 +12,7 @@ import { PluginsConfig } from "./PluginsConfig";
 import { ProjectTrustDialog } from "./ProjectTrustDialog";
 import { BranchNavigator } from "./BranchNavigator";
 import { WorktreeSwitcher } from "./WorktreeSwitcher";
-import { WorkspaceFilePanel, type RightPanelMode } from "./WorkspaceFilePanel";
+import { WorkspaceFilePanel } from "./WorkspaceFilePanel";
 import { SideChatPanel } from "./SideChatPanel";
 import { useTheme } from "@/hooks/useTheme";
 import { useI18n } from "@/hooks/useI18n";
@@ -37,10 +37,11 @@ import {
 import {
   blankPanelAfterLeaveSession,
   captureSessionFilePanelState,
+  deriveRightPanelMode,
   emptySessionFilePanelState,
-  isFilePanelSurfaceMode,
-  resolveRightPanelModeOnSessionSwitch,
-  type FilePanelSurfaceMode,
+  isFilesSurface,
+  resolveRightPanelViewOnSessionSwitch,
+  type FilesSurface,
   type SessionFilePanelState,
 } from "@/lib/session-file-panel";
 import type { SessionInfo, SessionTreeNode } from "@/lib/types";
@@ -86,11 +87,14 @@ export function AppShell() {
   const [initialSessionRestored, setInitialSessionRestored] = useState<boolean>(() => !initialSessionId);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileSidebarReady, setMobileSidebarReady] = useState(false);
-  const [rightPanelMode, setRightPanelMode] = useState<RightPanelMode>("closed");
+  // Codex-style orthogonal right-panel chrome + content (not a single mode enum).
+  const [rightPanelOpen, setRightPanelOpen] = useState(false);
+  const [rightPanelMaximized, setRightPanelMaximized] = useState(false);
+  const [rightPanelSurface, setRightPanelSurface] = useState<FilesSurface | "sideChat">("file");
   // Side Chat open/closed is remembered per main session so switching A→B
   // does not carry A's panel, and returning to A restores it.
   const sideChatOpenBySessionRef = useRef(new Map<string, boolean>());
-  // Codex-style: open file tabs + last non-chat surface are conversation-scoped.
+  // Codex-style: open file tabs + last files surface are conversation-scoped.
   const filePanelBySessionRef = useRef(new Map<string, SessionFilePanelState>());
   const sidebarWidthRef = useRef(SIDEBAR_DEFAULT_WIDTH);
   const rightPanelWidthRef = useRef(RIGHT_PANEL_FALLBACK_WIDTH);
@@ -105,10 +109,10 @@ export function AppShell() {
       ? SIDEBAR_MAX_WIDTH
       : getSidebarMaxWidth({
         viewportWidth: window.innerWidth,
-        rightPanelOpen: rightPanelMode !== "closed",
+        rightPanelOpen,
         rightPanelWidth: rightPanelWidthRef.current,
       }),
-    [rightPanelMode],
+    [rightPanelOpen],
   );
   const getResponsiveRightPanelMaxWidth = useCallback(
     () => typeof window === "undefined"
@@ -162,10 +166,10 @@ export function AppShell() {
     setMobileSidebarReady(true);
   }, []);
   useEffect(() => {
-    if (rightPanelMode === "closed") return;
+    if (!rightPanelOpen) return;
     reclampSidebarWidth();
     reclampRightPanelWidth();
-  }, [reclampRightPanelWidth, reclampSidebarWidth, rightPanelMode]);
+  }, [reclampRightPanelWidth, reclampSidebarWidth, rightPanelOpen]);
   const chatInputRef = useRef<ChatInputHandle | null>(null);
   const topBarRef = useRef<HTMLDivElement>(null);
 
@@ -204,11 +208,12 @@ export function AppShell() {
   }, []);
 
   const closeRightPanel = useCallback(() => {
-    setRightPanelMode((mode) => {
-      if (mode === "chat") rememberSideChatOpen(activeSessionIdRef.current, false);
-      return "closed";
-    });
-  }, [rememberSideChatOpen]);
+    if (rightPanelSurface === "sideChat") {
+      rememberSideChatOpen(activeSessionIdRef.current, false);
+    }
+    setRightPanelOpen(false);
+    setRightPanelMaximized(false);
+  }, [rememberSideChatOpen, rightPanelSurface]);
 
   const handleSessionStatsChange = useCallback((stats: SessionStatsInfo | null) => {
     setSessionStats(stats);
@@ -270,73 +275,84 @@ export function AppShell() {
     return () => ro.disconnect();
   }, [activeTopPanel]);
 
-  // Right panel — mutually exclusive explorer/file modes
+  // Right panel content — tabs + files surface (side chat is a separate surface).
   const [fileTabs, setFileTabs] = useState<Tab[]>([]);
   const [activeFileTabId, setActiveFileTabId] = useState<string | null>(null);
   const [changesCollapsed, setChangesCollapsed] = useState(true);
   const [changesCount, setChangesCount] = useState(0);
   const fileTabsRef = useRef<Tab[]>(fileTabs);
   const activeFileTabIdRef = useRef<string | null>(activeFileTabId);
-  const rightPanelModeRef = useRef<RightPanelMode>(rightPanelMode);
-  // Last explorer/file/closed surface while Side Chat may be covering it.
-  const lastFileSurfaceModeRef = useRef<FilePanelSurfaceMode>("closed");
+  // Last explorer/file surface while Side Chat may be covering it.
+  const lastFilesSurfaceRef = useRef<FilesSurface>("file");
   fileTabsRef.current = fileTabs;
   activeFileTabIdRef.current = activeFileTabId;
-  rightPanelModeRef.current = rightPanelMode;
+
+  const rightPanelMode = deriveRightPanelMode({
+    open: rightPanelOpen,
+    surface: rightPanelSurface,
+  });
 
   useEffect(() => {
-    if (isFilePanelSurfaceMode(rightPanelMode)) {
-      lastFileSurfaceModeRef.current = rightPanelMode;
+    if (isFilesSurface(rightPanelSurface)) {
+      lastFilesSurfaceRef.current = rightPanelSurface;
     }
-  }, [rightPanelMode]);
+  }, [rightPanelSurface]);
 
   // Keep the active session's open-files snapshot fresh (Codex openFilesByConversationId).
   useEffect(() => {
     const sessionId = selectedSession?.id;
     if (!sessionId) return;
+    const filesSurface = isFilesSurface(rightPanelSurface)
+      ? rightPanelSurface
+      : lastFilesSurfaceRef.current;
     filePanelBySessionRef.current.set(
       sessionId,
       captureSessionFilePanelState({
         tabs: fileTabs,
         activeTabId: activeFileTabId,
-        rightPanelMode,
-        previousSurfaceMode: lastFileSurfaceModeRef.current,
+        filesSurface,
+        previousFilesSurface: lastFilesSurfaceRef.current,
       }),
     );
-  }, [activeFileTabId, fileTabs, rightPanelMode, selectedSession?.id]);
+  }, [activeFileTabId, fileTabs, rightPanelSurface, selectedSession?.id]);
 
   const captureCurrentSessionFilePanel = useCallback(() => {
     const sessionId = activeSessionIdRef.current;
     if (!sessionId) return;
+    const filesSurface = isFilesSurface(rightPanelSurface)
+      ? rightPanelSurface
+      : lastFilesSurfaceRef.current;
     filePanelBySessionRef.current.set(
       sessionId,
       captureSessionFilePanelState({
         tabs: fileTabsRef.current,
         activeTabId: activeFileTabIdRef.current,
-        rightPanelMode: rightPanelModeRef.current,
-        previousSurfaceMode: lastFileSurfaceModeRef.current,
+        filesSurface,
+        previousFilesSurface: lastFilesSurfaceRef.current,
       }),
     );
-  }, []);
+  }, [rightPanelSurface]);
 
   const applySessionFilePanel = useCallback((sessionId: string | null) => {
     if (!sessionId) {
-      const blank = blankPanelAfterLeaveSession(rightPanelModeRef.current);
+      const blank = blankPanelAfterLeaveSession();
       setFileTabs(blank.tabs);
       setActiveFileTabId(blank.activeTabId);
-      setRightPanelMode(blank.mode);
-      if (isFilePanelSurfaceMode(blank.mode)) lastFileSurfaceModeRef.current = blank.mode;
+      setRightPanelOpen(blank.open);
+      setRightPanelSurface(blank.surface);
+      setRightPanelMaximized(false);
+      lastFilesSurfaceRef.current = blank.filesSurface;
       return;
     }
     const restored = filePanelBySessionRef.current.get(sessionId) ?? emptySessionFilePanelState();
     setFileTabs(restored.tabs.map((tab) => ({ ...tab })));
     setActiveFileTabId(restored.activeTabId);
+    lastFilesSurfaceRef.current = restored.filesSurface;
     const sideChatOpen = sideChatOpenBySessionRef.current.get(sessionId) === true;
-    const nextMode = resolveRightPanelModeOnSessionSwitch({ sideChatOpen, restored });
-    setRightPanelMode(nextMode);
-    lastFileSurfaceModeRef.current = restored.surfaceMode === "file" && restored.tabs.length === 0
-      ? "closed"
-      : restored.surfaceMode;
+    const next = resolveRightPanelViewOnSessionSwitch({ sideChatOpen, restored });
+    setRightPanelOpen(next.open);
+    setRightPanelSurface(next.surface);
+    if (!next.open) setRightPanelMaximized(false);
   }, []);
 
   // Same @mention format as the chat input's @ autocomplete, so the agent's
@@ -507,19 +523,22 @@ export function AppShell() {
     setNewSessionCwd(null);
     setSelectedSession(session);
     // Bind any files opened on the blank composer to the new conversation id.
+    const filesSurface = isFilesSurface(rightPanelSurface)
+      ? rightPanelSurface
+      : lastFilesSurfaceRef.current;
     filePanelBySessionRef.current.set(
       session.id,
       captureSessionFilePanelState({
         tabs: fileTabsRef.current,
         activeTabId: activeFileTabIdRef.current,
-        rightPanelMode: rightPanelModeRef.current,
-        previousSurfaceMode: lastFileSurfaceModeRef.current,
+        filesSurface,
+        previousFilesSurface: lastFilesSurfaceRef.current,
       }),
     );
     setRefreshKey((k) => k + 1);
     hydrateSelectedSession(session.id);
     router.replace(`?session=${encodeURIComponent(session.id)}`, { scroll: false });
-  }, [router, hydrateSelectedSession]);
+  }, [rightPanelSurface, router, hydrateSelectedSession]);
 
   const handleAgentEnd = useCallback(() => {
     setRefreshKey((k) => k + 1);
@@ -565,13 +584,16 @@ export function AppShell() {
   const handleSessionForked = useCallback((newSessionId: string) => {
     // Keep parent's open files under the parent id; fork starts with a copy of the live panel.
     captureCurrentSessionFilePanel();
+    const filesSurface = isFilesSurface(rightPanelSurface)
+      ? rightPanelSurface
+      : lastFilesSurfaceRef.current;
     filePanelBySessionRef.current.set(
       newSessionId,
       captureSessionFilePanelState({
         tabs: fileTabsRef.current,
         activeTabId: activeFileTabIdRef.current,
-        rightPanelMode: rightPanelModeRef.current,
-        previousSurfaceMode: lastFileSurfaceModeRef.current,
+        filesSurface,
+        previousFilesSurface: lastFilesSurfaceRef.current,
       }),
     );
     setRefreshKey((k) => k + 1);
@@ -583,7 +605,7 @@ export function AppShell() {
     }));
     hydrateSelectedSession(newSessionId);
     router.replace(`?session=${encodeURIComponent(newSessionId)}`, { scroll: false });
-  }, [captureCurrentSessionFilePanel, router, hydrateSelectedSession]);
+  }, [captureCurrentSessionFilePanel, rightPanelSurface, router, hydrateSelectedSession]);
 
   const handleInitialRestoreDone = useCallback(() => {
     setInitialSessionRestored(true);
@@ -603,8 +625,10 @@ export function AppShell() {
       // Drop the panel without re-writing the per-session map entry we are about to delete.
       setFileTabs([]);
       setActiveFileTabId(null);
-      setRightPanelMode("closed");
-      lastFileSurfaceModeRef.current = "closed";
+      setRightPanelOpen(false);
+      setRightPanelSurface("file");
+      setRightPanelMaximized(false);
+      lastFilesSurfaceRef.current = "file";
       router.replace("/", { scroll: false });
     }
     sideChatOpenBySessionRef.current.delete(sessionId);
@@ -642,7 +666,9 @@ export function AppShell() {
       });
     });
     setActiveFileTabId(tabId);
-    setRightPanelMode("file");
+    setRightPanelOpen(true);
+    setRightPanelSurface("file");
+    lastFilesSurfaceRef.current = "file";
     // On mobile the file panel is full-screen; close the drawer so it shows.
     if (isMobile) setSidebarOpen(false);
   }, [isMobile]);
@@ -654,8 +680,10 @@ export function AppShell() {
   const handleCloseFileTab = useCallback((tabId: string) => {
     setFileTabs((prev) => {
       const next = prev.filter((t) => t.id !== tabId);
-      if (next.length === 0) {
-        setRightPanelMode((mode) => mode === "file" ? "closed" : mode);
+      if (next.length === 0 && rightPanelSurface === "file") {
+        // Keep explorer available; only close panel if not on side chat.
+        setRightPanelOpen(false);
+        setRightPanelMaximized(false);
       }
       return next;
     });
@@ -664,32 +692,52 @@ export function AppShell() {
       const remaining = fileTabs.filter((t) => t.id !== tabId);
       return remaining.length > 0 ? remaining[remaining.length - 1].id : null;
     });
-  }, [fileTabs]);
+  }, [fileTabs, rightPanelSurface]);
 
   const toggleExplorerPanel = useCallback(() => {
     if (!activeCwd) return;
     if (isMobile) setSidebarOpen(false);
-    setRightPanelMode((mode) => mode === "explorer" ? "closed" : "explorer");
-  }, [activeCwd, isMobile]);
+    if (rightPanelOpen && rightPanelSurface === "explorer") {
+      setRightPanelOpen(false);
+      setRightPanelMaximized(false);
+      return;
+    }
+    setRightPanelOpen(true);
+    setRightPanelSurface("explorer");
+    lastFilesSurfaceRef.current = "explorer";
+  }, [activeCwd, isMobile, rightPanelOpen, rightPanelSurface]);
 
   const toggleSideChatPanel = useCallback(() => {
     if (!selectedSession) return;
     if (isMobile) setSidebarOpen(false);
-    setRightPanelMode((mode) => {
-      if (mode === "chat") {
-        rememberSideChatOpen(selectedSession.id, false);
-        // Restore the last non-chat surface for this session (file/explorer).
-        const restored = filePanelBySessionRef.current.get(selectedSession.id);
-        const surface = restored?.surfaceMode ?? lastFileSurfaceModeRef.current;
-        if (surface === "file" && (restored?.tabs.length ?? fileTabsRef.current.length) === 0) {
-          return "closed";
-        }
-        return surface;
+    if (rightPanelOpen && rightPanelSurface === "sideChat") {
+      rememberSideChatOpen(selectedSession.id, false);
+      // Restore last files surface without dropping tabs.
+      const restored = filePanelBySessionRef.current.get(selectedSession.id);
+      const surface = restored?.filesSurface ?? lastFilesSurfaceRef.current;
+      if (surface === "file" && (restored?.tabs.length ?? fileTabsRef.current.length) === 0) {
+        setRightPanelOpen(false);
+        setRightPanelMaximized(false);
+        setRightPanelSurface("file");
+        return;
       }
-      rememberSideChatOpen(selectedSession.id, true);
-      return "chat";
-    });
-  }, [isMobile, rememberSideChatOpen, selectedSession]);
+      setRightPanelSurface(surface);
+      lastFilesSurfaceRef.current = surface;
+      return;
+    }
+    rememberSideChatOpen(selectedSession.id, true);
+    setRightPanelOpen(true);
+    setRightPanelSurface("sideChat");
+  }, [isMobile, rememberSideChatOpen, rightPanelOpen, rightPanelSurface, selectedSession]);
+
+  const toggleRightPanelMaximized = useCallback(() => {
+    if (!rightPanelOpen) {
+      setRightPanelOpen(true);
+      setRightPanelMaximized(true);
+      return;
+    }
+    setRightPanelMaximized((value) => !value);
+  }, [rightPanelOpen]);
 
   const handleViewFullHistory = useCallback(() => {
     if (!selectedSession) return;
@@ -1445,7 +1493,7 @@ export function AppShell() {
               onSessionStatsPanelOpen={toggleSessionStatsPanel}
               onContextUsageChange={handleContextUsageChange}
               onOpenFile={handleOpenLinkedFile}
-              hideMinimap={rightPanelMode !== "closed"}
+              hideMinimap={rightPanelOpen}
             />
           ) : initialCwdStatus === "validating" ? (
             <div
@@ -1493,10 +1541,10 @@ export function AppShell() {
 
       <div
         aria-hidden="true"
-        className={`right-panel-overlay-backdrop${rightPanelMode !== "closed" ? " is-open" : ""}`}
+        className={`right-panel-overlay-backdrop${rightPanelOpen ? " is-open" : ""}`}
         onClick={closeRightPanel}
       />
-      {rightPanelMode !== "closed" && (
+      {rightPanelOpen && !rightPanelMaximized && (
         <div
           {...rightPanelResizer.separatorProps}
           aria-controls="file-panel"
@@ -1505,13 +1553,13 @@ export function AppShell() {
           title={`${translate("layout.resizeFilePanel")}: ${translate("layout.resizeHint")}`}
         />
       )}
-      {/* Right panel tab bar */}
+      {/* Right panel shell (Codex: open / width / maximize + content surfaces) */}
       <div
         ref={rightPanelResizer.panelRef}
         id="file-panel"
-        className={`right-panel-container${rightPanelMode === "closed" ? " right-panel-closed" : " right-panel-open"}${rightPanelResizer.isResizing ? " right-panel-resizing" : ""}`}
+        className={`right-panel-container${rightPanelOpen ? " right-panel-open" : " right-panel-closed"}${rightPanelMaximized ? " right-panel-maximized" : ""}${rightPanelResizer.isResizing ? " right-panel-resizing" : ""}`}
         style={{
-          "--right-panel-width": `${rightPanelResizer.width}px`,
+          "--right-panel-width": rightPanelMaximized ? "min(100%, max(420px, 100% - 320px))" : `${rightPanelResizer.width}px`,
           display: "flex",
           flexDirection: "column",
           height: "100%",
@@ -1519,6 +1567,80 @@ export function AppShell() {
           background: "var(--bg)",
         } as React.CSSProperties}
       >
+        {rightPanelOpen && (
+          <div
+            style={{
+              height: 36,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "flex-end",
+              gap: 2,
+              padding: "0 8px",
+              borderBottom: "1px solid var(--border)",
+              background: "var(--bg-panel)",
+              flexShrink: 0,
+            }}
+          >
+            <button
+              type="button"
+              onClick={toggleRightPanelMaximized}
+              title={rightPanelMaximized ? "Restore panel width" : "Expand panel"}
+              aria-label={rightPanelMaximized ? "Restore panel width" : "Expand panel"}
+              aria-pressed={rightPanelMaximized}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: 28,
+                height: 28,
+                border: "none",
+                borderRadius: 6,
+                background: rightPanelMaximized ? "var(--bg-selected)" : "transparent",
+                color: "var(--text-muted)",
+                cursor: "pointer",
+              }}
+            >
+              {rightPanelMaximized ? (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <polyline points="4 14 10 14 10 20" />
+                  <polyline points="20 10 14 10 14 4" />
+                  <line x1="14" y1="10" x2="21" y2="3" />
+                  <line x1="3" y1="21" x2="10" y2="14" />
+                </svg>
+              ) : (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <polyline points="15 3 21 3 21 9" />
+                  <polyline points="9 21 3 21 3 15" />
+                  <line x1="21" y1="3" x2="14" y2="10" />
+                  <line x1="3" y1="21" x2="10" y2="14" />
+                </svg>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={closeRightPanel}
+              title="Close panel"
+              aria-label="Close panel"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: 28,
+                height: 28,
+                border: "none",
+                borderRadius: 6,
+                background: "transparent",
+                color: "var(--text-muted)",
+                cursor: "pointer",
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          </div>
+        )}
         <WorkspaceFilePanel
           mode={rightPanelMode}
           cwd={activeCwd}
@@ -1546,14 +1668,14 @@ export function AppShell() {
         />
       </div>
     </div>
-    {/* Fixed right-corner control: file explorer */}
+    {/* Fixed right-corner control: side chat + explorer (Codex panel toggles) */}
     <div
       style={{
         position: "fixed",
         top: 0,
         right: "env(safe-area-inset-right)",
         zIndex: 300,
-        display: rightPanelMode === "chat" ? "none" : "flex",
+        display: "flex",
       }}
     >
       {rightPanelMode === "explorer" && changesCount > 0 && (

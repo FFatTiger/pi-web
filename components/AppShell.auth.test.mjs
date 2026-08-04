@@ -42,7 +42,7 @@ test("session stats are no longer duplicated in the top bar", () => {
 });
 
 test("fixed right corner exposes Side Chat and Explorer entries", () => {
-  const explorerGroupStart = source.indexOf("{/* Fixed right-corner control: file explorer */}");
+  const explorerGroupStart = source.indexOf("{/* Fixed right-corner control: side chat + explorer");
   assert.ok(explorerGroupStart >= 0, "explorer fixed group marker missing");
   const explorerGroupEnd = source.indexOf("{modelsConfigOpen &&", explorerGroupStart);
   assert.ok(explorerGroupEnd > explorerGroupStart, "explorer fixed group end missing");
@@ -60,10 +60,10 @@ test("Side Chat open state is remembered per main session", () => {
   assert.match(source, /rememberSideChatOpen\(selectedSession\.id, true\)/);
   assert.match(source, /rememberSideChatOpen\(selectedSession\.id, false\)/);
   assert.match(source, /applySessionFilePanel\(session\.id\)/);
-  assert.match(source, /resolveRightPanelModeOnSessionSwitch/);
+  assert.match(source, /resolveRightPanelViewOnSessionSwitch/);
   assert.match(source, /onClose=\{closeRightPanel\}/);
   assert.match(source, /sideChatOpenBySessionRef\.current\.delete\(sessionId\)/);
-  assert.match(source, /handleSessionDeleted[\s\S]*?setRightPanelMode\("closed"\)/);
+  assert.match(source, /handleSessionDeleted[\s\S]*?setRightPanelOpen\(false\)/);
 });
 
 test("open file tabs are scoped per session like Codex", () => {
@@ -79,4 +79,17 @@ test("open file tabs are scoped per session like Codex", () => {
   // New / deleted sessions do not keep foreign tabs.
   assert.match(source, /applySessionFilePanel\(null\)/);
   assert.match(source, /filePanelBySessionRef\.current\.delete\(sessionId\)/);
+});
+
+test("right panel chrome is orthogonal open/surface/maximize", () => {
+  assert.match(source, /const \[rightPanelOpen, setRightPanelOpen\]/);
+  assert.match(source, /const \[rightPanelMaximized, setRightPanelMaximized\]/);
+  assert.match(source, /const \[rightPanelSurface, setRightPanelSurface\]/);
+  assert.match(source, /deriveRightPanelMode/);
+  assert.match(source, /toggleRightPanelMaximized/);
+  assert.match(source, /right-panel-maximized/);
+  // Side chat toggles surface without a single-mode enum assignment to "chat" only.
+  assert.match(source, /setRightPanelSurface\("sideChat"\)/);
+  assert.match(source, /setRightPanelSurface\("explorer"\)/);
+  assert.match(source, /setRightPanelSurface\("file"\)/);
 });
