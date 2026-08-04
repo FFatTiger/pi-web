@@ -197,6 +197,7 @@ export function flattenTemporarySessions(groups: SidebarProjectGroup[]): Session
 export function groupSidebarProjects(
   sessions: SessionInfo[],
   manualProjects: ManualProject[],
+  projectOrder: string[] = [],
 ): SidebarProjectGroup[] {
   const manualByRoot = new Map(
     manualProjects.map((project) => [normalizeProjectRoot(project.root), {
@@ -226,12 +227,16 @@ export function groupSidebarProjects(
     const existing = groups.get(project.root);
     if (existing) {
       existing.manual = true;
+      // Keep empty/manual projects from jumping to the top when lastOpened is
+      // refreshed for retention. Order is owned by projectOrder.
       continue;
     }
     groups.set(project.root, {
       root: project.root,
       sessions: [],
-      latestActivity: project.lastOpened,
+      // Empty projects should not outrank active ones just because they were
+      // pinned/retained recently.
+      latestActivity: "",
       manual: true,
     });
   }
@@ -240,7 +245,60 @@ export function groupSidebarProjects(
     group.sessions.sort((a, b) => b.modified.localeCompare(a.modified));
   }
 
-  return [...groups.values()].sort((a, b) => b.latestActivity.localeCompare(a.latestActivity));
+  const orderIndex = new Map(
+    mergeProjectOrder(projectOrder, [...groups.keys()]).map((root, index) => [root, index]),
+  );
+
+  return [...groups.values()].sort((a, b) => {
+    const ai = orderIndex.get(a.root) ?? Number.MAX_SAFE_INTEGER;
+    const bi = orderIndex.get(b.root) ?? Number.MAX_SAFE_INTEGER;
+    if (ai !== bi) return ai - bi;
+    // Fallback only when both are untracked: newer activity first.
+    return b.latestActivity.localeCompare(a.latestActivity);
+  });
+}
+
+/**
+ * Codex-style stable project order:
+ * - known roots keep their previous relative order
+ * - brand-new roots are appended at the end
+ * - removed roots are dropped
+ */
+export function mergeProjectOrder(order: string[], roots: string[]): string[] {
+  const normalizedRoots = roots.map(normalizeProjectRoot);
+  const rootSet = new Set(normalizedRoots);
+  const next: string[] = [];
+  const seen = new Set<string>();
+
+  for (const raw of order) {
+    const root = normalizeProjectRoot(raw);
+    if (!rootSet.has(root) || seen.has(root)) continue;
+    next.push(root);
+    seen.add(root);
+  }
+  for (const root of normalizedRoots) {
+    if (seen.has(root)) continue;
+    next.push(root);
+    seen.add(root);
+  }
+  return next;
+}
+
+export function parseProjectOrder(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((value): value is string => typeof value === "string" && value.length > 0)
+      .map(normalizeProjectRoot);
+  } catch {
+    return [];
+  }
+}
+
+export function serializeProjectOrder(order: readonly string[]): string {
+  return JSON.stringify(order.map(normalizeProjectRoot));
 }
 
 export function getProjectActivity(
@@ -314,10 +372,17 @@ export function upsertManualProject(
   lastOpened: string,
 ): ManualProject[] {
   const normalizedRoot = normalizeProjectRoot(root);
-  return [
-    { root: normalizedRoot, lastOpened },
-    ...projects.filter((project) => normalizeProjectRoot(project.root) !== normalizedRoot),
-  ];
+  const existing = projects.find((project) => normalizeProjectRoot(project.root) === normalizedRoot);
+  // Preserve relative position in the manual list. Order is owned by projectOrder;
+  // lastOpened is retention metadata only and must not reshuffle the sidebar.
+  if (existing) {
+    return projects.map((project) => (
+      normalizeProjectRoot(project.root) === normalizedRoot
+        ? { root: normalizedRoot, lastOpened }
+        : project
+    ));
+  }
+  return [...projects, { root: normalizedRoot, lastOpened }];
 }
 
 export function removeManualProject(

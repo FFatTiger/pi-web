@@ -11,12 +11,15 @@ import {
   getProjectDisplayName,
   getSidebarSessionVisibility,
   groupSidebarProjects,
+  mergeProjectOrder,
   parseExpandedProjects,
   parseManualProjects,
+  parseProjectOrder,
   partitionSidebarProjects,
   removeManualProject,
   serializeExpandedProjects,
   serializeManualProjects,
+  serializeProjectOrder,
   upsertManualProject,
   type ManualProject,
   type SidebarProjectGroup,
@@ -48,6 +51,7 @@ const UNREAD_SESSIONS_STORAGE_KEY = "pi-web:unread-session-ids";
 const RUNNING_SESSIONS_POLL_MS = 2500;
 const MANUAL_PROJECTS_STORAGE_KEY = "pi-web:manual-projects";
 const EXPANDED_PROJECTS_STORAGE_KEY = "pi-web:expanded-projects";
+const PROJECT_ORDER_STORAGE_KEY = "pi-web:project-order";
 
 type AnchorRect = { top: number; left: number; right: number; width: number; bottom: number; height: number };
 
@@ -288,6 +292,10 @@ export function SessionSidebar({
     if (typeof window === "undefined") return [];
     return parseManualProjects(window.localStorage.getItem(MANUAL_PROJECTS_STORAGE_KEY));
   });
+  const [projectOrder, setProjectOrder] = useState<string[]>(() => {
+    if (typeof window === "undefined") return [];
+    return parseProjectOrder(window.localStorage.getItem(PROJECT_ORDER_STORAGE_KEY));
+  });
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(() => {
     if (typeof window === "undefined") return new Set();
     return parseExpandedProjects(window.localStorage.getItem(EXPANDED_PROJECTS_STORAGE_KEY));
@@ -420,6 +428,14 @@ export function SessionSidebar({
 
   useEffect(() => {
     try {
+      window.localStorage.setItem(PROJECT_ORDER_STORAGE_KEY, serializeProjectOrder(projectOrder));
+    } catch {
+      // localStorage may be unavailable in privacy mode.
+    }
+  }, [projectOrder]);
+
+  useEffect(() => {
+    try {
       window.localStorage.setItem(EXPANDED_PROJECTS_STORAGE_KEY, serializeExpandedProjects(expandedProjects));
     } catch {
       // localStorage may be unavailable in privacy mode.
@@ -454,9 +470,21 @@ export function SessionSidebar({
   }, [selectedSessionId]);
 
   const projectGroups = useMemo(
-    () => groupSidebarProjects(allSessions, manualProjects),
-    [allSessions, manualProjects],
+    () => groupSidebarProjects(allSessions, manualProjects, projectOrder),
+    [allSessions, manualProjects, projectOrder],
   );
+
+  // Keep projectOrder as a stable superset of currently visible roots, like Codex PROJECT_ORDER.
+  useEffect(() => {
+    const roots = projectGroups.map((group) => group.root);
+    setProjectOrder((previous) => {
+      const next = mergeProjectOrder(previous, roots);
+      if (next.length === previous.length && next.every((root, index) => root === previous[index])) {
+        return previous;
+      }
+      return next;
+    });
+  }, [projectGroups]);
   const { projects: regularProjects, temporary: temporaryProjects } = useMemo(
     () => partitionSidebarProjects(projectGroups),
     [projectGroups],
@@ -499,6 +527,8 @@ export function SessionSidebar({
   const activateManualProject = useCallback((root: string) => {
     const openedAt = new Date().toISOString();
     setManualProjects((previous) => upsertManualProject(previous, root, openedAt));
+    // New projects append to the end of the stable order; existing ones keep place.
+    setProjectOrder((previous) => mergeProjectOrder(previous, [...previous, root]));
     setExpandedProjects((previous) => new Set(previous).add(root));
     onSelectProject(root, root);
     setDirectoryOpen(false);
@@ -669,8 +699,10 @@ export function SessionSidebar({
         // Pin the empty project BEFORE deletes. Otherwise each onSessionDeleted
         // bumps refreshKey, reloads the session list, and the project vanishes
         // because it only existed via session-backed grouping.
+        // Do NOT reshuffle projectOrder here — clear should keep the same place.
         const pinned = upsertManualProject(manualProjects, group.root, new Date().toISOString());
         persistManualProjects(pinned);
+        setProjectOrder((previous) => mergeProjectOrder(previous, [...previous, group.root]));
         setExpandedProjects((previous) => new Set(previous).add(group.root));
         // Optimistically clear sessions in UI so the empty project stays visible.
         setAllSessions((previous) => previous.filter((session) => {
@@ -682,6 +714,7 @@ export function SessionSidebar({
       } else {
         const deletedIds = await deleteProjectSessions(group, "sidebar.removeProjectError", { notifyParent: false });
         persistManualProjects(removeManualProject(manualProjects, group.root));
+        setProjectOrder((previous) => previous.filter((root) => root !== group.root));
         setExpandedProjects((previous) => {
           if (!previous.has(group.root)) return previous;
           const next = new Set(previous);
