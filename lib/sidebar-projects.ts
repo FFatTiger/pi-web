@@ -306,6 +306,13 @@ export function upsertManualProject(
   return [{ root, lastOpened }, ...projects.filter((project) => project.root !== root)];
 }
 
+export function removeManualProject(
+  projects: ManualProject[],
+  root: string,
+): ManualProject[] {
+  return projects.filter((project) => project.root !== root);
+}
+
 export function parseExpandedProjects(raw: string | null): Set<string> {
   if (!raw) return new Set();
   try {

@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef, useMemo, type CSSProperties, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import type { SessionInfo } from "@/lib/types";
+import { useI18n } from "@/hooks/useI18n";
 import { AuthControls } from "./AuthControls";
 import {
   buildSidebarSessionTree,
@@ -13,6 +15,7 @@ import {
   parseExpandedProjects,
   parseManualProjects,
   partitionSidebarProjects,
+  removeManualProject,
   serializeExpandedProjects,
   serializeManualProjects,
   upsertManualProject,
@@ -230,6 +233,7 @@ export function SessionSidebar({
   refreshKey,
   onSessionDeleted,
 }: Props) {
+  const { t } = useI18n();
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -560,6 +564,53 @@ export function SessionSidebar({
     onNewSession?.(tempId, group.root, group.root);
   }, [onNewSession]);
 
+  const [removeTarget, setRemoveTarget] = useState<SidebarProjectGroup | null>(null);
+  const [removeBusy, setRemoveBusy] = useState(false);
+  const [removeError, setRemoveError] = useState<string | null>(null);
+
+  const handleRemoveProject = useCallback(async () => {
+    if (!removeTarget || removeBusy) return;
+    setRemoveBusy(true);
+    setRemoveError(null);
+    try {
+      const sessionIds = removeTarget.sessions.map((session) => session.id);
+      const results = await Promise.allSettled(
+        sessionIds.map(async (sessionId) => {
+          const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
+          if (!response.ok) {
+            const body = await response.json().catch(() => ({})) as { error?: string };
+            throw new Error(body.error ?? `HTTP ${response.status}`);
+          }
+          onSessionDeleted?.(sessionId);
+        }),
+      );
+      const failed = results.filter((result) => result.status === "rejected").length;
+      if (failed > 0) {
+        throw new Error(`${t("sidebar.removeProjectError")} (${failed}/${sessionIds.length})`);
+      }
+
+      setManualProjects((previous) => removeManualProject(previous, removeTarget.root));
+      setExpandedProjects((previous) => {
+        if (!previous.has(removeTarget.root)) return previous;
+        const next = new Set(previous);
+        next.delete(removeTarget.root);
+        return next;
+      });
+      setShowAllSessionProjects((previous) => {
+        if (!previous.has(removeTarget.root)) return previous;
+        const next = new Set(previous);
+        next.delete(removeTarget.root);
+        return next;
+      });
+      await loadSessions(false);
+      setRemoveTarget(null);
+    } catch (error) {
+      setRemoveError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setRemoveBusy(false);
+    }
+  }, [loadSessions, onSessionDeleted, removeBusy, removeTarget, t]);
+
   const renderProjectGroup = (group: SidebarProjectGroup) => {
     const expanded = expandedProjects.has(group.root);
     const selected = activeProjectRoot === group.root;
@@ -585,6 +636,10 @@ export function SessionSidebar({
         onNewSession={(event) => {
           event.stopPropagation();
           startProjectSession(group);
+        }}
+        onRemoveProject={() => {
+          setRemoveError(null);
+          setRemoveTarget(group);
         }}
         onSelectSession={onSelectSession}
         onRenamed={loadSessions}
@@ -835,16 +890,16 @@ export function SessionSidebar({
         )}
 
         {regularProjects.length > 0 && (
-          <SidebarSection label="项目">
+          <SidebarSection label={t("sidebar.projectsSection")}>
             {regularProjects.map((group) => renderProjectGroup(group))}
           </SidebarSection>
         )}
 
         {(temporaryProjects.length > 0 || temporarySessions.length > 0) && (
-          <SidebarSection label="临时对话">
+          <SidebarSection label={t("sidebar.temporarySection")}>
             {temporarySessions.length === 0 ? (
               <div style={{ padding: "6px 14px 10px 34px", fontSize: 12, color: "var(--text-dim)" }}>
-                没有聊天
+                {t("sidebar.noChats")}
               </div>
             ) : (
               temporarySessions.map((session) => (
@@ -866,6 +921,21 @@ export function SessionSidebar({
           </SidebarSection>
         )}
       </div>
+
+      {removeTarget && (
+        <RemoveProjectDialog
+          projectName={getProjectDisplayName(removeTarget.root)}
+          chatCount={removeTarget.sessions.length}
+          busy={removeBusy}
+          error={removeError}
+          onCancel={() => {
+            if (removeBusy) return;
+            setRemoveTarget(null);
+            setRemoveError(null);
+          }}
+          onConfirm={() => void handleRemoveProject()}
+        />
+      )}
     </div>
   );
 }
@@ -900,6 +970,7 @@ function ProjectGroup({
   unreadSessionIds,
   onToggle,
   onNewSession,
+  onRemoveProject,
   onSelectSession,
   onRenamed,
   onSessionDeleted,
@@ -917,6 +988,7 @@ function ProjectGroup({
   unreadSessionIds: Set<string>;
   onToggle: () => void;
   onNewSession: (event: React.MouseEvent) => void;
+  onRemoveProject: () => void;
   onSelectSession: (session: SessionInfo, isRestore?: boolean) => void;
   onRenamed: () => void;
   onSessionDeleted: (id: string) => void;
@@ -925,8 +997,29 @@ function ProjectGroup({
   showAllSessions: boolean;
   onToggleShowAllSessions: () => void;
 }) {
+  const { t } = useI18n();
   const [hovered, setHovered] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
   const label = getProjectDisplayName(group.root);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [menuOpen]);
 
   return (
     <div style={{ marginBottom: 2 }}>
@@ -998,10 +1091,10 @@ function ProjectGroup({
         <button
           type="button"
           onClick={onNewSession}
-          title={`New session in ${group.root}`}
-          aria-label={`New session in ${label}`}
+          title={t("sidebar.newSessionTitle", { path: group.root })}
+          aria-label={t("sidebar.newSessionTitle", { path: label })}
           style={{
-            display: hovered || selected ? "flex" : "none",
+            display: hovered || selected || menuOpen ? "flex" : "none",
             alignItems: "center",
             justifyContent: "center",
             width: 22,
@@ -1029,6 +1122,96 @@ function ProjectGroup({
             <line x1="1" y1="6" x2="11" y2="6" />
           </svg>
         </button>
+        <div ref={menuRef} style={{ position: "relative", flexShrink: 0 }}>
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              setMenuOpen((open) => !open);
+            }}
+            title={t("sidebar.projectActions")}
+            aria-label={t("sidebar.projectActions")}
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            style={{
+              display: hovered || selected || menuOpen ? "flex" : "none",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 22,
+              height: 22,
+              padding: 0,
+              background: menuOpen ? "var(--bg-hover)" : "none",
+              border: "none",
+              borderRadius: 6,
+              color: "var(--text-dim)",
+              cursor: "pointer",
+              transition: "color 0.12s, background 0.12s",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.color = "var(--text)";
+              e.currentTarget.style.background = "var(--bg-hover)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.color = "var(--text-dim)";
+              e.currentTarget.style.background = menuOpen ? "var(--bg-hover)" : "none";
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+              <circle cx="3.5" cy="8" r="1.3" />
+              <circle cx="8" cy="8" r="1.3" />
+              <circle cx="12.5" cy="8" r="1.3" />
+            </svg>
+          </button>
+          {menuOpen && (
+            <div
+              role="menu"
+              style={{
+                position: "absolute",
+                top: "calc(100% + 4px)",
+                right: 0,
+                zIndex: 40,
+                minWidth: 160,
+                padding: 4,
+                border: "1px solid var(--border)",
+                borderRadius: 10,
+                background: "var(--bg)",
+                boxShadow: "0 10px 28px rgba(0,0,0,0.12)",
+              }}
+            >
+              <button
+                type="button"
+                role="menuitem"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setMenuOpen(false);
+                  onRemoveProject();
+                }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  width: "100%",
+                  padding: "8px 10px",
+                  border: "none",
+                  borderRadius: 7,
+                  background: "transparent",
+                  color: "#dc2626",
+                  cursor: "pointer",
+                  fontSize: 13,
+                  textAlign: "left",
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(220,38,38,0.08)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M18 6 6 18" />
+                  <path d="m6 6 12 12" />
+                </svg>
+                <span>{t("sidebar.removeProject")}</span>
+              </button>
+            </div>
+          )}
+        </div>
         <span
           style={{
             width: 14,
@@ -1054,7 +1237,7 @@ function ProjectGroup({
             fontSize: 12,
             color: "var(--text-dim)",
           }}>
-            没有聊天
+            {t("sidebar.noChats")}
           </div>
         ) : (
           <div>
@@ -1092,13 +1275,122 @@ function ProjectGroup({
                   fontSize: 12,
                 }}
               >
-                {showAllSessions ? "收起" : "展开显示"}
+                {showAllSessions ? t("sidebar.collapseSessions") : t("sidebar.expandSessions")}
               </button>
             )}
           </div>
         )
       )}
     </div>
+  );
+}
+
+function RemoveProjectDialog({
+  projectName,
+  chatCount,
+  busy,
+  error,
+  onCancel,
+  onConfirm,
+}: {
+  projectName: string;
+  chatCount: number;
+  busy: boolean;
+  error: string | null;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const { t } = useI18n();
+  return createPortal(
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 1000,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 20,
+        background: "rgba(0,0,0,0.28)",
+      }}
+      onClick={onCancel}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="remove-project-title"
+        onClick={(event) => event.stopPropagation()}
+        style={{
+          width: "min(420px, 100%)",
+          border: "1px solid var(--border)",
+          borderRadius: 12,
+          background: "var(--bg)",
+          boxShadow: "0 20px 60px rgba(0,0,0,0.24)",
+          overflow: "hidden",
+        }}
+      >
+        <div style={{ padding: "16px 18px 8px" }}>
+          <div id="remove-project-title" style={{ fontSize: 15, fontWeight: 650, color: "var(--text)" }}>
+            {t("sidebar.removeProjectTitle", { name: projectName })}
+          </div>
+          <div style={{ marginTop: 8, fontSize: 13, lineHeight: 1.55, color: "var(--text-muted)" }}>
+            {t("sidebar.removeProjectBody")}
+            {chatCount > 0 ? ` (${chatCount})` : ""}
+          </div>
+          {error && (
+            <div role="alert" style={{ marginTop: 10, fontSize: 12, color: "#dc2626" }}>
+              {error}
+            </div>
+          )}
+        </div>
+        <div style={{
+          display: "flex",
+          justifyContent: "flex-end",
+          gap: 8,
+          padding: "12px 16px",
+          borderTop: "1px solid var(--border)",
+          background: "var(--bg-panel)",
+        }}>
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={busy}
+            style={{
+              height: 32,
+              padding: "0 12px",
+              borderRadius: 8,
+              border: "1px solid var(--border)",
+              background: "var(--bg)",
+              color: "var(--text-muted)",
+              cursor: busy ? "not-allowed" : "pointer",
+              fontSize: 13,
+            }}
+          >
+            {t("sidebar.cancel")}
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={busy}
+            style={{
+              height: 32,
+              padding: "0 12px",
+              borderRadius: 8,
+              border: "1px solid #dc2626",
+              background: "#dc2626",
+              color: "#fff",
+              cursor: busy ? "not-allowed" : "pointer",
+              fontSize: 13,
+              fontWeight: 600,
+              opacity: busy ? 0.75 : 1,
+            }}
+          >
+            {busy ? t("sidebar.removingProject") : t("sidebar.removeProjectConfirm")}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }
 
