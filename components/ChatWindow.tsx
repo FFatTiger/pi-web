@@ -208,7 +208,6 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     agentPhase,
     isNew,
     sessionIdRef, messagesEndRef, scrollContainerRef,
-    lastUserMsgRef,
     showScrollToBottom,
     handleScrollToBottomClick,
     handleSend, handleAbort, handleFork, handleNavigate, handleModelChange,
@@ -537,15 +536,8 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                 }
               }
 
-              let lastUserIdx = -1;
-              for (let i = messages.length - 1; i >= 0; i--) {
-                if (messages[i].role === "user") { lastUserIdx = i; break; }
-              }
               // Anchor for live-tail detection: the last user message, or a
               // compaction summary when compaction has replaced it mid-turn.
-              // Computed independently from lastUserIdx (which is kept for the
-              // scroll-to-user ref) because a compaction summary can sit after
-              // the last user message and anchor the still-streaming segment.
               let lastAnchorIdx = -1;
               for (let i = messages.length - 1; i >= 0; i--) {
                 if (isGroupAnchor(messages[i])) { lastAnchorIdx = i; break; }
@@ -561,7 +553,6 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
 
               const attachVisibleRef = (idx: number, refIndex: number) => (el: HTMLDivElement | null) => {
                 messageRefs.current[refIndex] = el;
-                if (idx === lastUserIdx) { (lastUserMsgRef as { current: HTMLDivElement | null }).current = el; }
               };
 
               const renderMessage = (idx: number, options: { attachRef?: boolean; keyPrefix?: string; messageOverride?: AgentMessage; showTimestamp?: boolean } = {}): ReactNode => {
@@ -734,10 +725,6 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                 } as BashExecutionMessage}
                 sessionId={session?.id ?? sessionIdRef.current ?? undefined}
               />
-            )}
-
-            {agentRunning && (
-              <div style={{ height: scrollContainerRef.current ? scrollContainerRef.current.clientHeight : "80vh" }} />
             )}
 
             <div ref={messagesEndRef} />

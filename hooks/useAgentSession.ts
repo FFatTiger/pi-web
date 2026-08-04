@@ -157,7 +157,7 @@ export type ThinkingLevelOption = "auto" | "off" | "minimal" | "low" | "medium" 
 
 const PROGRAMMATIC_SCROLL_IGNORE_MS = 700;
 const USER_SCROLL_INTENT_MS = 1200;
-/** Codex-style threshold: farther than this from bottom means "scrolled away". */
+/** Farther than this from bottom means "scrolled away". */
 const NEAR_BOTTOM_PX = 24;
 const PROMPT_SETTLE_INITIAL_DELAY_MS = 800;
 const PROMPT_SETTLE_POLL_MS = 600;
@@ -396,8 +396,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const bashRecoveryIdRef = useRef(0);
   const handleAgentEventRef = useRef<((event: AgentEvent) => void) | null>(null);
   const initialScrollDoneRef = useRef(false);
-  const lastUserMsgRef = useRef<HTMLDivElement | null>(null);
-  const pendingScrollToUserRef = useRef(false);
   const completionScrollAllowedRef = useRef(true);
   const executeBashRef = useRef<(command: string, excludeFromContext: boolean) => Promise<void> | undefined>(undefined);
   const userScrollIntentUntilRef = useRef(0);
@@ -1257,7 +1255,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     setAgentRunning(true);
     setAgentPhase(isSlashCommandPrompt ? { kind: "running_command" } : { kind: "waiting_model" });
     dispatch({ type: "start" });
-    pendingScrollToUserRef.current = true;
     completionScrollAllowedRef.current = true;
 
     const piImages = images?.map((img) => ({ type: "image" as const, data: img.data, mimeType: img.mimeType }));
@@ -1717,20 +1714,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   }, [updateScrollToBottomVisibility]);
 
   const handleScrollToBottomClick = useCallback(() => {
-    // Codex: clicking re-subscribes to latest output (re-enable follow).
+    // Re-enable auto-follow when the user explicitly returns to the latest output.
     completionScrollAllowedRef.current = true;
     scrollToBottom("smooth");
   }, [scrollToBottom]);
-
-  const scrollUserMsgToTop = useCallback(() => {
-    const container = scrollContainerRef.current;
-    const el = lastUserMsgRef.current;
-    if (!container || !el) return;
-    const elAbsTop = el.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop;
-    ignoreProgrammaticScrollUntilRef.current = Date.now() + PROGRAMMATIC_SCROLL_IGNORE_MS;
-    container.scrollTo({ top: elAbsTop - 16, behavior: "smooth" });
-    window.requestAnimationFrame(() => updateScrollToBottomVisibility());
-  }, [updateScrollToBottomVisibility]);
 
   const markUserScrollIntent = useCallback((event: Event) => {
     if (event instanceof KeyboardEvent) {
@@ -1744,7 +1731,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     updateScrollToBottomVisibility();
     if (Date.now() < ignoreProgrammaticScrollUntilRef.current) return;
     if (Date.now() > userScrollIntentUntilRef.current) return;
-    // User intentionally scrolled: unpin auto-follow (Codex static mode).
+    // User intentionally scrolled away from the bottom: unpin auto-follow.
     const container = scrollContainerRef.current;
     if (!container) return;
     if (getDistanceFromBottom(container) > NEAR_BOTTOM_PX) {
@@ -1842,11 +1829,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   useEffect(() => {
     if (messages.length > 0) {
-      if (pendingScrollToUserRef.current) {
-        pendingScrollToUserRef.current = false;
-        initialScrollDoneRef.current = true;
-        scrollUserMsgToTop();
-      } else if (!initialScrollDoneRef.current) {
+      if (!initialScrollDoneRef.current) {
         initialScrollDoneRef.current = true;
         scrollToBottom("instant");
       } else if (completionScrollAllowedRef.current) {
@@ -1858,7 +1841,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } else {
       updateScrollToBottomVisibility();
     }
-  }, [messages.length, agentRunning, scrollToBottom, scrollUserMsgToTop, updateScrollToBottomVisibility]);
+  }, [messages.length, agentRunning, scrollToBottom, updateScrollToBottomVisibility]);
 
   // Keep visibility/follow in sync while streaming content grows without a new message row.
   useEffect(() => {
@@ -1922,7 +1905,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     isNew,
     // Refs
     sessionIdRef, eventSourceRef, messagesEndRef, scrollContainerRef,
-    lastUserMsgRef, pendingScrollToUserRef, initialScrollDoneRef,
+    initialScrollDoneRef,
     showScrollToBottom,
     // Actions
     handleScrollToBottomClick,

@@ -2025,7 +2025,6 @@ function SessionTreeItem({
           collapsed={collapsed}
           onToggleCollapse={() => setCollapsed((v) => !v)}
           isDragging={draggingKey === sessionKey}
-          dropPosition={dropPosition}
           onDragStart={(event) => onSessionDragStart(node.session.id, event, title)}
           onDragOver={(event) => onSessionDragOver(node.session.id, event)}
           onDragLeave={() => onSessionDragLeave(node.session.id)}
@@ -2190,7 +2189,6 @@ function SessionItem({
   collapsed = false,
   onToggleCollapse,
   isDragging = false,
-  dropPosition = null,
   onDragStart,
   onDragOver,
   onDragLeave,
@@ -2209,7 +2207,6 @@ function SessionItem({
   collapsed?: boolean;
   onToggleCollapse?: () => void;
   isDragging?: boolean;
-  dropPosition?: DropPosition | null;
   onDragStart?: (event: React.DragEvent) => void;
   onDragOver?: (event: React.DragEvent) => void;
   onDragLeave?: () => void;
