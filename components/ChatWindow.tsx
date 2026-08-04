@@ -238,6 +238,20 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
   const [visibleCount, setVisibleCount] = useState(VISIBLE_PAGE_SIZE);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const prevScrollDistanceRef = useRef<number | null>(null);
+  const composerWrapRef = useRef<HTMLDivElement>(null);
+  const [composerHeight, setComposerHeight] = useState(0);
+
+  // Codex-like: the scroll area extends to the page bottom; the composer is
+  // an overlay on top of it, so the right scrollbar runs the full height.
+  useEffect(() => {
+    const node = composerWrapRef.current;
+    if (!node) return;
+    const measure = () => setComposerHeight(node.offsetHeight);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
 
   // IntersectionObserver on the sentinel div at the top of the message list.
   // When it becomes visible, load the next page of older messages.
@@ -524,7 +538,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
           </div>
         </div>
         <div ref={scrollContainerRef} className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto pt-4 pi-chat-scroll">
-          <div style={{ minWidth: 0, padding: `0 ${CHAT_COLUMN_PADDING}px` }}>
+          <div style={{ minWidth: 0, padding: `0 ${CHAT_COLUMN_PADDING}px ${composerHeight + 24}px` }}>
             <div style={{ width: "100%", minWidth: 0, maxWidth: 820, margin: "0 auto" }}>
               <ExtensionWidgets widgets={aboveEditorWidgets} />
 
@@ -742,7 +756,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
         ) : null}
       </div>
 
-      <div className="relative">
+      <div ref={composerWrapRef} className="absolute inset-x-0 bottom-0 z-20">
         <div className="relative h-0">
           <button
             type="button"
