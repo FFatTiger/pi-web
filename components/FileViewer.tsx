@@ -27,6 +27,7 @@ import { CodeBlock, MermaidBlock } from "./MermaidBlock";
 import { parseUnifiedPatch } from "@/lib/patch";
 import type { GitFileDiffResponse } from "@/lib/git-types";
 import { useI18n } from "@/hooks/useI18n";
+import { codeBlockBackground, normalizeCodeTheme } from "@/lib/code-theme";
 
 interface Props {
   filePath: string;
@@ -927,6 +928,10 @@ export function FileViewer({
 
 function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onRevealPath, onMentionLines, gitRefreshKey, initialDisplayMode }: Props) {
   const { isDark } = useTheme();
+  const codeTheme = useMemo(
+    () => normalizeCodeTheme(isDark ? vscDarkPlus : vs),
+    [isDark],
+  );
   const { t } = useI18n();
   const [data, setData] = useState<FileData | null>(null);
   const [gitDiff, setGitDiff] = useState<GitFileDiffResponse | null>(null);
@@ -1318,7 +1323,7 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onRevealPa
           <SyntaxHighlighter
             className={wrapLines ? "file-source-view is-wrapped" : "file-source-view"}
             language={language === "text" ? "plaintext" : language}
-            style={isDark ? vscDarkPlus : vs}
+            style={codeTheme}
             showLineNumbers
             lineNumberStyle={{
               ...FILE_LINE_NUMBER_STYLE,
@@ -1327,7 +1332,7 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onRevealPa
               margin: 0,
               padding: 0,
               border: 0,
-              background: "var(--bg)",
+              ...codeBlockBackground("var(--bg)"),
               ...FILE_CODE_STYLE,
               width: wrapLines ? "100%" : "max-content",
               minWidth: "100%",
