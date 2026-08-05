@@ -43,6 +43,12 @@ interface Props {
   onSendToSideChat?: (message: string) => void;
   /** Hide minimap while a right-side panel (side chat / file) is open. */
   hideMinimap?: boolean;
+  /**
+   * Codex contentShift (signed px). Applied as transform:translateX on the
+   * content column only — scrollport/scrollbar stay full-width.
+   * Negative = shift left (shift mode). 0 in overlay/gutter.
+   */
+  contentShift?: number;
 }
 
 function phaseLabel(phase: AgentPhase, t: (key: string, params?: Record<string, string | number>) => string): string | null {
@@ -174,7 +180,7 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, children, t }: { mes
   );
 }
 
-export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsChange, onSessionStatsPanelOpen, onContextUsageChange, onOpenFile, onSendToSideChat, hideMinimap = false }: Props) {
+export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsChange, onSessionStatsPanelOpen, onContextUsageChange, onOpenFile, onSendToSideChat, hideMinimap = false, contentShift = 0 }: Props) {
   const { t } = useI18n();
   const { soundEnabled, onSoundToggle, playDoneSound, unlockAudio } = useAudio();
   const isMobile = useIsMobile();
@@ -515,6 +521,9 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
             zIndex: 40,
             padding: `0 ${CHAT_COLUMN_PADDING}px`,
             pointerEvents: "none",
+            // Codex: shift notice shelf with content column (contentShift).
+            transform: contentShift ? `translateX(${contentShift}px)` : undefined,
+            transition: "transform 0.3s cubic-bezier(0.23, 1, 0.32, 1)",
           }}
         >
           <div style={{ maxWidth: 820, margin: "0 auto" }}>
@@ -529,7 +538,14 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
             scrollPaddingBottom: composerFooterHeight + 16,
           }}
         >
-          <div style={{ minWidth: 0, padding: `0 ${CHAT_COLUMN_PADDING}px ${composerFooterHeight + 24}px` }}>
+          <div style={{
+            minWidth: 0,
+            padding: `0 ${CHAT_COLUMN_PADDING}px ${composerFooterHeight + 24}px`,
+            // Codex contentShift: transform on content column only.
+            // Scrollport stays full-width so the scrollbar does not move.
+            transform: contentShift ? `translateX(${contentShift}px)` : undefined,
+            transition: "transform 0.3s cubic-bezier(0.23, 1, 0.32, 1)",
+          }}>
             <div style={{ width: "100%", minWidth: 0, maxWidth: 820, margin: "0 auto" }}>
               <ExtensionWidgets widgets={aboveEditorWidgets} />
 
@@ -753,7 +769,14 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
           className="thread-composer-footer"
         >
           <div className="thread-composer-footer-fade" aria-hidden="true" />
-          <div className="thread-composer-footer-inner">
+          <div
+            className="thread-composer-footer-inner"
+            style={{
+              // Codex contentShift: move composer with the content column.
+              transform: contentShift ? `translateX(${contentShift}px)` : undefined,
+              transition: "transform 0.3s cubic-bezier(0.23, 1, 0.32, 1)",
+            }}
+          >
             <div className="relative h-0">
               <button
                 type="button"

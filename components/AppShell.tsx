@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useGlobalKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { SessionSidebar } from "./SessionSidebar";
@@ -32,6 +32,10 @@ import {
   SIDEBAR_MAX_WIDTH,
   SIDEBAR_MIN_WIDTH,
 } from "@/lib/panel-layout";
+import {
+  getSummaryContentShift,
+  getSummaryDisplayMode,
+} from "@/lib/thread-summary-layout";
 import {
   closeRightPanelTab,
   emptyRightPanelTabs,
@@ -257,9 +261,38 @@ export function AppShell() {
   // Session stats popover still uses top panel positioning (opened from composer).
   const [activeTopPanel, setActiveTopPanel] = useState<"session" | null>(null);
   const [topPanelPos, setTopPanelPos] = useState<{ top: number; left: number; width: number } | null>(null);
-  // Codex pinned summary (thread environment / actions).
+  // Codex pinned summary: toolbar toggles open/close. Layout mode is width-driven:
+  // overlay / shift / gutter (see lib/thread-summary-layout.ts).
   const [threadSummaryOpen, setThreadSummaryOpen] = useState(false);
-  const [threadSummaryPinned, setThreadSummaryPinned] = useState(false);
+  const threadSummaryVisible = threadSummaryOpen;
+  const toggleThreadSummary = useCallback(() => {
+    setThreadSummaryOpen((value) => !value);
+  }, []);
+  // Track center-column width for Codex displayMode math (mainContentTargetWidth).
+  const centerColumnRef = useRef<HTMLDivElement>(null);
+  const [centerColumnWidth, setCenterColumnWidth] = useState(0);
+  useEffect(() => {
+    const node = centerColumnRef.current;
+    if (!node || typeof ResizeObserver === "undefined") return;
+    const update = () => setCenterColumnWidth(node.getBoundingClientRect().width);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(node);
+    return () => ro.disconnect();
+  }, []);
+  const summaryDisplayMode = useMemo(
+    () => getSummaryDisplayMode(centerColumnWidth),
+    [centerColumnWidth],
+  );
+  // Codex contentShift: only non-zero in shift mode when open.
+  // Signed px applied as transform:translateX on the content column (not padding).
+  const summaryContentShift = useMemo(
+    () => getSummaryContentShift({
+      open: threadSummaryVisible,
+      mainContentWidth: centerColumnWidth,
+    }),
+    [centerColumnWidth, threadSummaryVisible],
+  );
 
   const toggleSessionStatsPanel = useCallback(() => {
     if (isMobile) setSidebarOpen(false);
@@ -1135,22 +1168,15 @@ export function AppShell() {
               <button
                 type="button"
                 className="app-toolbar-btn"
-                data-active={threadSummaryOpen || threadSummaryPinned}
+                data-active={threadSummaryVisible}
                 title={translate("summary.toggle")}
                 aria-label={translate("summary.toggle")}
-                aria-pressed={threadSummaryOpen || threadSummaryPinned}
-                onClick={() => {
-                  if (threadSummaryOpen && !threadSummaryPinned) {
-                    setThreadSummaryOpen(false);
-                    return;
-                  }
-                  setThreadSummaryOpen(true);
-                }}
+                aria-pressed={threadSummaryVisible}
+                onClick={toggleThreadSummary}
               >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M12 17v5" />
-                  <path d="M9 2h6l1 7H8z" />
-                  <path d="M8 9h8v2a4 4 0 0 1-8 0z" />
+                {/* Codex thread-summary-panel HeaderButton icon (two dots + list lines) */}
+                <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                  <path d="M5.693 11.056a2.71 2.71 0 0 1 2.432 2.694l-.015.277a2.71 2.71 0 0 1-2.694 2.432l-.276-.015a2.71 2.71 0 0 1-2.418-2.417l-.014-.277a2.709 2.709 0 0 1 2.708-2.708l.277.014Zm-.277 1.316a1.378 1.378 0 1 0 0 2.757 1.378 1.378 0 0 0 0-2.757Zm11.384.727a.665.665 0 0 1 0 1.302l-.134.014h-5.833a.665.665 0 0 1 0-1.33h5.833l.135.014ZM5.693 3.556A2.71 2.71 0 0 1 8.125 6.25l-.015.277A2.71 2.71 0 0 1 5.416 8.96l-.276-.015a2.71 2.71 0 0 1-2.418-2.417l-.014-.277a2.709 2.709 0 0 1 2.708-2.708l.277.014Zm-.277 1.316a1.378 1.378 0 1 0 .001 2.757 1.378 1.378 0 0 0-.001-2.757Zm11.384.727a.665.665 0 0 1 0 1.302l-.134.014h-5.833a.665.665 0 0 1 0-1.33h5.833l.135.014Z" />
                 </svg>
               </button>
             </div>
@@ -1328,8 +1354,13 @@ export function AppShell() {
 
         </div>
 
-        {/* Chat content */}
-        <div style={{ flex: 1, overflow: "hidden", position: "relative" }}>
+        {/* Chat content. Summary panel is floating content of this column (Codex).
+            contentShift (transform) is width-mode-driven: overlay/gutter = 0,
+            shift = -(300+16)/2. Scrollport stays full-width. */}
+        <div
+          ref={centerColumnRef}
+          style={{ flex: 1, overflow: "hidden", position: "relative" }}
+        >
           {showChat ? (
             <ChatWindow
               key={sessionKey}
@@ -1347,7 +1378,8 @@ export function AppShell() {
               onContextUsageChange={handleContextUsageChange}
               onOpenFile={handleOpenLinkedFile}
               onSendToSideChat={selectedSession ? handleSendToSideChat : undefined}
-              hideMinimap={rightPanelOpen}
+              hideMinimap={rightPanelOpen || (threadSummaryVisible && summaryDisplayMode !== "overlay")}
+              contentShift={summaryContentShift}
             />
           ) : initialCwdStatus === "validating" ? (
             <div
@@ -1393,8 +1425,8 @@ export function AppShell() {
 
           {/* Codex ThreadSummary is floating content of the center thread column. */}
           <ThreadSummaryPanel
-            open={threadSummaryOpen || threadSummaryPinned}
-            pinned={threadSummaryPinned}
+            open={threadSummaryVisible}
+            pinned={threadSummaryVisible}
             hasSession={Boolean(selectedSession)}
             hasWorkspace={Boolean(activeCwd)}
             cwd={activeCwd}
@@ -1421,16 +1453,8 @@ export function AppShell() {
             }
             onClose={() => {
               setThreadSummaryOpen(false);
-              if (!threadSummaryPinned) return;
-              setThreadSummaryPinned(false);
             }}
-            onTogglePinned={() => {
-              setThreadSummaryPinned((value) => {
-                const next = !value;
-                if (next) setThreadSummaryOpen(true);
-                return next;
-              });
-            }}
+            onTogglePinned={toggleThreadSummary}
             onOpenSideChat={() => {
               openSideChatShell({ forceNew: true });
             }}
@@ -1645,23 +1669,16 @@ export function AppShell() {
           {/* Right panel collapsed: pin sits immediately left of the show-panel button. */}
           <button
             type="button"
-            className={`thread-summary-entry-btn${threadSummaryOpen || threadSummaryPinned ? " is-active" : ""}`}
+            className={`thread-summary-entry-btn${threadSummaryVisible ? " is-active" : ""}`}
             title={translate("summary.toggle")}
             aria-label={translate("summary.toggle")}
-            aria-pressed={threadSummaryOpen || threadSummaryPinned}
-            onClick={() => {
-              if (threadSummaryOpen && !threadSummaryPinned) {
-                setThreadSummaryOpen(false);
-                return;
-              }
-              setThreadSummaryOpen(true);
-            }}
+            aria-pressed={threadSummaryVisible}
+            onClick={toggleThreadSummary}
             style={{ pointerEvents: "auto" }}
           >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M12 17v5" />
-              <path d="M9 2h6l1 7H8z" />
-              <path d="M8 9h8v2a4 4 0 0 1-8 0z" />
+            {/* Codex thread-summary-panel icon (two dots + list lines) */}
+            <svg width="15" height="15" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+              <path d="M5.693 11.056a2.71 2.71 0 0 1 2.432 2.694l-.015.277a2.71 2.71 0 0 1-2.694 2.432l-.276-.015a2.71 2.71 0 0 1-2.418-2.417l-.014-.277a2.709 2.709 0 0 1 2.708-2.708l.277.014Zm-.277 1.316a1.378 1.378 0 1 0 0 2.757 1.378 1.378 0 0 0 0-2.757Zm11.384.727a.665.665 0 0 1 0 1.302l-.134.014h-5.833a.665.665 0 0 1 0-1.33h5.833l.135.014ZM5.693 3.556A2.71 2.71 0 0 1 8.125 6.25l-.015.277A2.71 2.71 0 0 1 5.416 8.96l-.276-.015a2.71 2.71 0 0 1-2.418-2.417l-.014-.277a2.709 2.709 0 0 1 2.708-2.708l.277.014Zm-.277 1.316a1.378 1.378 0 1 0 .001 2.757 1.378 1.378 0 0 0-.001-2.757Zm11.384.727a.665.665 0 0 1 0 1.302l-.134.014h-5.833a.665.665 0 0 1 0-1.33h5.833l.135.014Z" />
             </svg>
           </button>
           <button

@@ -119,7 +119,6 @@ export function ThreadSummaryPanel({
   hasWorkspace,
   cwd,
   projectRoot,
-  sessionName,
   changesCount = 0,
   systemPrompt,
   branchTree,
@@ -128,7 +127,6 @@ export function ThreadSummaryPanel({
   canGenerateTitle,
   generateTitleDisabledReason,
   onClose,
-  onTogglePinned,
   onOpenSideChat,
   onOpenFiles,
   onViewFullHistory,
@@ -178,41 +176,6 @@ export function ThreadSummaryPanel({
       role="dialog"
       aria-label={t("summary.title")}
     >
-      <div className="thread-summary-toolbar">
-        <div className="thread-summary-toolbar-title">
-          <strong>{t("summary.title")}</strong>
-          {sessionName && <span className="thread-summary-session-name">{sessionName}</span>}
-        </div>
-        <div className="thread-summary-toolbar-actions">
-          <button
-            type="button"
-            className={`thread-summary-icon-btn${pinned ? " is-active" : ""}`}
-            title={pinned ? t("summary.unpin") : t("summary.pin")}
-            aria-label={pinned ? t("summary.unpin") : t("summary.pin")}
-            aria-pressed={pinned}
-            onClick={onTogglePinned}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M12 17v5" />
-              <path d="M9 2h6l1 7H8z" />
-              <path d="M8 9h8v2a4 4 0 0 1-8 0z" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            className="thread-summary-icon-btn"
-            title={t("i18n.close")}
-            aria-label={t("i18n.close")}
-            onClick={onClose}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
-              <path d="M18 6 6 18" />
-              <path d="m6 6 12 12" />
-            </svg>
-          </button>
-        </div>
-      </div>
-
       <div className="thread-summary-scroll">
         <Section
           title={t("summary.environment")}
