@@ -153,17 +153,20 @@ export function getSidebarSessionVisibility(
   };
 }
 
-/** Default-cwd scratch roots created by /api/default-cwd: ~/pi-cwd-YYYYMMDD */
-const TEMPORARY_PROJECT_BASENAME = /^pi-cwd-\d{8}$/;
-
 export function getProjectBasename(root: string): string {
   const normalized = root.replace(/[\\/]+$/, "").replace(/\\/g, "/");
   const parts = normalized.split("/").filter(Boolean);
   return parts[parts.length - 1] || root;
 }
 
+/**
+ * Temporary / "Recent" scratch roots under ~/.pi/agent/temp-session
+ * (Codex-style: temp-session/YYYY-MM-DD/f[-N]).
+ * Client-safe path-segment match — no getAgentDir().
+ */
 export function isTemporaryProjectRoot(root: string): boolean {
-  return TEMPORARY_PROJECT_BASENAME.test(getProjectBasename(root));
+  const normalized = normalizeProjectRoot(root);
+  return /(^|\/)\.pi\/agent\/temp-session(?:\/|$)/.test(normalized);
 }
 
 export function getProjectDisplayName(root: string): string {
