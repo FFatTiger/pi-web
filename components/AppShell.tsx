@@ -1042,8 +1042,9 @@ export function AppShell() {
         />
       )}
 
-      {/* Center: chat */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
+      {/* Center: chat — Codex full-width mode: collapsed to 0 and clipped so
+          the toolbar cannot overlap the expanded right panel. */}
+      <div style={{ flex: rightPanelMaximized ? "none" : 1, width: rightPanelMaximized ? 0 : undefined, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
         {/* Codex toolbar: 46px row with icon buttons */}
         <div ref={topBarRef} className="app-top-toolbar" style={{ display: "flex", alignItems: "center", flexShrink: 0, height: "calc(46px + env(safe-area-inset-top))", paddingTop: "env(safe-area-inset-top)", paddingInline: 8, gap: 2 }}>
           <button

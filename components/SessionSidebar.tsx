@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import type { SessionInfo } from "@/lib/types";
 import { useI18n } from "@/hooks/useI18n";
 import { AuthControls } from "./AuthControls";
+import { PiLogo } from "./PiLogo";
 import {
   applySessionOrderToTree,
   buildSidebarSessionTree,
@@ -274,7 +275,7 @@ function PiWebTitle() {
   const [scrambling, setScrambling] = useState(false);
   const revertTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const target = showVersion ? `${process.env.NEXT_PUBLIC_APP_VERSION ?? "0.0.0"}p${process.env.NEXT_PUBLIC_PI_VERSION ?? "0.0.0"}` : "Pi Web";
+  const target = showVersion ? `${process.env.NEXT_PUBLIC_APP_VERSION ?? "0.0.0"}p${process.env.NEXT_PUBLIC_PI_VERSION ?? "0.0.0"}` : "Pi";
   const display = useScramble(target, scrambling);
 
   const triggerScramble = useCallback((toVersion: boolean) => {
@@ -299,15 +300,31 @@ function PiWebTitle() {
   return (
     <button
       onClick={handleClick}
+      title={showVersion ? "Pi" : "Pi — click for version"}
       style={{
         background: "none", border: "none", padding: 0, cursor: "default",
-        fontWeight: 700, fontSize: 15, letterSpacing: "-0.01em",
-        color: showVersion ? "var(--accent)" : "var(--text)",
-        fontFamily: "var(--font-mono)",
-        minWidth: "6ch",
+        display: "inline-flex", alignItems: "center", gap: 7,
+        minWidth: 0,
       }}
     >
-      {display}
+      <PiLogo
+        size={19}
+        style={{
+          flexShrink: 0,
+          color: showVersion ? "var(--accent)" : "var(--text)",
+          transition: "color 0.15s ease",
+        }}
+      />
+      <span
+        style={{
+          fontWeight: 700, fontSize: 15, letterSpacing: "-0.01em",
+          color: showVersion ? "var(--accent)" : "var(--text)",
+          fontFamily: "var(--font-mono)",
+          transition: "color 0.15s ease",
+        }}
+      >
+        {display}
+      </span>
     </button>
   );
 }
