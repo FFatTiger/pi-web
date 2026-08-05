@@ -1547,26 +1547,6 @@ span.linenumber {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.thread-summary-entry-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--bg);
-  color: var(--text-muted);
-  cursor: pointer;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-  pointer-events: auto;
-}
-.thread-summary-entry-btn:hover,
-.thread-summary-entry-btn.is-active {
-  background: var(--bg-selected);
-  color: var(--text);
-}
-
 /* Codex top toolbar: 46px row, icon buttons, surface tint */
 .app-top-toolbar {
   box-sizing: border-box;

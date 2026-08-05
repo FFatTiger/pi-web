@@ -1669,15 +1669,16 @@ export function AppShell() {
           {/* Right panel collapsed: pin sits immediately left of the show-panel button. */}
           <button
             type="button"
-            className={`thread-summary-entry-btn${threadSummaryVisible ? " is-active" : ""}`}
+            className="app-toolbar-btn"
+            data-active={threadSummaryVisible}
             title={translate("summary.toggle")}
             aria-label={translate("summary.toggle")}
             aria-pressed={threadSummaryVisible}
             onClick={toggleThreadSummary}
             style={{ pointerEvents: "auto" }}
           >
-            {/* Codex thread-summary-panel icon (two dots + list lines) */}
-            <svg width="15" height="15" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            {/* Same chrome as right-panel-open summary control: app-toolbar-btn + filled list glyph */}
+            <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
               <path d="M5.693 11.056a2.71 2.71 0 0 1 2.432 2.694l-.015.277a2.71 2.71 0 0 1-2.694 2.432l-.276-.015a2.71 2.71 0 0 1-2.418-2.417l-.014-.277a2.709 2.709 0 0 1 2.708-2.708l.277.014Zm-.277 1.316a1.378 1.378 0 1 0 0 2.757 1.378 1.378 0 0 0 0-2.757Zm11.384.727a.665.665 0 0 1 0 1.302l-.134.014h-5.833a.665.665 0 0 1 0-1.33h5.833l.135.014ZM5.693 3.556A2.71 2.71 0 0 1 8.125 6.25l-.015.277A2.71 2.71 0 0 1 5.416 8.96l-.276-.015a2.71 2.71 0 0 1-2.418-2.417l-.014-.277a2.709 2.709 0 0 1 2.708-2.708l.277.014Zm-.277 1.316a1.378 1.378 0 1 0 .001 2.757 1.378 1.378 0 0 0-.001-2.757Zm11.384.727a.665.665 0 0 1 0 1.302l-.134.014h-5.833a.665.665 0 0 1 0-1.33h5.833l.135.014Z" />
             </svg>
           </button>

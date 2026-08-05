@@ -2188,7 +2188,9 @@ function ProjectGroup({
       {expanded && (
         group.sessions.length === 0 ? (
           <div style={{
-            padding: "4px 14px 8px 36px",
+            // Codex nested list under project: ~px-8 inset from row edge.
+            padding: "4px 8px 8px 32px",
+            margin: "0 6px",
             fontSize: 12,
             color: "var(--text-dim)",
           }}>
@@ -2227,9 +2229,11 @@ function ProjectGroup({
                 }}
                 aria-expanded={showAllSessions}
                 style={{
-                  width: "100%",
+                  width: "calc(100% - 12px)",
                   height: 28,
-                  padding: "0 14px 0 36px",
+                  // Codex nested "Show more": j===`nested` && `px-8`
+                  margin: "0 6px",
+                  padding: "0 8px 0 32px",
                   display: "flex",
                   alignItems: "center",
                   background: "transparent",
@@ -2442,7 +2446,8 @@ function SessionTreeItem({
         {depth > 0 && (
           <div style={{
             position: "absolute",
-            left: depth * 12 + 6,
+            // Codex nested rail under grouped/forked rows.
+            left: 20 + depth * 12,
             top: 0, bottom: 0,
             width: 1,
             background: "var(--border)",
@@ -2459,6 +2464,7 @@ function SessionTreeItem({
           onRenamed={onRenamed}
           onDeleted={(id) => onSessionDeleted?.(id)}
           depth={depth}
+          nested
           hasChildren={hasChildren}
           collapsed={collapsed}
           onToggleCollapse={() => setCollapsed((v) => !v)}
@@ -2624,6 +2630,8 @@ function SessionItem({
   onRenamed,
   onDeleted,
   depth = 0,
+  /** Codex isGrouped/nested: indent under a project. Recent/flat is edge (no extra indent). */
+  nested = false,
   hasChildren = false,
   collapsed = false,
   onToggleCollapse,
@@ -2642,6 +2650,7 @@ function SessionItem({
   onRenamed?: () => void;
   onDeleted?: (id: string) => void;
   depth?: number;
+  nested?: boolean;
   hasChildren?: boolean;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
@@ -2751,7 +2760,11 @@ function SessionItem({
         display: "flex",
         alignItems: "center",
         margin: "1px 6px",
-        paddingLeft: depth > 0 ? depth * 12 + 14 : 14,
+        // Codex: Recent/flat = edge (padding-row-x only).
+        // Project children = nested (~px-8 / 32px); forks nest further.
+        paddingLeft: nested
+          ? 32 + depth * 12
+          : "var(--padding-row-x, 8px)",
         paddingRight: "var(--padding-row-x, 8px)",
         cursor: confirmDelete || renaming || !onDragStart ? "default" : isDragging ? "grabbing" : "grab",
         userSelect: "none",
