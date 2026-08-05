@@ -43,6 +43,8 @@ interface Props {
 
 export interface FileExplorerHandle {
   openUploadPicker: () => void;
+  /** Expand ancestors and highlight a path (file or directory). */
+  revealPath: (targetPath: string) => void;
 }
 
 type UploadPhase = "idle" | "checking" | "uploading";
@@ -283,6 +285,7 @@ function TreeNode({
   return (
     <div>
       <div
+        data-explorer-path={node.fullPath}
         onClick={handleClick}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
@@ -295,7 +298,9 @@ function TreeNode({
           paddingRight: 8,
           height: 24,
           cursor: "pointer",
-          background: hovered ? "var(--bg-hover)" : "transparent",
+          background: highlighted
+            ? "var(--bg-selected)"
+            : hovered ? "var(--bg-hover)" : "transparent",
           borderRadius: 4,
           userSelect: "none",
         }}
@@ -658,11 +663,52 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
     void prepareUpload(files);
   }, [prepareUpload]);
 
+  const revealPath = useCallback((targetPath: string) => {
+    const normalizedTarget = normalizeFilePathSlashes(targetPath);
+    const normalizedCwd = normalizeFilePathSlashes(cwd).replace(/\/$/, "");
+    if (!normalizedTarget) return;
+
+    const directoriesToExpand = new Set<string>();
+    // If target is under cwd, expand every ancestor from cwd down.
+    if (normalizedTarget === normalizedCwd || normalizedTarget.startsWith(`${normalizedCwd}/`)) {
+      directoriesToExpand.add(normalizedCwd);
+      let directory = getFileDirectory(normalizedTarget);
+      while (directory && (directory === normalizedCwd || directory.startsWith(`${normalizedCwd}/`))) {
+        directoriesToExpand.add(directory);
+        if (directory === normalizedCwd) break;
+        const parent = getFileDirectory(directory);
+        if (parent === directory) break;
+        directory = parent;
+      }
+      // Expand the target itself when it is a directory path.
+      directoriesToExpand.add(normalizedTarget);
+    }
+
+    setExpandedPaths((prev) => {
+      const next = new Set(prev);
+      for (const path of directoriesToExpand) next.add(path);
+      return next;
+    });
+    setHighlightedPaths(new Set([normalizedTarget]));
+    // Force tree nodes under newly expanded paths to load children.
+    setTreeRefreshKey((value) => value + 1);
+
+    // Best-effort scroll after expand/highlight paint.
+    window.setTimeout(() => {
+      const escaped = (window.CSS && "escape" in window.CSS)
+        ? window.CSS.escape(normalizedTarget)
+        : normalizedTarget.replace(/\\/g, "\\\\").replace(/"/g, "\\\"");
+      const el = document.querySelector(`[data-explorer-path="${escaped}"]`) as HTMLElement | null;
+      el?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }, 80);
+  }, [cwd]);
+
   useImperativeHandle(ref, () => ({
     openUploadPicker() {
       if (!uploadBusy) uploadInputRef.current?.click();
     },
-  }), [uploadBusy]);
+    revealPath,
+  }), [revealPath, uploadBusy]);
 
   useEffect(() => {
     onUploadBusyChange?.(uploadBusy);

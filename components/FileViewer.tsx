@@ -20,16 +20,22 @@ import {
 import { encodeFilePathForApi, getFileDirectory, getFileName, getRelativeFilePath } from "@/lib/file-paths";
 import { resolveLocalFileHref } from "@/lib/file-links";
 import { markdownPreviewRehypePlugins, markdownPreviewRemarkPlugins, normalizeDisplayMath } from "@/lib/markdown";
+import { buildFileBreadcrumbs, directoryPathForBreadcrumb } from "@/lib/file-breadcrumbs";
+import { subscribeOpenFileWatch } from "@/lib/open-file-watch";
+import { copyText } from "@/lib/clipboard";
 import { CodeBlock, MermaidBlock } from "./MermaidBlock";
 import { parseUnifiedPatch } from "@/lib/patch";
 import type { GitFileDiffResponse } from "@/lib/git-types";
 import { useI18n } from "@/hooks/useI18n";
+import { codeBlockBackground, normalizeCodeTheme } from "@/lib/code-theme";
 
 interface Props {
   filePath: string;
   cwd?: string;
   sourceSessionId?: string | null;
   onOpenFile?: (filePath: string) => void;
+  /** Reveal a directory/file in the explorer tree (breadcrumb click). */
+  onRevealPath?: (path: string) => void;
   onMentionLines?: (relativePath: string, startLine: number, endLine: number) => void;
   gitRefreshKey?: number;
   initialDisplayMode?: DisplayMode;
@@ -226,6 +232,152 @@ function DownloadLink({ filePath, sourceSessionId }: { filePath: string; sourceS
   );
 }
 
+function FileBreadcrumbBar({
+  filePath,
+  cwd,
+  onRevealPath,
+}: {
+  filePath: string;
+  cwd?: string;
+  onRevealPath?: (path: string) => void;
+}) {
+  const { t } = useI18n();
+  const segments = useMemo(() => buildFileBreadcrumbs(filePath, cwd), [cwd, filePath]);
+
+  return (
+    <nav className="file-viewer-breadcrumbs" aria-label={t("files.breadcrumbAria")}>
+      {segments.map((segment, index) => {
+        const isLast = index === segments.length - 1;
+        const revealPath = directoryPathForBreadcrumb(segment);
+        const clickable = Boolean(onRevealPath && revealPath && !isLast);
+        return (
+          <span key={`${segment.path}:${index}`} className="file-viewer-breadcrumb-item">
+            {index > 0 && <span className="file-viewer-breadcrumb-sep" aria-hidden="true">/</span>}
+            {clickable ? (
+              <button
+                type="button"
+                className="file-viewer-breadcrumb-link"
+                title={revealPath ?? segment.path}
+                onClick={() => onRevealPath?.(revealPath!)}
+              >
+                {segment.label}
+              </button>
+            ) : (
+              <span
+                className={`file-viewer-breadcrumb-label${isLast ? " is-current" : ""}`}
+                title={segment.path}
+              >
+                {segment.label}
+              </span>
+            )}
+          </span>
+        );
+      })}
+    </nav>
+  );
+}
+
+function FileToolbarActions({
+  filePath,
+  cwd,
+  sourceSessionId,
+  isHtml,
+  htmlContent,
+  onRevealPath,
+}: {
+  filePath: string;
+  cwd?: string;
+  sourceSessionId?: string | null;
+  isHtml?: boolean;
+  htmlContent?: string;
+  onRevealPath?: (path: string) => void;
+}) {
+  const { t } = useI18n();
+  const [copied, setCopied] = useState(false);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+  }, []);
+
+  const handleCopyPath = async () => {
+    try {
+      await copyText(filePath);
+      setCopied(true);
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = setTimeout(() => setCopied(false), 1200);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const handleReveal = () => {
+    onRevealPath?.(getFileDirectory(filePath) || filePath);
+  };
+
+  const handleOpenHtml = () => {
+    if (!htmlContent) return;
+    const blob = new Blob([htmlContent], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    window.open(url, "_blank", "noopener,noreferrer");
+    window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+  };
+
+  return (
+    <div className="file-viewer-actions">
+      <button
+        type="button"
+        className="file-viewer-icon-button"
+        title={copied ? t("i18n.copied") : t("files.copyPath")}
+        aria-label={copied ? t("i18n.copied") : t("files.copyPath")}
+        onClick={() => void handleCopyPath()}
+      >
+        {copied ? (
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+        ) : (
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <rect x="9" y="9" width="13" height="13" rx="2" />
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+          </svg>
+        )}
+      </button>
+      {onRevealPath && (
+        <button
+          type="button"
+          className="file-viewer-icon-button"
+          title={t("files.revealInExplorer")}
+          aria-label={t("files.revealInExplorer")}
+          onClick={handleReveal}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+          </svg>
+        </button>
+      )}
+      {isHtml && htmlContent != null && (
+        <button
+          type="button"
+          className="file-viewer-icon-button"
+          title={t("files.openInNewTab")}
+          aria-label={t("files.openInNewTab")}
+          onClick={handleOpenHtml}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M14 3h7v7" />
+            <path d="M10 14 21 3" />
+            <path d="M21 14v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h6" />
+          </svg>
+        </button>
+      )}
+      <DownloadLink filePath={filePath} sourceSessionId={sourceSessionId} />
+      {/* cwd kept for future absolute/relative toggle */}
+      <span className="sr-only">{cwd}</span>
+    </div>
+  );
+}
+
 type DiffLine = {
   type: "unchanged" | "removed" | "added";
   text: string;
@@ -410,14 +562,13 @@ function DiffView({ patch }: { patch: string }) {
   );
 }
 
-function ImageViewer({ filePath, cwd, sourceSessionId }: Props) {
+function ImageViewer({ filePath, cwd, sourceSessionId, onRevealPath }: Props) {
   const { t } = useI18n();
   const [watching, setWatching] = useState(false);
   const [bust, setBust] = useState(0);
   const [size, setSize] = useState<number | null>(null);
   const [naturalSize, setNaturalSize] = useState<{ w: number; h: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const esRef = useRef<EventSource | null>(null);
 
   const ext = getFileName(filePath).toLowerCase().split(".").pop() ?? "";
 
@@ -428,29 +579,18 @@ function ImageViewer({ filePath, cwd, sourceSessionId }: Props) {
     setError(null);
     setWatching(false);
 
-    if (esRef.current) {
-      esRef.current.close();
-      esRef.current = null;
-    }
-
-    const es = new EventSource(getFileApiUrl(filePath, "watch", sourceSessionId));
-    esRef.current = es;
-
-    es.addEventListener("connected", () => setWatching(true));
-    es.addEventListener("change", (e) => {
-      try {
-        const d = JSON.parse((e as MessageEvent).data) as { size?: number };
-        if (typeof d.size === "number") setSize(d.size);
-      } catch { /* ignore */ }
+    return subscribeOpenFileWatch(filePath, sourceSessionId, (event) => {
+      if (event.type === "connected") {
+        setWatching(true);
+        return;
+      }
+      if (event.type === "error") {
+        setWatching(false);
+        return;
+      }
+      if (typeof event.size === "number") setSize(event.size);
       setBust((b) => b + 1);
     });
-    es.addEventListener("error", () => setWatching(false));
-    es.onerror = () => setWatching(false);
-
-    return () => {
-      es.close();
-      esRef.current = null;
-    };
   }, [filePath, sourceSessionId]);
 
   const src = getFileApiUrl(filePath, "read", sourceSessionId, bust ? { v: bust } : undefined);
@@ -472,9 +612,7 @@ function ImageViewer({ filePath, cwd, sourceSessionId }: Props) {
           flexShrink: 0,
         }}
       >
-        <span style={{ fontFamily: "var(--font-mono)" }} title={filePath}>
-          {getRelativeFilePath(filePath, cwd)}
-        </span>
+        <FileBreadcrumbBar filePath={filePath} cwd={cwd} onRevealPath={onRevealPath} />
         <span style={{ marginLeft: "auto" }}>{ext || "image"}</span>
         {naturalSize && <span>{naturalSize.w} × {naturalSize.h}</span>}
         {formatSizeStr && <span>{formatSizeStr}</span>}
@@ -494,7 +632,7 @@ function ImageViewer({ filePath, cwd, sourceSessionId }: Props) {
           />
           {watching ? "live" : "static"}
         </span>
-        <DownloadLink filePath={filePath} sourceSessionId={sourceSessionId} />
+        <FileToolbarActions filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} onRevealPath={onRevealPath} />
       </div>
       <div
         style={{
@@ -544,14 +682,13 @@ function formatDuration(seconds: number): string {
   return `${mins}:${String(secs).padStart(2, "0")}`;
 }
 
-function AudioViewer({ filePath, cwd, sourceSessionId }: Props) {
+function AudioViewer({ filePath, cwd, sourceSessionId, onRevealPath }: Props) {
   const { t } = useI18n();
   const [watching, setWatching] = useState(false);
   const [bust, setBust] = useState(0);
   const [size, setSize] = useState<number | null>(null);
   const [duration, setDuration] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const esRef = useRef<EventSource | null>(null);
 
   const ext = getFileName(filePath).toLowerCase().split(".").pop() ?? "";
 
@@ -562,31 +699,20 @@ function AudioViewer({ filePath, cwd, sourceSessionId }: Props) {
     setError(null);
     setWatching(false);
 
-    if (esRef.current) {
-      esRef.current.close();
-      esRef.current = null;
-    }
-
-    const es = new EventSource(getFileApiUrl(filePath, "watch", sourceSessionId));
-    esRef.current = es;
-
-    es.addEventListener("connected", () => setWatching(true));
-    es.addEventListener("change", (e) => {
-      try {
-        const d = JSON.parse((e as MessageEvent).data) as { size?: number };
-        if (typeof d.size === "number") setSize(d.size);
-      } catch { /* ignore */ }
+    return subscribeOpenFileWatch(filePath, sourceSessionId, (event) => {
+      if (event.type === "connected") {
+        setWatching(true);
+        return;
+      }
+      if (event.type === "error") {
+        setWatching(false);
+        return;
+      }
+      if (typeof event.size === "number") setSize(event.size);
       setDuration(null);
       setError(null);
       setBust((b) => b + 1);
     });
-    es.addEventListener("error", () => setWatching(false));
-    es.onerror = () => setWatching(false);
-
-    return () => {
-      es.close();
-      esRef.current = null;
-    };
   }, [filePath, sourceSessionId]);
 
   const src = getFileApiUrl(filePath, "read", sourceSessionId, bust ? { v: bust } : undefined);
@@ -606,9 +732,7 @@ function AudioViewer({ filePath, cwd, sourceSessionId }: Props) {
           flexShrink: 0,
         }}
       >
-        <span style={{ fontFamily: "var(--font-mono)" }} title={filePath}>
-          {getRelativeFilePath(filePath, cwd)}
-        </span>
+        <FileBreadcrumbBar filePath={filePath} cwd={cwd} onRevealPath={onRevealPath} />
         <span style={{ marginLeft: "auto" }}>{ext || "audio"}</span>
         {duration != null && <span>{formatDuration(duration)}</span>}
         {size != null && <span>{formatSize(size)}</span>}
@@ -628,7 +752,7 @@ function AudioViewer({ filePath, cwd, sourceSessionId }: Props) {
           />
           {watching ? "live" : "static"}
         </span>
-        <DownloadLink filePath={filePath} sourceSessionId={sourceSessionId} />
+        <FileToolbarActions filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} onRevealPath={onRevealPath} />
       </div>
       <div
         style={{
@@ -661,13 +785,12 @@ function AudioViewer({ filePath, cwd, sourceSessionId }: Props) {
   );
 }
 
-function DocumentViewer({ filePath, cwd, sourceSessionId }: Props) {
+function DocumentViewer({ filePath, cwd, sourceSessionId, onRevealPath }: Props) {
   const { t } = useI18n();
   const [watching, setWatching] = useState(false);
   const [bust, setBust] = useState(0);
   const [size, setSize] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const esRef = useRef<EventSource | null>(null);
 
   const ext = getFileExt(filePath);
   const isPdf = ext === "pdf";
@@ -680,11 +803,6 @@ function DocumentViewer({ filePath, cwd, sourceSessionId }: Props) {
     setSize(null);
     setError(null);
     setWatching(false);
-
-    if (esRef.current) {
-      esRef.current.close();
-      esRef.current = null;
-    }
 
     fetch(getFileApiUrl(filePath, "meta", sourceSessionId))
       .then((r) => r.json())
@@ -699,31 +817,25 @@ function DocumentViewer({ filePath, cwd, sourceSessionId }: Props) {
       })
       .catch((e) => setError(String(e)));
 
-    const es = new EventSource(getFileApiUrl(filePath, "watch", sourceSessionId));
-    esRef.current = es;
-
-    es.addEventListener("connected", () => setWatching(true));
-    es.addEventListener("change", (e) => {
-      try {
-        const d = JSON.parse((e as MessageEvent).data) as { size?: number };
-        if (typeof d.size === "number") {
-          setSize(d.size);
-          if (!isPdf && d.size > DOCX_PREVIEW_MAX_BYTES) {
-            setError("DOCX too large for preview (>10MB)");
-            return;
-          }
+    return subscribeOpenFileWatch(filePath, sourceSessionId, (event) => {
+      if (event.type === "connected") {
+        setWatching(true);
+        return;
+      }
+      if (event.type === "error") {
+        setWatching(false);
+        return;
+      }
+      if (typeof event.size === "number") {
+        setSize(event.size);
+        if (!isPdf && event.size > DOCX_PREVIEW_MAX_BYTES) {
+          setError("DOCX too large for preview (>10MB)");
+          return;
         }
-      } catch { /* ignore */ }
+      }
       setError(null);
       setBust((b) => b + 1);
     });
-    es.addEventListener("error", () => setWatching(false));
-    es.onerror = () => setWatching(false);
-
-    return () => {
-      es.close();
-      esRef.current = null;
-    };
   }, [filePath, isPdf, sourceSessionId]);
 
   return (
@@ -741,12 +853,9 @@ function DocumentViewer({ filePath, cwd, sourceSessionId }: Props) {
           flexShrink: 0,
         }}
       >
-        <span style={{ fontFamily: "var(--font-mono)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={filePath}>
-          {getRelativeFilePath(filePath, cwd)}
-        </span>
+        <FileBreadcrumbBar filePath={filePath} cwd={cwd} onRevealPath={onRevealPath} />
         <span style={{ marginLeft: "auto" }}>{ext === "docx" ? "docx preview" : "pdf"}</span>
         {size != null && <span>{formatSize(size)}</span>}
-        <DownloadLink filePath={filePath} sourceSessionId={sourceSessionId} />
         <span
           title={watching ? t("i18n.liveSync") : t("i18n.notWatching")}
           style={{ display: "flex", alignItems: "center", gap: 4, color: watching ? "#4ade80" : "var(--text-dim)", flexShrink: 0 }}
@@ -763,6 +872,7 @@ function DocumentViewer({ filePath, cwd, sourceSessionId }: Props) {
           />
           {watching ? "live" : "static"}
         </span>
+        <FileToolbarActions filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} onRevealPath={onRevealPath} />
       </div>
       <div style={{ flex: 1, minHeight: 0, background: "var(--bg-panel)" }}>
         {error ? (
@@ -783,21 +893,45 @@ function DocumentViewer({ filePath, cwd, sourceSessionId }: Props) {
   );
 }
 
-export function FileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionLines, gitRefreshKey, initialDisplayMode }: Props) {
+export function FileViewer({
+  filePath,
+  cwd,
+  sourceSessionId,
+  onOpenFile,
+  onRevealPath,
+  onMentionLines,
+  gitRefreshKey,
+  initialDisplayMode,
+}: Props) {
   if (isImagePath(filePath)) {
-    return <ImageViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} />;
+    return <ImageViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} onRevealPath={onRevealPath} />;
   }
   if (isAudioPath(filePath)) {
-    return <AudioViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} />;
+    return <AudioViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} onRevealPath={onRevealPath} />;
   }
   if (isDocumentPreviewPath(filePath)) {
-    return <DocumentViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} />;
+    return <DocumentViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} onRevealPath={onRevealPath} />;
   }
-  return <TextFileViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} onOpenFile={onOpenFile} onMentionLines={onMentionLines} gitRefreshKey={gitRefreshKey} initialDisplayMode={initialDisplayMode} />;
+  return (
+    <TextFileViewer
+      filePath={filePath}
+      cwd={cwd}
+      sourceSessionId={sourceSessionId}
+      onOpenFile={onOpenFile}
+      onRevealPath={onRevealPath}
+      onMentionLines={onMentionLines}
+      gitRefreshKey={gitRefreshKey}
+      initialDisplayMode={initialDisplayMode}
+    />
+  );
 }
 
-function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionLines, gitRefreshKey, initialDisplayMode }: Props) {
+function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onRevealPath, onMentionLines, gitRefreshKey, initialDisplayMode }: Props) {
   const { isDark } = useTheme();
+  const codeTheme = useMemo(
+    () => normalizeCodeTheme(isDark ? vscDarkPlus : vs),
+    [isDark],
+  );
   const { t } = useI18n();
   const [data, setData] = useState<FileData | null>(null);
   const [gitDiff, setGitDiff] = useState<GitFileDiffResponse | null>(null);
@@ -807,7 +941,6 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionL
   const [displayMode, setDisplayMode] = useState<DisplayMode>("source");
   const [wrapLines, setWrapLines] = useState(false);
   const [watching, setWatching] = useState(false);
-  const esRef = useRef<EventSource | null>(null);
   const gitDiffRequestRef = useRef(0);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const [selectedLineRange, setSelectedLineRange] = useState<SelectedLineRange | null>(null);
@@ -852,7 +985,7 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionL
     }
   }, [cwd]);
 
-  // Initial load + SSE watch setup
+  // Initial load + shared open-file watch (session-level fanout).
   useEffect(() => {
     setLoading(true);
     setError(null);
@@ -862,38 +995,20 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionL
     setWrapLines(false);
     setWatching(false);
 
-    if (esRef.current) {
-      esRef.current.close();
-      esRef.current = null;
-    }
-
     fetchContent(filePath).finally(() => setLoading(false));
 
-    // Set up SSE watch
-    const es = new EventSource(getFileApiUrl(filePath, "watch", sourceSessionId));
-    esRef.current = es;
-
-    es.addEventListener("connected", () => {
-      setWatching(true);
-    });
-
-    es.addEventListener("change", () => {
+    return subscribeOpenFileWatch(filePath, sourceSessionId, (event) => {
+      if (event.type === "connected") {
+        setWatching(true);
+        return;
+      }
+      if (event.type === "error") {
+        setWatching(false);
+        return;
+      }
       void fetchContent(filePath);
       void fetchGitDiff(filePath);
     });
-
-    es.addEventListener("error", () => {
-      setWatching(false);
-    });
-
-    es.onerror = () => {
-      setWatching(false);
-    };
-
-    return () => {
-      es.close();
-      esRef.current = null;
-    };
   }, [filePath, fetchContent, fetchGitDiff, sourceSessionId]);
 
   useEffect(() => {
@@ -914,10 +1029,7 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionL
   }, [displayMode, hasGitDiff]);
 
   useEffect(() => {
-    if (!isDeletedDiff || !esRef.current) return;
-    esRef.current.close();
-    esRef.current = null;
-    setWatching(false);
+    if (isDeletedDiff) setWatching(false);
   }, [isDeletedDiff]);
 
   // Opened from the Changes list (initialDisplayMode === "diff"): switch to the
@@ -1043,9 +1155,7 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionL
           flexShrink: 0,
         }}
       >
-        <span className="file-viewer-path" style={{ fontFamily: "var(--font-mono)" }} title={filePath}>
-          {getRelativeFilePath(filePath, cwd)}
-        </span>
+        <FileBreadcrumbBar filePath={filePath} cwd={cwd} onRevealPath={onRevealPath} />
 
         <span className="file-viewer-meta" title={metadata}>{metadata}</span>
         {!isDeletedDiff && (
@@ -1085,44 +1195,51 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionL
             </div>
           )}
 
-          <div className="file-viewer-actions">
-            {effectiveDisplayMode === "source" && (
-              <>
-                <button
-                  type="button"
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={handleMentionSelectedLines}
-                  title={t("i18n.mentionSelectedLines")}
-                  aria-label={t("i18n.mentionSelectedLines")}
-                  disabled={!selectedLineRange}
-                  className="file-viewer-icon-button"
-                >
-                  <MentionIcon />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setWrapLines((value) => !value)}
-                  title={wrapLines ? t("i18n.disableWrap") : t("i18n.enableWrap")}
-                  aria-label={wrapLines ? t("i18n.disableWrap") : t("i18n.enableWrap")}
-                  aria-pressed={wrapLines}
-                  className="file-viewer-icon-button"
-                  style={{
-                    background: wrapLines ? "var(--bg-selected)" : "transparent",
-                    color: wrapLines ? "var(--text)" : "var(--text-muted)",
-                  }}
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="M3 6h18" />
-                    <path d="M3 12h15a3 3 0 1 1 0 6h-4" />
-                    <path d="m16 16-2 2 2 2" />
-                    <path d="M3 18h7" />
-                  </svg>
-                </button>
-              </>
-            )}
-          </div>
+          {effectiveDisplayMode === "source" && (
+            <>
+              <button
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={handleMentionSelectedLines}
+                title={t("i18n.mentionSelectedLines")}
+                aria-label={t("i18n.mentionSelectedLines")}
+                disabled={!selectedLineRange}
+                className="file-viewer-icon-button"
+              >
+                <MentionIcon />
+              </button>
+              <button
+                type="button"
+                onClick={() => setWrapLines((value) => !value)}
+                title={wrapLines ? t("i18n.disableWrap") : t("i18n.enableWrap")}
+                aria-label={wrapLines ? t("i18n.disableWrap") : t("i18n.enableWrap")}
+                aria-pressed={wrapLines}
+                className="file-viewer-icon-button"
+                style={{
+                  background: wrapLines ? "var(--bg-selected)" : "transparent",
+                  color: wrapLines ? "var(--text)" : "var(--text-muted)",
+                }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M3 6h18" />
+                  <path d="M3 12h15a3 3 0 1 1 0 6h-4" />
+                  <path d="m16 16-2 2 2 2" />
+                  <path d="M3 18h7" />
+                </svg>
+              </button>
+            </>
+          )}
 
-          {!isDeletedDiff && <DownloadLink filePath={filePath} sourceSessionId={sourceSessionId} />}
+          {!isDeletedDiff && (
+            <FileToolbarActions
+              filePath={filePath}
+              cwd={cwd}
+              sourceSessionId={sourceSessionId}
+              isHtml={isHtml}
+              htmlContent={isHtml ? content : undefined}
+              onRevealPath={onRevealPath}
+            />
+          )}
         </div>
       </div>
 
@@ -1206,7 +1323,7 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionL
           <SyntaxHighlighter
             className={wrapLines ? "file-source-view is-wrapped" : "file-source-view"}
             language={language === "text" ? "plaintext" : language}
-            style={isDark ? vscDarkPlus : vs}
+            style={codeTheme}
             showLineNumbers
             lineNumberStyle={{
               ...FILE_LINE_NUMBER_STYLE,
@@ -1215,7 +1332,7 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionL
               margin: 0,
               padding: 0,
               border: 0,
-              background: "var(--bg)",
+              ...codeBlockBackground("var(--bg)"),
               ...FILE_CODE_STYLE,
               width: wrapLines ? "100%" : "max-content",
               minWidth: "100%",

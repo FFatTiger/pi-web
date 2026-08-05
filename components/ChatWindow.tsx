@@ -38,6 +38,8 @@ interface Props {
   onSessionStatsPanelOpen?: () => void;
   onContextUsageChange?: (usage: { percent: number | null; contextWindow: number; tokens: number | null } | null) => void;
   onOpenFile?: (filePath: string) => void;
+  /** Send current draft to a new Side Chat (Codex-style). */
+  onSendToSideChat?: (message: string) => void;
   /** Hide minimap while a right-side panel (side chat / file) is open. */
   hideMinimap?: boolean;
 }
@@ -171,7 +173,7 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, children, t }: { mes
   );
 }
 
-export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsChange, onSessionStatsPanelOpen, onContextUsageChange, onOpenFile, hideMinimap = false }: Props) {
+export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsChange, onSessionStatsPanelOpen, onContextUsageChange, onOpenFile, onSendToSideChat, hideMinimap = false }: Props) {
   const { t } = useI18n();
   const { soundEnabled, onSoundToggle, playDoneSound, unlockAudio } = useAudio();
   const isMobile = useIsMobile();
@@ -208,7 +210,8 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     agentPhase,
     isNew,
     sessionIdRef, messagesEndRef, scrollContainerRef,
-    lastUserMsgRef,
+    showScrollToBottom,
+    handleScrollToBottomClick,
     handleSend, handleAbort, handleFork, handleNavigate, handleModelChange,
     handleCompact, handleSteer, handleFollowUp, handlePromptWithStreamingBehavior, handleAbortCompaction,
     handleRecallQueue,
@@ -237,6 +240,8 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
   const [visibleCount, setVisibleCount] = useState(VISIBLE_PAGE_SIZE);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const prevScrollDistanceRef = useRef<number | null>(null);
+  const composerFooterRef = useRef<HTMLDivElement>(null);
+  const [composerFooterHeight, setComposerFooterHeight] = useState(140);
 
   // IntersectionObserver on the sentinel div at the top of the message list.
   // When it becomes visible, load the next page of older messages.
@@ -333,6 +338,18 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
   const isEmptyNew = isNew && messages.length === 0 && !streamState.isStreaming && !sessionBusy;
   const messageCwd = session?.cwd ?? newSessionCwd ?? undefined;
 
+  // Codex: measure sticky composer footer so scroll padding keeps last messages visible.
+  useEffect(() => {
+    if (isEmptyNew) return;
+    const node = composerFooterRef.current;
+    if (!node) return;
+    const measure = () => setComposerFooterHeight(Math.max(96, node.offsetHeight));
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(node);
+    return () => ro.disconnect();
+  }, [isEmptyNew]);
+
   const availableThinkingLevels = displayModelValue
     ? (modelThinkingLevels[`${displayModelValue.provider}:${displayModelValue.modelId}`] ?? null)
     : null;
@@ -376,6 +393,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
       onBuiltinCommand={handleBuiltinSlashCommand}
       onAudioUnlock={unlockAudio}
       draftKey={session?.id ?? (newSessionCwd ? `new:${newSessionCwd}` : undefined)}
+      onSendToSideChat={onSendToSideChat}
       cwd={session?.cwd ?? newSessionCwd}
     />
   );
@@ -506,7 +524,8 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
         </div>
       ) : (
       <>
-      <div className="relative flex min-w-0 flex-1 overflow-hidden">
+      {/* Codex center column: full-height scroll stage + sticky composer overlay */}
+      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <div
           style={{
             position: "absolute",
@@ -522,8 +541,15 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
             <NoticeShelf notices={notices} floating align="right" />
           </div>
         </div>
-        <div ref={scrollContainerRef} className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto pt-4 [scrollbar-width:none]">
-          <div style={{ minWidth: 0, padding: `0 ${CHAT_COLUMN_PADDING}px` }}>
+        <div
+          ref={scrollContainerRef}
+          className="thread-scroll-container absolute inset-0 min-w-0 overflow-x-hidden overflow-y-auto pt-4"
+          style={{
+            // Codex: keep last messages above sticky composer footer.
+            scrollPaddingBottom: composerFooterHeight + 16,
+          }}
+        >
+          <div style={{ minWidth: 0, padding: `0 ${CHAT_COLUMN_PADDING}px ${composerFooterHeight + 24}px` }}>
             <div style={{ width: "100%", minWidth: 0, maxWidth: 820, margin: "0 auto" }}>
               <ExtensionWidgets widgets={aboveEditorWidgets} />
 
@@ -535,15 +561,8 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
                 }
               }
 
-              let lastUserIdx = -1;
-              for (let i = messages.length - 1; i >= 0; i--) {
-                if (messages[i].role === "user") { lastUserIdx = i; break; }
-              }
               // Anchor for live-tail detection: the last user message, or a
               // compaction summary when compaction has replaced it mid-turn.
-              // Computed independently from lastUserIdx (which is kept for the
-              // scroll-to-user ref) because a compaction summary can sit after
-              // the last user message and anchor the still-streaming segment.
               let lastAnchorIdx = -1;
               for (let i = messages.length - 1; i >= 0; i--) {
                 if (isGroupAnchor(messages[i])) { lastAnchorIdx = i; break; }
@@ -559,7 +578,6 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
 
               const attachVisibleRef = (idx: number, refIndex: number) => (el: HTMLDivElement | null) => {
                 messageRefs.current[refIndex] = el;
-                if (idx === lastUserIdx) { (lastUserMsgRef as { current: HTMLDivElement | null }).current = el; }
               };
 
               const renderMessage = (idx: number, options: { attachRef?: boolean; keyPrefix?: string; messageOverride?: AgentMessage; showTimestamp?: boolean } = {}): ReactNode => {
@@ -734,10 +752,6 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
               />
             )}
 
-            {agentRunning && (
-              <div style={{ height: scrollContainerRef.current ? scrollContainerRef.current.clientHeight : "80vh" }} />
-            )}
-
             <div ref={messagesEndRef} />
             </div>
           </div>
@@ -751,21 +765,69 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
             onRevealHistory={revealHistoryForMinimap}
           />
         ) : null}
-      </div>
 
-      <div className="relative">
+        {/* Codex sticky composer footer: overlays the full-height scroll stage */}
         <div
-          style={{
-            padding: `0 ${CHAT_COLUMN_PADDING}px`,
-          }}
+          ref={composerFooterRef}
+          data-thread-scroll-footer="true"
+          className="thread-composer-footer"
         >
-          <div style={{ maxWidth: 820, margin: "0 auto" }}>
-            <ExtensionWidgets widgets={belowEditorWidgets} />
+          <div className="thread-composer-footer-fade" aria-hidden="true" />
+          <div className="thread-composer-footer-inner">
+            <div className="relative h-0">
+              <button
+                type="button"
+                onClick={handleScrollToBottomClick}
+                aria-label={t("chat.scrollToBottom")}
+                title={t("chat.scrollToBottom")}
+                tabIndex={showScrollToBottom ? 0 : -1}
+                aria-hidden={!showScrollToBottom}
+                style={{
+                  position: "absolute",
+                  left: "50%",
+                  bottom: 12,
+                  transform: "translateX(-50%)",
+                  zIndex: 30,
+                  width: 32,
+                  height: 32,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  borderRadius: 999,
+                  border: "1px solid var(--border)",
+                  background: "var(--bg)",
+                  color: "var(--text-muted)",
+                  boxShadow: "0 6px 18px rgba(0,0,0,0.10)",
+                  cursor: showScrollToBottom ? "pointer" : "default",
+                  opacity: showScrollToBottom ? 1 : 0,
+                  pointerEvents: showScrollToBottom ? "auto" : "none",
+                  transition: "opacity 0.16s ease",
+                }}
+              >
+                {agentRunning ? (
+                  <span aria-hidden="true" style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
+                    <span className="scroll-to-bottom-dot" />
+                    <span className="scroll-to-bottom-dot" />
+                    <span className="scroll-to-bottom-dot" />
+                  </span>
+                ) : (
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M8 3v9" />
+                    <path d="m4.5 8.5 3.5 3.5 3.5-3.5" />
+                  </svg>
+                )}
+              </button>
+            </div>
+            <div style={{ padding: `0 ${CHAT_COLUMN_PADDING}px` }}>
+              <div style={{ maxWidth: 820, margin: "0 auto" }}>
+                <ExtensionWidgets widgets={belowEditorWidgets} />
+              </div>
+            </div>
+            {chatInputElement}
+            {sessionInfoBarElement}
+            <ExtensionStatusBar statuses={extensionStatuses} />
           </div>
         </div>
-        {chatInputElement}
-        {sessionInfoBarElement}
-        <ExtensionStatusBar statuses={extensionStatuses} />
       </div>
       </>
       )}

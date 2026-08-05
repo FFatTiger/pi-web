@@ -170,6 +170,11 @@ export function getProjectDisplayName(root: string): string {
   return getProjectBasename(root);
 }
 
+/** Normalize project roots so Windows path separators / trailing slashes match. */
+export function normalizeProjectRoot(root: string): string {
+  return root.replace(/[\\/]+$/, "").replace(/\\/g, "/");
+}
+
 export function partitionSidebarProjects(groups: SidebarProjectGroup[]): {
   projects: SidebarProjectGroup[];
   temporary: SidebarProjectGroup[];
@@ -192,12 +197,18 @@ export function flattenTemporarySessions(groups: SidebarProjectGroup[]): Session
 export function groupSidebarProjects(
   sessions: SessionInfo[],
   manualProjects: ManualProject[],
+  projectOrder: string[] = [],
 ): SidebarProjectGroup[] {
-  const manualByRoot = new Map(manualProjects.map((project) => [project.root, project]));
+  const manualByRoot = new Map(
+    manualProjects.map((project) => [normalizeProjectRoot(project.root), {
+      ...project,
+      root: normalizeProjectRoot(project.root),
+    }]),
+  );
   const groups = new Map<string, SidebarProjectGroup>();
 
   for (const session of sessions) {
-    const root = session.projectRoot ?? session.cwd;
+    const root = normalizeProjectRoot(session.projectRoot ?? session.cwd);
     const existing = groups.get(root);
     if (existing) {
       existing.sessions.push(session);
@@ -212,16 +223,20 @@ export function groupSidebarProjects(
     }
   }
 
-  for (const project of manualProjects) {
+  for (const project of manualByRoot.values()) {
     const existing = groups.get(project.root);
     if (existing) {
       existing.manual = true;
+      // Keep empty/manual projects from jumping to the top when lastOpened is
+      // refreshed for retention. Order is owned by projectOrder.
       continue;
     }
     groups.set(project.root, {
       root: project.root,
       sessions: [],
-      latestActivity: project.lastOpened,
+      // Empty projects should not outrank active ones just because they were
+      // pinned/retained recently.
+      latestActivity: "",
       manual: true,
     });
   }
@@ -230,7 +245,176 @@ export function groupSidebarProjects(
     group.sessions.sort((a, b) => b.modified.localeCompare(a.modified));
   }
 
-  return [...groups.values()].sort((a, b) => b.latestActivity.localeCompare(a.latestActivity));
+  const orderIndex = new Map(
+    mergeProjectOrder(projectOrder, [...groups.keys()]).map((root, index) => [root, index]),
+  );
+
+  return [...groups.values()].sort((a, b) => {
+    const ai = orderIndex.get(a.root) ?? Number.MAX_SAFE_INTEGER;
+    const bi = orderIndex.get(b.root) ?? Number.MAX_SAFE_INTEGER;
+    if (ai !== bi) return ai - bi;
+    // Fallback only when both are untracked: newer activity first.
+    return b.latestActivity.localeCompare(a.latestActivity);
+  });
+}
+
+/**
+ * Codex-style stable project order:
+ * - known roots keep their previous relative order
+ * - brand-new roots are appended at the end
+ * - roots missing from `roots` are dropped
+ *
+ * Callers must only prune with a complete visible-root set (after sessions
+ * hydrate). Passing a partial set (e.g. manual-only before /api/sessions)
+ * permanently drops the rest of the saved drag order.
+ */
+export function mergeProjectOrder(order: string[], roots: string[]): string[] {
+  const normalizedRoots = roots.map(normalizeProjectRoot);
+  const rootSet = new Set(normalizedRoots);
+  const next: string[] = [];
+  const seen = new Set<string>();
+
+  for (const raw of order) {
+    const root = normalizeProjectRoot(raw);
+    if (!rootSet.has(root) || seen.has(root)) continue;
+    next.push(root);
+    seen.add(root);
+  }
+  for (const root of normalizedRoots) {
+    if (seen.has(root)) continue;
+    next.push(root);
+    seen.add(root);
+  }
+  return next;
+}
+
+export function parseProjectOrder(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((value): value is string => typeof value === "string" && value.length > 0)
+      .map(normalizeProjectRoot);
+  } catch {
+    return [];
+  }
+}
+
+export function serializeProjectOrder(order: readonly string[]): string {
+  return JSON.stringify(order.map(normalizeProjectRoot));
+}
+
+export type ProjectSessionOrders = Record<string, string[]>;
+
+export function parseProjectSessionOrders(raw: string | null): ProjectSessionOrders {
+  if (!raw) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const next: ProjectSessionOrders = {};
+    for (const [rawRoot, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (!Array.isArray(value)) continue;
+      const ids = value.filter((item): item is string => typeof item === "string" && item.length > 0);
+      if (ids.length === 0) continue;
+      next[normalizeProjectRoot(rawRoot)] = ids;
+    }
+    return next;
+  } catch {
+    return {};
+  }
+}
+
+export function serializeProjectSessionOrders(orders: ProjectSessionOrders): string {
+  const normalized: ProjectSessionOrders = {};
+  for (const [root, ids] of Object.entries(orders)) {
+    const key = normalizeProjectRoot(root);
+    const unique: string[] = [];
+    const seen = new Set<string>();
+    for (const id of ids) {
+      if (seen.has(id)) continue;
+      unique.push(id);
+      seen.add(id);
+    }
+    if (unique.length > 0) normalized[key] = unique;
+  }
+  return JSON.stringify(normalized);
+}
+
+/** Move `fromId` relative to `toId` inside a stable id list. */
+export function reorderIds(
+  ids: string[],
+  fromId: string,
+  toId: string,
+  position: "before" | "after" = "after",
+): string[] {
+  if (fromId === toId) return ids;
+  const fromIndex = ids.indexOf(fromId);
+  const toIndex = ids.indexOf(toId);
+  if (fromIndex < 0 || toIndex < 0) return ids;
+  const next = ids.slice();
+  const [moved] = next.splice(fromIndex, 1);
+  let insertAt = next.indexOf(toId);
+  if (insertAt < 0) return ids;
+  if (position === "after") insertAt += 1;
+  next.splice(insertAt, 0, moved);
+  return next;
+}
+
+/**
+ * Merge manual session order with the currently visible session ids.
+ * Known ids keep relative manual order; new ids are prepended (newest-first UX).
+ */
+export function mergeSessionOrder(order: string[] | undefined, sessionIds: string[]): string[] {
+  const idSet = new Set(sessionIds);
+  const next: string[] = [];
+  const seen = new Set<string>();
+
+  for (const id of order ?? []) {
+    if (!idSet.has(id) || seen.has(id)) continue;
+    next.push(id);
+    seen.add(id);
+  }
+
+  const missing = sessionIds.filter((id) => !seen.has(id));
+  // Prepend unknown ids so brand-new sessions appear near the top without
+  // reshuffling the user's existing manual arrangement.
+  return [...missing, ...next];
+}
+
+export function applySessionOrderToTree(
+  tree: SidebarSessionTreeNode[],
+  order: string[] | undefined,
+): SidebarSessionTreeNode[] {
+  if (!order || order.length === 0) return tree;
+  const index = new Map(order.map((id, i) => [id, i]));
+  const sortNodes = (nodes: SidebarSessionTreeNode[]): SidebarSessionTreeNode[] => {
+    const sorted = nodes
+      .map((node) => ({
+        ...node,
+        children: sortNodes(node.children),
+      }))
+      .sort((a, b) => {
+        const ai = index.get(a.session.id) ?? Number.MAX_SAFE_INTEGER;
+        const bi = index.get(b.session.id) ?? Number.MAX_SAFE_INTEGER;
+        if (ai !== bi) return ai - bi;
+        return b.session.modified.localeCompare(a.session.modified);
+      });
+    return sorted;
+  };
+  return sortNodes(tree);
+}
+
+export function collectTreeSessionIds(tree: SidebarSessionTreeNode[]): string[] {
+  const ids: string[] = [];
+  const walk = (nodes: SidebarSessionTreeNode[]) => {
+    for (const node of nodes) {
+      ids.push(node.session.id);
+      if (node.children.length > 0) walk(node.children);
+    }
+  };
+  walk(tree);
+  return ids;
 }
 
 export function getProjectActivity(
@@ -303,7 +487,26 @@ export function upsertManualProject(
   root: string,
   lastOpened: string,
 ): ManualProject[] {
-  return [{ root, lastOpened }, ...projects.filter((project) => project.root !== root)];
+  const normalizedRoot = normalizeProjectRoot(root);
+  const existing = projects.find((project) => normalizeProjectRoot(project.root) === normalizedRoot);
+  // Preserve relative position in the manual list. Order is owned by projectOrder;
+  // lastOpened is retention metadata only and must not reshuffle the sidebar.
+  if (existing) {
+    return projects.map((project) => (
+      normalizeProjectRoot(project.root) === normalizedRoot
+        ? { root: normalizedRoot, lastOpened }
+        : project
+    ));
+  }
+  return [...projects, { root: normalizedRoot, lastOpened }];
+}
+
+export function removeManualProject(
+  projects: ManualProject[],
+  root: string,
+): ManualProject[] {
+  const normalizedRoot = normalizeProjectRoot(root);
+  return projects.filter((project) => normalizeProjectRoot(project.root) !== normalizedRoot);
 }
 
 export function parseExpandedProjects(raw: string | null): Set<string> {

@@ -1270,7 +1270,9 @@ export async function startRpcSession(
     sessionManager.getSessionName(),
     sessionManager.getEntries(),
   );
-  const sideChatSelection = sideChatMetadata ? getSideChatToolSelection() : undefined;
+  const sideChatSelection = sideChatMetadata
+    ? getSideChatToolSelection(sideChatMetadata.toolMode)
+    : undefined;
   const toolNames = options.toolNames ?? sideChatSelection?.toolNames;
   const includeExtensionTools = options.includeExtensionTools ?? sideChatSelection?.includeExtensionTools ?? true;
   const { initialModel, thinkingLevel } = options;

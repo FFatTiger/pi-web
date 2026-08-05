@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vs } from "react-syntax-highlighter/dist/cjs/styles/prism";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/cjs/styles/prism";
 import { useTheme } from "@/hooks/useTheme";
 import { useI18n } from "@/hooks/useI18n";
 import { copyText } from "@/lib/clipboard";
+import { codeBlockBackground, normalizeCodeTheme } from "@/lib/code-theme";
 
 interface MermaidBlockProps {
   code: string;
@@ -242,6 +243,11 @@ export function CodeBlock({ code, lang, headerAction }: CodeBlockProps) {
     });
   };
 
+  const theme = useMemo(
+    () => normalizeCodeTheme(isDark ? vscDarkPlus : vs),
+    [isDark],
+  );
+
   return (
     <div className="markdown-code-block">
       <div className="markdown-code-header">
@@ -258,7 +264,7 @@ export function CodeBlock({ code, lang, headerAction }: CodeBlockProps) {
       </div>
       <SyntaxHighlighter
         language={lang || "text"}
-        style={isDark ? vscDarkPlus : vs}
+        style={theme}
         showLineNumbers
         lineNumberStyle={{ color: "var(--text-dim)", fontStyle: "normal" }}
         customStyle={{
@@ -267,7 +273,7 @@ export function CodeBlock({ code, lang, headerAction }: CodeBlockProps) {
           fontSize: 12.5,
           lineHeight: 1.62,
           borderRadius: 0,
-          background: "color-mix(in srgb, var(--bg) 92%, var(--bg-panel))",
+          ...codeBlockBackground("color-mix(in srgb, var(--bg) 92%, var(--bg-panel))"),
         }}
         codeTagProps={{ style: { fontFamily: "var(--font-mono)" } }}
       >

@@ -7,7 +7,7 @@ const source = readFileSync(new URL("./AppShell.tsx", import.meta.url), "utf8");
 const sidebarContentStart = source.indexOf("const sidebarContent = (");
 const sidebarContentEnd = source.indexOf("return (", sidebarContentStart + 1);
 const sidebarBlock = source.slice(sidebarContentStart, sidebarContentEnd);
-const topBarStart = source.indexOf("{/* Top bar with sidebar toggle */}");
+const topBarStart = source.indexOf("{/* Codex toolbar: 46px row with icon buttons */}");
 const topBarEnd = source.indexOf("{/* Top panel dropdown — shared, only one active at a time */}");
 const topBarBlock = source.slice(topBarStart, topBarEnd);
 
@@ -41,27 +41,62 @@ test("session stats are no longer duplicated in the top bar", () => {
   assert.doesNotMatch(topBarBlock, /\{fmt\(t\.input\)\}/);
 });
 
-test("fixed right corner exposes Side Chat and Explorer entries", () => {
-  const explorerGroupStart = source.indexOf("{/* Fixed right-corner control: file explorer */}");
-  assert.ok(explorerGroupStart >= 0, "explorer fixed group marker missing");
-  const explorerGroupEnd = source.indexOf("{modelsConfigOpen &&", explorerGroupStart);
-  assert.ok(explorerGroupEnd > explorerGroupStart, "explorer fixed group end missing");
-  const fixedRegion = source.slice(explorerGroupStart, explorerGroupEnd);
+test("fixed right corner uses Codex expand/close cluster for the RIGHT panel", () => {
+  const groupStart = source.indexOf("{/* Codex right-panel chrome: floating expand + close cluster");
+  assert.ok(groupStart >= 0, "top-right right-panel cluster marker missing");
+  const groupEnd = source.indexOf("{modelsConfigOpen &&", groupStart);
+  assert.ok(groupEnd > groupStart, "top-right control group end missing");
+  const fixedRegion = source.slice(groupStart, groupEnd);
   assert.equal(fixedRegion.includes("<AuthControls"), false);
-  assert.match(fixedRegion, /rightPanelMode === "explorer"/);
-  assert.match(fixedRegion, /rightPanelMode === "chat"/);
-  assert.match(fixedRegion, /toggleSideChatPanel/);
-  assert.doesNotMatch(fixedRegion, /rightPanelMode === "file"/);
-  assert.doesNotMatch(fixedRegion, /toggleFilePanel/);
+  assert.match(fixedRegion, /codex-panel-control-cluster/);
+  assert.match(fixedRegion, /toggleRightPanelMaximized/);
+  assert.match(fixedRegion, /closeRightPanel/);
+  assert.match(fixedRegion, /layout\.expandPanel/);
+  assert.match(fixedRegion, /layout\.closePanel/);
+  assert.doesNotMatch(fixedRegion, /handleSidebarToggle/);
+  assert.doesNotMatch(fixedRegion, /toggleSideChatPanel/);
+  assert.doesNotMatch(fixedRegion, /toggleExplorerPanel/);
 });
 
 test("Side Chat open state is remembered per main session", () => {
   assert.match(source, /sideChatOpenBySessionRef/);
-  assert.match(source, /rememberSideChatOpen\(selectedSession\.id, next === "chat"\)/);
-  assert.match(source, /const sideChatOpen = sideChatOpenBySessionRef\.current\.get\(session\.id\) === true/);
-  assert.match(source, /if \(sideChatOpen\) return "chat"/);
-  assert.match(source, /if \(current === "chat"\) return "closed"/);
-  assert.match(source, /onClose=\{closeRightPanel\}/);
+  assert.match(source, /rememberSideChatOpen\(sessionId, tabs\.some\(\(tab\) => tab\.kind === "sideChat"\)\)/);
+  assert.match(source, /applySessionFilePanel\(session\.id\)/);
+  assert.match(source, /rightPanelTabsBySessionRef/);
+  assert.match(source, /openSideChatShell/);
   assert.match(source, /sideChatOpenBySessionRef\.current\.delete\(sessionId\)/);
-  assert.match(source, /handleSessionDeleted[\s\S]*?setRightPanelMode\("closed"\)/);
+  assert.match(source, /handleSessionDeleted[\s\S]*?setRightPanelOpen\(false\)/);
+});
+
+test("open file tabs are scoped per session like Codex", () => {
+  assert.match(source, /rightPanelTabsBySessionRef/);
+  assert.match(source, /captureCurrentSessionFilePanel/);
+  assert.match(source, /applySessionFilePanel/);
+  assert.match(source, /openOrFocusFilePanelTab/);
+  // Leaving A captures before restoring B.
+  assert.match(source, /if \(activeSessionIdRef\.current && activeSessionIdRef\.current !== session\.id\)/);
+  assert.match(source, /captureCurrentSessionFilePanel\(\)/);
+  assert.match(source, /applySessionFilePanel\(session\.id\)/);
+  // New / deleted sessions do not keep foreign tabs.
+  assert.match(source, /applySessionFilePanel\(null\)/);
+  assert.match(source, /rightPanelTabsBySessionRef\.current\.delete\(sessionId\)/);
+});
+
+test("right panel chrome is multi-tab open/maximize (Codex RightPanelTabs)", () => {
+  assert.match(source, /const \[rightPanelOpen, setRightPanelOpen\]/);
+  assert.match(source, /const \[rightPanelMaximized, setRightPanelMaximized\]/);
+  assert.match(source, /const \[rightPanelTabs, setRightPanelTabs\]/);
+  assert.match(source, /const \[activeRightPanelTabId, setActiveRightPanelTabId\]/);
+  assert.match(source, /openOrFocusRightPanelTab/);
+  assert.match(source, /closeRightPanelTab/);
+  assert.match(source, /toggleRightPanelMaximized/);
+  assert.match(source, /right-panel-maximized/);
+  // Codex multi-tab: side chat / files / open-file chips coexist as panel tabs.
+  assert.match(source, /openSideChatShell/);
+  assert.match(source, /openRightPanelKind\("files"/);
+  assert.match(source, /openOrFocusFilePanelTab/);
+  assert.match(source, /openOrFocusSideChatPanelTab/);
+  assert.match(source, /rightPanelTabsBySessionRef/);
+  assert.match(source, /explorerOpen/);
+  assert.match(source, /ThreadSummaryPanel/);
 });
