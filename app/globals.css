@@ -1358,17 +1358,11 @@ span.linenumber {
   display: none;
 }
 
-/* Codex right-panel floating controls */
-.codex-panel-control-btn:hover {
-  background: var(--bg-hover) !important;
-  color: var(--text) !important;
-}
-.codex-panel-control-btn:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
-  outline-offset: 1px;
-}
+/* Codex right-panel floating controls: plain toolbar row (no capsule chrome). */
 .codex-panel-control-cluster {
-  backdrop-filter: blur(8px);
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
 }
 
 /* Codex ThreadSummaryPanel / pinned summary */
