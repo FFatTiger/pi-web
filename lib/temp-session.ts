@@ -7,6 +7,9 @@ export function getTempSessionRoot(agentDir = getAgentDir()): string {
   return join(agentDir, "temp-session");
 }
 
+/** Client-safe basename marker used when grouping recent/temp sessions. */
+export const TEMP_SESSION_ROOT_SEGMENT = ".pi/agent/temp-session";
+
 function localDateStamp(now = new Date()): string {
   const y = now.getFullYear();
   const m = String(now.getMonth() + 1).padStart(2, "0");

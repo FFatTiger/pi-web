@@ -598,19 +598,8 @@ export function SessionSidebar({
   // Codex:
   // - mode=project → recent = projectless/temp sessions only
   // - mode=list    → recent = all sessions in one flat list
-  // Live recency boost (Codex recencyAt): running sessions and selected
-  // session bubble to "now" so Last updated reorders without waiting for disk mtime.
-  const activityBoostMs = useMemo(() => {
-    const boost = new Map<string, number>();
-    const now = Date.now();
-    for (const id of runningSessionIds) boost.set(id, now);
-    if (selectedSessionId) {
-      // Keep the open chat near the top while viewing / after activity.
-      boost.set(selectedSessionId, Math.max(boost.get(selectedSessionId) ?? 0, now));
-    }
-    return boost;
-  }, [runningSessionIds, selectedSessionId]);
-
+  // No live "now" boost for updated_at (selecting/running must not invent recency).
+  // Priority mode still uses runningSessionIds / unreadSessionIds ranks.
   const recentSessionsRaw = useMemo(() => {
     if (sidebarPrefs.mode === "list") return allSessions;
     return flattenTemporarySessions(temporaryProjects);
@@ -621,10 +610,9 @@ export function SessionSidebar({
       mode: sidebarPrefs.chatSortMode,
       runningSessionIds,
       unreadSessionIds,
-      activityBoostMs,
       manualOrder: sessionOrders[GLOBAL_SESSION_ORDER_KEY],
     }),
-    [activityBoostMs, recentSessionsRaw, runningSessionIds, sessionOrders, sidebarPrefs.chatSortMode, unreadSessionIds],
+    [recentSessionsRaw, runningSessionIds, sessionOrders, sidebarPrefs.chatSortMode, unreadSessionIds],
   );
 
   const showProjectsSection = sidebarPrefs.mode === "project" && regularProjects.length > 0;
@@ -764,13 +752,14 @@ export function SessionSidebar({
   const startRecentSession = useCallback(async () => {
     try {
       const res = await fetch("/api/default-cwd", { method: "POST" });
-      const data = await res.json() as { cwd?: string; error?: string };
+      const data = await res.json() as { cwd?: string; projectRoot?: string; error?: string };
       if (!data.cwd) return;
       const tempId = typeof crypto.randomUUID === "function"
         ? crypto.randomUUID()
         : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-      // projectRoot = cwd so session groups under temp-session tree as temporary
-      onNewSession?.(tempId, data.cwd, data.cwd);
+      // Prefer shared temp-session root as projectRoot so all recent chats group together.
+      const projectRoot = data.projectRoot ?? data.cwd;
+      onNewSession?.(tempId, data.cwd, projectRoot);
       setSidebarPrefs((prev) => ({
         ...prev,
         collapsed: { ...prev.collapsed, recent: false },
@@ -918,6 +907,8 @@ export function SessionSidebar({
     toId: string,
     position: DropPosition,
   ) => {
+    // Only persist drag order in manual sort mode (Codex chatSortMode=manual).
+    if (sidebarPrefs.chatSortMode !== "manual") return;
     const group = projectGroups.find((item) => item.root === projectRoot);
     if (!group) return;
     const baseOrder = mergeSessionOrder(
@@ -929,7 +920,25 @@ export function SessionSidebar({
       ...previous,
       [projectRoot]: nextOrder,
     }));
-  }, [projectGroups, sessionOrders]);
+  }, [projectGroups, sessionOrders, sidebarPrefs.chatSortMode]);
+
+  /** Manual order for the Recent flat list (Codex codex-sidebar-chat-order-v1). */
+  const reorderRecentSession = useCallback((
+    fromId: string,
+    toId: string,
+    position: DropPosition,
+  ) => {
+    if (sidebarPrefs.chatSortMode !== "manual") return;
+    const baseOrder = mergeSessionOrder(
+      sessionOrders[GLOBAL_SESSION_ORDER_KEY],
+      recentSessionsRaw.map((session) => session.id),
+    );
+    const nextOrder = reorderIds(baseOrder, fromId, toId, position);
+    setSessionOrders((previous) => ({
+      ...previous,
+      [GLOBAL_SESSION_ORDER_KEY]: nextOrder,
+    }));
+  }, [recentSessionsRaw, sessionOrders, sidebarPrefs.chatSortMode]);
 
   type ProjectDialogMode = "clear" | "remove";
   const [projectDialog, setProjectDialog] = useState<{ group: SidebarProjectGroup; mode: ProjectDialogMode } | null>(null);
@@ -1045,7 +1054,6 @@ export function SessionSidebar({
       mode: sidebarPrefs.chatSortMode,
       runningSessionIds,
       unreadSessionIds,
-      activityBoostMs,
       manualOrder: sessionOrders[group.root],
     });
     const fullTree = buildSidebarSessionTree(sortedGroupSessions);
@@ -1400,7 +1408,7 @@ export function SessionSidebar({
         )}
         {!loading && !error && projectGroups.length === 0 && recentSessions.length === 0 && (
           <div style={{ padding: "16px 14px", color: "var(--text-muted)", fontSize: 12 }}>
-            Open a directory or start a recent chat
+            {t("sidebar.emptyHint")}
           </div>
         )}
 
@@ -1412,61 +1420,18 @@ export function SessionSidebar({
             onToggle={() => toggleSectionCollapsed("projects")}
             actions={(
               <>
-                <div style={{ position: "relative", flexShrink: 0 }}>
-                  <button
-                    ref={organizeMenuButtonRef}
-                    type="button"
-                    title={t("sidebar.projectOptions")}
-                    aria-label={t("sidebar.projectOptions")}
-                    onClick={(e) => { e.stopPropagation(); openOrganizeMenu(); }}
-                    className="sidebar-icon-button sidebar-hover-icon-button-tint"
-                    style={{
-                      display: "inline-flex", alignItems: "center", justifyContent: "center",
-                      width: 24, height: 24, padding: 0, border: "none", borderRadius: 8,
-                      background: organizeMenuOpen ? "var(--bg-selected)" : "transparent",
-                      color: "var(--text-dim)", cursor: "pointer",
-                    }}
-                  >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <circle cx="5" cy="12" r="1.5" />
-                      <circle cx="12" cy="12" r="1.5" />
-                      <circle cx="19" cy="12" r="1.5" />
-                    </svg>
-                  </button>
-                  {organizeMenuOpen && organizeMenuRect && createPortal(
-                    <div ref={organizeMenuPanelRef} role="menu" style={getProjectMenuStyle(organizeMenuRect)}>
-                      <div style={{ padding: "6px 10px 4px", fontSize: 11, color: "var(--text-dim)", fontWeight: 500 }}>
-                        {t("sidebar.organizeSidebar")}
-                      </div>
-                      <MenuRadioItem checked={sidebarPrefs.mode === "project"} label={t("sidebar.byProject")} onClick={() => setOrganizeMode("project")} />
-                      <MenuRadioItem checked={sidebarPrefs.mode === "list"} label={t("sidebar.inOneList")} onClick={() => setOrganizeMode("list")} />
-                      <div style={{ height: 1, background: "var(--border)", margin: "6px 0" }} />
-                      <div style={{ padding: "4px 10px 4px", fontSize: 11, color: "var(--text-dim)", fontWeight: 500 }}>
-                        {t("sidebar.sortChatsBy")}
-                      </div>
-                      <MenuRadioItem checked={sidebarPrefs.chatSortMode === "priority"} label={t("sidebar.sortPriority")} onClick={() => setChatSortMode("priority")} />
-                      <MenuRadioItem checked={sidebarPrefs.chatSortMode === "updated_at"} label={t("sidebar.sortUpdated")} onClick={() => setChatSortMode("updated_at")} />
-                      <MenuRadioItem checked={sidebarPrefs.chatSortMode === "manual"} label={t("sidebar.sortManual")} onClick={() => setChatSortMode("manual")} />
-                    </div>,
-                    document.body,
-                  )}
-                </div>
-                <button
-                  type="button"
+                <OrganizeMenuButton
+                  buttonRef={organizeMenuButtonRef}
+                  open={organizeMenuOpen}
+                  onToggle={openOrganizeMenu}
+                  title={t("sidebar.projectOptions")}
+                />
+                <IconActionButton
                   title={t("sidebar.addProject")}
-                  aria-label={t("sidebar.addProject")}
-                  onClick={(e) => { e.stopPropagation(); void handleDirectoryButtonClick(); }}
-                  className="sidebar-icon-button sidebar-hover-icon-button-tint"
-                  style={{
-                    display: "inline-flex", alignItems: "center", justifyContent: "center",
-                    width: 24, height: 24, padding: 0, border: "none", borderRadius: 8,
-                    background: "transparent", color: "var(--text-dim)", cursor: "pointer",
-                  }}
+                  onClick={() => void handleDirectoryButtonClick()}
                 >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="M12 5v14" /><path d="M5 12h14" />
-                  </svg>
-                </button>
+                  <PlusIcon />
+                </IconActionButton>
               </>
             )}
           >
@@ -1482,62 +1447,19 @@ export function SessionSidebar({
             actions={(
               <>
                 {!showProjectsSection && (
-                  <div style={{ position: "relative", flexShrink: 0 }}>
-                    <button
-                      ref={organizeMenuButtonRef}
-                      type="button"
-                      title={t("sidebar.projectOptions")}
-                      aria-label={t("sidebar.projectOptions")}
-                      onClick={(e) => { e.stopPropagation(); openOrganizeMenu(); }}
-                      className="sidebar-icon-button sidebar-hover-icon-button-tint"
-                      style={{
-                        display: "inline-flex", alignItems: "center", justifyContent: "center",
-                        width: 24, height: 24, padding: 0, border: "none", borderRadius: 8,
-                        background: organizeMenuOpen ? "var(--bg-selected)" : "transparent",
-                        color: "var(--text-dim)", cursor: "pointer",
-                      }}
-                    >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                        <circle cx="5" cy="12" r="1.5" />
-                        <circle cx="12" cy="12" r="1.5" />
-                        <circle cx="19" cy="12" r="1.5" />
-                      </svg>
-                    </button>
-                    {organizeMenuOpen && organizeMenuRect && createPortal(
-                      <div ref={organizeMenuPanelRef} role="menu" style={getProjectMenuStyle(organizeMenuRect)}>
-                        <div style={{ padding: "6px 10px 4px", fontSize: 11, color: "var(--text-dim)", fontWeight: 500 }}>
-                          {t("sidebar.organizeSidebar")}
-                        </div>
-                        <MenuRadioItem checked={sidebarPrefs.mode === "project"} label={t("sidebar.byProject")} onClick={() => setOrganizeMode("project")} />
-                        <MenuRadioItem checked={sidebarPrefs.mode === "list"} label={t("sidebar.inOneList")} onClick={() => setOrganizeMode("list")} />
-                        <div style={{ height: 1, background: "var(--border)", margin: "6px 0" }} />
-                        <div style={{ padding: "4px 10px 4px", fontSize: 11, color: "var(--text-dim)", fontWeight: 500 }}>
-                          {t("sidebar.sortChatsBy")}
-                        </div>
-                        <MenuRadioItem checked={sidebarPrefs.chatSortMode === "priority"} label={t("sidebar.sortPriority")} onClick={() => setChatSortMode("priority")} />
-                        <MenuRadioItem checked={sidebarPrefs.chatSortMode === "updated_at"} label={t("sidebar.sortUpdated")} onClick={() => setChatSortMode("updated_at")} />
-                        <MenuRadioItem checked={sidebarPrefs.chatSortMode === "manual"} label={t("sidebar.sortManual")} onClick={() => setChatSortMode("manual")} />
-                      </div>,
-                      document.body,
-                    )}
-                  </div>
+                  <OrganizeMenuButton
+                    buttonRef={organizeMenuButtonRef}
+                    open={organizeMenuOpen}
+                    onToggle={openOrganizeMenu}
+                    title={t("sidebar.projectOptions")}
+                  />
                 )}
-                <button
-                  type="button"
+                <IconActionButton
                   title={t("sidebar.newRecentChat")}
-                  aria-label={t("sidebar.newRecentChat")}
-                  onClick={(e) => { e.stopPropagation(); void startRecentSession(); }}
-                  className="sidebar-icon-button sidebar-hover-icon-button-tint"
-                  style={{
-                    display: "inline-flex", alignItems: "center", justifyContent: "center",
-                    width: 24, height: 24, padding: 0, border: "none", borderRadius: 8,
-                    background: "transparent", color: "var(--text-dim)", cursor: "pointer",
-                  }}
+                  onClick={() => void startRecentSession()}
                 >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="M12 5v14" /><path d="M5 12h14" />
-                  </svg>
-                </button>
+                  <PlusIcon />
+                </IconActionButton>
               </>
             )}
           >
@@ -1546,23 +1468,77 @@ export function SessionSidebar({
                 {t("sidebar.noChats")}
               </div>
             ) : (
-              recentSessions.map((session) => (
-                <SessionItem
-                  key={session.id}
-                  session={session}
-                  isSelected={session.id === selectedSessionId}
-                  isRunning={runningSessionIds.has(session.id)}
-                  isUnread={unreadSessionIds.has(session.id)}
-                  onClick={() => onSelectSession(session)}
-                  onRenamed={loadSessions}
-                  onDeleted={(id) => {
-                    onSessionDeleted?.(id);
-                    void loadSessions();
-                  }}
-                />
-              ))
+              recentSessions.map((session) => {
+                const dragKey = `session:${GLOBAL_SESSION_ORDER_KEY}:${session.id}`;
+                const title = session.name || session.firstMessage.slice(0, 50) || session.id.slice(0, 12);
+                const canDrag = sidebarPrefs.chatSortMode === "manual";
+                return (
+                  <SessionItem
+                    key={session.id}
+                    session={session}
+                    isSelected={session.id === selectedSessionId}
+                    isRunning={runningSessionIds.has(session.id)}
+                    isUnread={unreadSessionIds.has(session.id)}
+                    onClick={() => onSelectSession(session)}
+                    onRenamed={loadSessions}
+                    onDeleted={(id) => {
+                      onSessionDeleted?.(id);
+                      void loadSessions();
+                    }}
+                    isDragging={draggingKey === dragKey}
+                    onDragStart={canDrag ? (event) => {
+                      writeDragPayload(event, {
+                        kind: "session",
+                        projectRoot: GLOBAL_SESSION_ORDER_KEY,
+                        sessionId: session.id,
+                      });
+                      setDraggingKey(dragKey);
+                      startDragOverlay(event, "session", title);
+                    } : undefined}
+                    onDragOver={canDrag ? (event) => {
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = "move";
+                      setDragOverKey(dragKey);
+                      setDragOverPosition(getDropPosition(event, event.currentTarget));
+                    } : undefined}
+                    onDragLeave={canDrag ? () => {
+                      setDragOverKey((current) => (current === dragKey ? null : current));
+                      setDragOverPosition((current) => (dragOverKey === dragKey ? null : current));
+                    } : undefined}
+                    onDrop={canDrag ? (event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      const payload = readDragPayload(event);
+                      const position = getDropPosition(event, event.currentTarget);
+                      clearDragUi();
+                      if (!payload || payload.kind !== "session") return;
+                      if (payload.projectRoot !== GLOBAL_SESSION_ORDER_KEY) return;
+                      reorderRecentSession(payload.sessionId, session.id, position);
+                    } : undefined}
+                    onDragEnd={canDrag ? () => clearDragUi() : undefined}
+                  />
+                );
+              })
             )}
           </CollapsibleSection>
+        )}
+
+        {organizeMenuOpen && organizeMenuRect && createPortal(
+          <div ref={organizeMenuPanelRef} role="menu" style={getProjectMenuStyle(organizeMenuRect)}>
+            <div style={{ padding: "6px 10px 4px", fontSize: 11, color: "var(--text-dim)", fontWeight: 500 }}>
+              {t("sidebar.organizeSidebar")}
+            </div>
+            <MenuRadioItem checked={sidebarPrefs.mode === "project"} label={t("sidebar.byProject")} onClick={() => setOrganizeMode("project")} />
+            <MenuRadioItem checked={sidebarPrefs.mode === "list"} label={t("sidebar.inOneList")} onClick={() => setOrganizeMode("list")} />
+            <div style={{ height: 1, background: "var(--border)", margin: "6px 0" }} />
+            <div style={{ padding: "4px 10px 4px", fontSize: 11, color: "var(--text-dim)", fontWeight: 500 }}>
+              {t("sidebar.sortChatsBy")}
+            </div>
+            <MenuRadioItem checked={sidebarPrefs.chatSortMode === "priority"} label={t("sidebar.sortPriority")} onClick={() => setChatSortMode("priority")} />
+            <MenuRadioItem checked={sidebarPrefs.chatSortMode === "updated_at"} label={t("sidebar.sortUpdated")} onClick={() => setChatSortMode("updated_at")} />
+            <MenuRadioItem checked={sidebarPrefs.chatSortMode === "manual"} label={t("sidebar.sortManual")} onClick={() => setChatSortMode("manual")} />
+          </div>,
+          document.body,
         )}
       </div>
 
@@ -1620,6 +1596,77 @@ export function SessionSidebar({
         document.body,
       )}
     </div>
+  );
+}
+
+function PlusIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 5v14" /><path d="M5 12h14" />
+    </svg>
+  );
+}
+
+function IconActionButton({
+  title,
+  onClick,
+  children,
+}: {
+  title: string;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={title}
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
+      className="sidebar-icon-button sidebar-hover-icon-button-tint"
+      style={{
+        display: "inline-flex", alignItems: "center", justifyContent: "center",
+        width: 24, height: 24, padding: 0, border: "none", borderRadius: 8,
+        background: "transparent", color: "var(--text-dim)", cursor: "pointer",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function OrganizeMenuButton({
+  buttonRef,
+  open,
+  onToggle,
+  title,
+}: {
+  buttonRef: React.RefObject<HTMLButtonElement | null>;
+  open: boolean;
+  onToggle: () => void;
+  title: string;
+}) {
+  return (
+    <button
+      ref={buttonRef}
+      type="button"
+      title={title}
+      aria-label={title}
+      aria-expanded={open}
+      onClick={(e) => { e.stopPropagation(); onToggle(); }}
+      className="sidebar-icon-button sidebar-hover-icon-button-tint"
+      style={{
+        display: "inline-flex", alignItems: "center", justifyContent: "center",
+        width: 24, height: 24, padding: 0, border: "none", borderRadius: 8,
+        background: open ? "var(--bg-selected)" : "transparent",
+        color: "var(--text-dim)", cursor: "pointer",
+      }}
+    >
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <circle cx="5" cy="12" r="1.5" />
+        <circle cx="12" cy="12" r="1.5" />
+        <circle cx="19" cy="12" r="1.5" />
+      </svg>
+    </button>
   );
 }
 
@@ -2520,7 +2567,7 @@ function RunningSessionIndicator() {
         alignItems: "center",
         justifyContent: "center",
         flexShrink: 0,
-        color: "var(--text-dim)",
+        color: "var(--accent)",
       }}
     >
       <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true" style={{ display: "block" }}>
@@ -2676,9 +2723,9 @@ function SessionItem({
   return (
     <div
       className="sidebar-item"
-      draggable={!confirmDelete && !renaming && !deleting}
+      draggable={Boolean(onDragStart) && !confirmDelete && !renaming && !deleting}
       onDragStart={(event) => {
-        if (confirmDelete || renaming || deleting) {
+        if (!onDragStart || confirmDelete || renaming || deleting) {
           event.preventDefault();
           return;
         }
@@ -2687,7 +2734,7 @@ function SessionItem({
           event.preventDefault();
           return;
         }
-        onDragStart?.(event);
+        onDragStart(event);
       }}
       onDragOver={(event) => {
         if (!onDragOver) return;
@@ -2706,7 +2753,7 @@ function SessionItem({
         margin: "1px 6px",
         paddingLeft: depth > 0 ? depth * 12 + 14 : 14,
         paddingRight: "var(--padding-row-x, 8px)",
-        cursor: confirmDelete || renaming ? "default" : isDragging ? "grabbing" : "grab",
+        cursor: confirmDelete || renaming || !onDragStart ? "default" : isDragging ? "grabbing" : "grab",
         userSelect: "none",
         background: confirmDelete
           ? "rgba(239,68,68,0.06)"

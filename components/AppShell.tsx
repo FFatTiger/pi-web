@@ -467,9 +467,12 @@ export function AppShell() {
   }, [applySessionFilePanel, captureCurrentSessionFilePanel, router, isMobile]);
 
   const handleNewSession = useCallback((_sessionId: string, fallbackCwd: string, projectRoot = fallbackCwd) => {
-    // Resolve remembered cwd immediately from the ref so project-row + uses the
-    // last worktree without waiting for React state.
-    const cwd = projectCwdsRef.current.get(projectRoot) ?? fallbackCwd;
+    // Project-row "+" passes projectRoot === fallbackCwd and should reuse the
+    // remembered worktree cwd. Recent/temp chats pass an explicit new cwd
+    // (temp-session/.../f-N) that must not be overwritten by projectCwds.
+    const cwd = fallbackCwd !== projectRoot
+      ? fallbackCwd
+      : (projectCwdsRef.current.get(projectRoot) ?? fallbackCwd);
     captureCurrentSessionFilePanel();
     setActiveProjectRoot(projectRoot);
     setActiveCwd(cwd);
