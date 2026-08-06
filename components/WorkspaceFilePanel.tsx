@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { getFileName } from "@/lib/file-paths";
 import { useI18n } from "@/hooks/useI18n";
 import type { RightPanelTab, RightPanelTabAction } from "@/lib/right-panel-tabs";
+import { CODEX_PANEL_SPRING_MS } from "./MotionPanelShell";
 import { FileExplorer, type FileExplorerHandle } from "./FileExplorer";
 import { FileViewer } from "./FileViewer";
 import { RightPanelHome } from "./RightPanelHome";
@@ -17,18 +18,19 @@ interface WorkspaceFilePanelProps {
   activeTabId: string | null;
   cwd: string | null;
   explorerRefreshKey: number;
-  changesCollapsed: boolean;
   explorerOpen: boolean;
+  rightPanelMaximized: boolean;
   canOpenSideChat: boolean;
   onSelectPanelTab: (tabId: string) => void;
   onClosePanelTab: (tabId: string) => void;
   onOpenAction: (action: RightPanelTabAction) => void;
   onToggleExplorer: () => void;
+  onToggleRightPanelMaximized: () => void;
+  onCloseRightPanel: () => void;
   onOpenFile: (filePath: string, fileName: string, options?: OpenFileOptions) => void;
   onAtMention: (relativePath: string, isDir: boolean) => void;
   onAtMentions: (relativePaths: string[]) => void;
   onMentionLines?: (relativePath: string, startLine: number, endLine: number) => void;
-  onChangesCountChange?: (count: number) => void;
   sideChat?: ReactNode;
 }
 
@@ -39,23 +41,25 @@ export function WorkspaceFilePanel(props: WorkspaceFilePanelProps) {
     activeTabId,
     cwd,
     explorerRefreshKey,
-    changesCollapsed,
     explorerOpen,
+    rightPanelMaximized,
     canOpenSideChat,
     onSelectPanelTab,
     onClosePanelTab,
     onOpenAction,
     onToggleExplorer,
+    onToggleRightPanelMaximized,
+    onCloseRightPanel,
     onOpenFile,
     onAtMention,
     onAtMentions,
     onMentionLines,
-    onChangesCountChange,
     sideChat,
   } = props;
   const { t } = useI18n();
   const explorerRef = useRef<FileExplorerHandle>(null);
   const [localRefreshKey, setLocalRefreshKey] = useState(0);
+  const [contentMounted, setContentMounted] = useState(open);
   const [refreshDone, setRefreshDone] = useState(false);
   const [uploadBusy, setUploadBusy] = useState(false);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -66,6 +70,16 @@ export function WorkspaceFilePanel(props: WorkspaceFilePanelProps) {
   const activeFileTab = activePanelTab?.kind === "file" ? activePanelTab : null;
   const showFilePreview = Boolean(activeFileTab?.filePath);
   const showExplorer = isFileSurface && explorerOpen;
+
+  useEffect(() => {
+    if (open) {
+      setContentMounted(true);
+      return;
+    }
+    // Keep chrome mounted through the Codex spring close.
+    const timer = window.setTimeout(() => setContentMounted(false), CODEX_PANEL_SPRING_MS);
+    return () => window.clearTimeout(timer);
+  }, [open]);
 
   useEffect(() => () => {
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
@@ -83,14 +97,17 @@ export function WorkspaceFilePanel(props: WorkspaceFilePanelProps) {
       className="workspace-file-panel-content"
       style={{ display: "flex", flex: 1, minWidth: 0, minHeight: 0, flexDirection: "column", background: "var(--bg)" }}
     >
-      {open && (
+      {contentMounted && (
         <RightPanelTabBar
           tabs={tabs}
           activeTabId={activeTabId}
           hasWorkspace={Boolean(cwd)}
           hasSession={canOpenSideChat}
           explorerOpen={explorerOpen}
+          maximized={rightPanelMaximized}
           onToggleExplorer={isFileSurface ? onToggleExplorer : undefined}
+          onToggleMaximized={onToggleRightPanelMaximized}
+          onClosePanel={onCloseRightPanel}
           onSelectTab={onSelectPanelTab}
           onCloseTab={onClosePanelTab}
           onOpenAction={onOpenAction}
@@ -229,8 +246,6 @@ export function WorkspaceFilePanel(props: WorkspaceFilePanelProps) {
                         onAtMention={onAtMention}
                         onAtMentions={onAtMentions}
                         onUploadBusyChange={setUploadBusy}
-                        changesCollapsed={changesCollapsed}
-                        onChangesCountChange={onChangesCountChange}
                       />
                     ) : (
                       <div style={{ padding: 16, color: "var(--text-dim)", fontSize: 12 }}>

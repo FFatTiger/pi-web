@@ -12,6 +12,7 @@ import { ProjectTrustDialog } from "./ProjectTrustDialog";
 import { WorkspaceFilePanel } from "./WorkspaceFilePanel";
 import { SideChatPanel } from "./SideChatPanel";
 import { ThreadSummaryPanel } from "./ThreadSummaryPanel";
+import { CODEX_PANEL_SPRING_MS, MotionPanelShell } from "./MotionPanelShell";
 import { useTheme } from "@/hooks/useTheme";
 import { useI18n } from "@/hooks/useI18n";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -25,12 +26,13 @@ import {
   getDefaultRightPanelWidth,
   getRightPanelMaxWidth,
   getSidebarMaxWidth,
-  RIGHT_PANEL_FALLBACK_WIDTH,
+  RIGHT_PANEL_DEFAULT_WIDTH,
   RIGHT_PANEL_MAX_WIDTH,
   RIGHT_PANEL_MIN_WIDTH,
   SIDEBAR_DEFAULT_WIDTH,
   SIDEBAR_MAX_WIDTH,
   SIDEBAR_MIN_WIDTH,
+  SPLIT_PANEL_MIN_WIDTH,
 } from "@/lib/panel-layout";
 import {
   getSummaryContentShift,
@@ -70,6 +72,18 @@ export function AppShell() {
   const { t: translate } = useI18n();
   const isMobile = useIsMobile();
   useViewportHeight();
+  // Desktop split layout uses Codex spring width shells; overlay/mobile keep CSS transform slides.
+  const [useSplitMotionShell, setUseSplitMotionShell] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mql = window.matchMedia(`(min-width: ${SPLIT_PANEL_MIN_WIDTH}px)`);
+    const sync = () => setUseSplitMotionShell(mql.matches);
+    sync();
+    mql.addEventListener("change", sync);
+    return () => mql.removeEventListener("change", sync);
+  }, []);
+  const sidebarMotionEnabled = !isMobile;
+  const rightPanelMotionEnabled = useSplitMotionShell;
   const [selectedSession, setSelectedSession] = useState<SessionInfo | null>(null);
   const [projectTrust, setProjectTrust] = useState<ProjectTrustStatus | null>(null);
   const [projectTrustDialogOpen, setProjectTrustDialogOpen] = useState(false);
@@ -98,17 +112,33 @@ export function AppShell() {
   const [rightPanelMaximized, setRightPanelMaximized] = useState(false);
   const [rightPanelTabs, setRightPanelTabs] = useState<RightPanelTab[]>([]);
   const [activeRightPanelTabId, setActiveRightPanelTabId] = useState<string | null>(null);
+  const rightPanelOpenRef = useRef(rightPanelOpen);
+  const rightPanelMaximizedRef = useRef(rightPanelMaximized);
+  const rightPanelTabsRef = useRef<RightPanelTab[]>(rightPanelTabs);
+  const activeRightPanelTabIdRef = useRef<string | null>(activeRightPanelTabId);
+  const explorerOpenRef = useRef(true);
+  rightPanelOpenRef.current = rightPanelOpen;
+  rightPanelMaximizedRef.current = rightPanelMaximized;
+  rightPanelTabsRef.current = rightPanelTabs;
+  activeRightPanelTabIdRef.current = activeRightPanelTabId;
   // Side Chat open/closed is remembered per main session so switching A→B
   // does not carry A's panel, and returning to A restores it.
   const sideChatOpenBySessionRef = useRef(new Map<string, boolean>());
-  // Right panel shell tabs (side chat / files / open files) per main session.
-  const rightPanelTabsBySessionRef = useRef(new Map<string, { tabs: RightPanelTab[]; activeTabId: string | null }>());
+  // Right panel topology per main session. Codex persists visibility/full-width
+  // independently from the tab descriptors, so a hidden panel can reopen exactly.
+  const rightPanelTabsBySessionRef = useRef(new Map<string, {
+    tabs: RightPanelTab[];
+    activeTabId: string | null;
+    open: boolean;
+    maximized: boolean;
+    explorerOpen: boolean;
+  }>());
   const [sideChatBootstrapMessage, setSideChatBootstrapMessage] = useState<string | null>(null);
   const sidebarWidthRef = useRef(SIDEBAR_DEFAULT_WIDTH);
-  const rightPanelWidthRef = useRef(RIGHT_PANEL_FALLBACK_WIDTH);
+  const rightPanelWidthRef = useRef(RIGHT_PANEL_DEFAULT_WIDTH);
   const getResponsiveRightPanelWidth = useCallback(
     () => typeof window === "undefined"
-      ? RIGHT_PANEL_FALLBACK_WIDTH
+      ? RIGHT_PANEL_DEFAULT_WIDTH
       : getDefaultRightPanelWidth(window.innerWidth),
     [],
   );
@@ -141,18 +171,21 @@ export function AppShell() {
     maxWidth: SIDEBAR_MAX_WIDTH,
     minWidth: SIDEBAR_MIN_WIDTH,
     storageKey: "pi-sidebar-width",
+    persistenceMode: "pixels",
     widthRef: sidebarWidthRef,
   });
   const rightPanelResizer = useResizablePanel({
     ariaLabel: translate("layout.resizeFilePanel"),
     cssVariable: "--right-panel-width",
-    defaultWidth: RIGHT_PANEL_FALLBACK_WIDTH,
+    defaultWidth: RIGHT_PANEL_DEFAULT_WIDTH,
     getDefaultWidth: getResponsiveRightPanelWidth,
     getMaxWidth: getResponsiveRightPanelMaxWidth,
     growthDirection: "left",
     maxWidth: RIGHT_PANEL_MAX_WIDTH,
     minWidth: RIGHT_PANEL_MIN_WIDTH,
-    storageKey: "pi-right-panel-width",
+    // Ratio only — no migration from older pixel keys.
+    storageKey: "app-shell:right-panel-width-ratio",
+    persistenceMode: "ratio",
     widthRef: rightPanelWidthRef,
   });
   const reclampSidebarWidth = sidebarResizer.reclampWidth;
@@ -173,10 +206,14 @@ export function AppShell() {
   useEffect(() => {
     setMobileSidebarReady(true);
   }, []);
+  // Reclamp after the Codex spring settles so we don't thrash layout mid-tween.
   useEffect(() => {
     if (!rightPanelOpen) return;
-    reclampSidebarWidth();
-    reclampRightPanelWidth();
+    const timer = window.setTimeout(() => {
+      reclampSidebarWidth();
+      reclampRightPanelWidth();
+    }, CODEX_PANEL_SPRING_MS);
+    return () => window.clearTimeout(timer);
   }, [reclampRightPanelWidth, reclampSidebarWidth, rightPanelOpen]);
   const chatInputRef = useRef<ChatInputHandle | null>(null);
   const topBarRef = useRef<HTMLDivElement>(null);
@@ -214,11 +251,23 @@ export function AppShell() {
     sideChatOpenBySessionRef.current.set(sessionId, open);
   }, []);
 
-  const persistRightPanelTabs = useCallback((sessionId: string | null | undefined, tabs: RightPanelTab[], activeTabId: string | null) => {
+  const persistRightPanelTabs = useCallback((
+    sessionId: string | null | undefined,
+    tabs: RightPanelTab[],
+    activeTabId: string | null,
+    overrides: Partial<Pick<{
+      open: boolean;
+      maximized: boolean;
+      explorerOpen: boolean;
+    }, "open" | "maximized" | "explorerOpen">> = {},
+  ) => {
     if (!sessionId) return;
     rightPanelTabsBySessionRef.current.set(sessionId, {
       tabs: tabs.map((tab) => ({ ...tab })),
       activeTabId,
+      open: overrides.open ?? rightPanelOpenRef.current,
+      maximized: overrides.maximized ?? rightPanelMaximizedRef.current,
+      explorerOpen: overrides.explorerOpen ?? explorerOpenRef.current,
     });
     rememberSideChatOpen(sessionId, tabs.some((tab) => tab.kind === "sideChat"));
   }, [rememberSideChatOpen]);
@@ -226,8 +275,10 @@ export function AppShell() {
   const closeRightPanel = useCallback(() => {
     const sessionId = activeSessionIdRef.current;
     if (sessionId) {
-      persistRightPanelTabs(sessionId, rightPanelTabs, activeRightPanelTabId);
+      persistRightPanelTabs(sessionId, rightPanelTabs, activeRightPanelTabId, { open: false });
     }
+    rightPanelOpenRef.current = false;
+    rightPanelMaximizedRef.current = false;
     setRightPanelOpen(false);
     setRightPanelMaximized(false);
   }, [activeRightPanelTabId, persistRightPanelTabs, rightPanelTabs]);
@@ -269,17 +320,53 @@ export function AppShell() {
     setThreadSummaryOpen((value) => !value);
   }, []);
   // Track center-column width for Codex displayMode math (mainContentTargetWidth).
+  // IMPORTANT: never setState on every RO frame while side panels spring their width —
+  // that re-renders AppShell every animation frame and is the main jank source.
   const centerColumnRef = useRef<HTMLDivElement>(null);
   const [centerColumnWidth, setCenterColumnWidth] = useState(0);
+  const centerWidthRafRef = useRef<number | null>(null);
+  const lastCenterWidthRef = useRef(0);
   useEffect(() => {
     const node = centerColumnRef.current;
     if (!node || typeof ResizeObserver === "undefined") return;
-    const update = () => setCenterColumnWidth(node.getBoundingClientRect().width);
-    update();
-    const ro = new ResizeObserver(update);
+
+    const publish = (width: number) => {
+      // Ignore sub-pixel noise from spring frames.
+      if (Math.abs(width - lastCenterWidthRef.current) < 2) return;
+      lastCenterWidthRef.current = width;
+      setCenterColumnWidth(width);
+    };
+
+    const schedule = () => {
+      if (centerWidthRafRef.current != null) return;
+      centerWidthRafRef.current = window.requestAnimationFrame(() => {
+        centerWidthRafRef.current = null;
+        publish(node.getBoundingClientRect().width);
+      });
+    };
+
+    // Only live-track while summary is open (contentShift depends on it).
+    // While closed, a single sample is enough and panel springs stay smooth.
+    publish(node.getBoundingClientRect().width);
+    if (!threadSummaryVisible) {
+      return () => {
+        if (centerWidthRafRef.current != null) {
+          window.cancelAnimationFrame(centerWidthRafRef.current);
+          centerWidthRafRef.current = null;
+        }
+      };
+    }
+
+    const ro = new ResizeObserver(schedule);
     ro.observe(node);
-    return () => ro.disconnect();
-  }, []);
+    return () => {
+      ro.disconnect();
+      if (centerWidthRafRef.current != null) {
+        window.cancelAnimationFrame(centerWidthRafRef.current);
+        centerWidthRafRef.current = null;
+      }
+    };
+  }, [threadSummaryVisible]);
   const summaryDisplayMode = useMemo(
     () => getSummaryDisplayMode(centerColumnWidth),
     [centerColumnWidth],
@@ -319,26 +406,25 @@ export function AppShell() {
     return () => ro.disconnect();
   }, [activeTopPanel]);
 
-  const [changesCollapsed, setChangesCollapsed] = useState(true);
-  const [changesCount, setChangesCount] = useState(0);
   // Codex: folder tree is independently collapsible from the open-file tabs.
   const [explorerOpen, setExplorerOpen] = useState(true);
-  const rightPanelTabsRef = useRef<RightPanelTab[]>(rightPanelTabs);
-  const activeRightPanelTabIdRef = useRef<string | null>(activeRightPanelTabId);
-  rightPanelTabsRef.current = rightPanelTabs;
-  activeRightPanelTabIdRef.current = activeRightPanelTabId;
+  explorerOpenRef.current = explorerOpen;
 
   const activeRightPanelTab = rightPanelTabs.find((tab) => tab.id === activeRightPanelTabId) ?? null;
   const filesPanelActive = rightPanelOpen
     && (activeRightPanelTab?.kind === "files" || activeRightPanelTab?.kind === "file");
   const sideChatPanelActive = rightPanelOpen && activeRightPanelTab?.kind === "sideChat";
 
-  // Keep the active session's panel-tabs snapshot fresh (includes open files).
+  // Keep the active session's complete panel topology fresh.
   useEffect(() => {
     const sessionId = selectedSession?.id;
     if (!sessionId) return;
-    persistRightPanelTabs(sessionId, rightPanelTabs, activeRightPanelTabId);
-  }, [activeRightPanelTabId, persistRightPanelTabs, rightPanelTabs, selectedSession?.id]);
+    persistRightPanelTabs(sessionId, rightPanelTabs, activeRightPanelTabId, {
+      open: rightPanelOpen,
+      maximized: rightPanelMaximized,
+      explorerOpen,
+    });
+  }, [activeRightPanelTabId, explorerOpen, persistRightPanelTabs, rightPanelMaximized, rightPanelOpen, rightPanelTabs, selectedSession?.id]);
 
   const captureCurrentSessionFilePanel = useCallback(() => {
     const sessionId = activeSessionIdRef.current;
@@ -373,8 +459,10 @@ export function AppShell() {
     }
     setRightPanelTabs(nextTabs);
     setActiveRightPanelTabId(nextActive);
-    setRightPanelOpen(nextTabs.length > 0);
-    if (nextTabs.length === 0) setRightPanelMaximized(false);
+    const hasTabs = nextTabs.length > 0;
+    setRightPanelOpen(savedPanel?.open ?? hasTabs);
+    setRightPanelMaximized(hasTabs && (savedPanel?.maximized ?? false));
+    setExplorerOpen(savedPanel?.explorerOpen ?? true);
   }, []);
 
   // Same @mention format as the chat input's @ autocomplete, so the agent's
@@ -784,11 +872,17 @@ export function AppShell() {
 
   const toggleRightPanelMaximized = useCallback(() => {
     if (!rightPanelOpen) {
+      rightPanelOpenRef.current = true;
+      rightPanelMaximizedRef.current = true;
       setRightPanelOpen(true);
       setRightPanelMaximized(true);
       return;
     }
-    setRightPanelMaximized((value) => !value);
+    setRightPanelMaximized((value) => {
+      const next = !value;
+      rightPanelMaximizedRef.current = next;
+      return next;
+    });
   }, [rightPanelOpen]);
 
   /** Codex top-right control: show/hide the right side panel (not the left sidebar). */
@@ -799,6 +893,7 @@ export function AppShell() {
     }
     if (isMobile) setSidebarOpen(false);
     // Re-open shell. Empty tabs → Codex blank home; otherwise restore last tabs.
+    rightPanelOpenRef.current = true;
     setRightPanelOpen(true);
   }, [closeRightPanel, isMobile, rightPanelOpen]);
 
@@ -1049,25 +1144,27 @@ export function AppShell() {
         }}
       />
 
-      {/* Left sidebar */}
-      <div
-        ref={sidebarResizer.panelRef}
+      {/* Left sidebar — Codex shell: outer spring width, fixed inner content width. */}
+      <MotionPanelShell
+        panelRef={sidebarResizer.panelRef}
         id="session-sidebar"
+        side="left"
+        open={sidebarOpen}
+        targetWidth={sidebarResizer.width}
+        isResizing={sidebarResizer.isResizing}
+        motionEnabled={sidebarMotionEnabled}
         className={`sidebar-container${sidebarOpen ? " sidebar-open" : " sidebar-closed"}${mobileSidebarReady ? "" : " sidebar-mobile-pending"}${sidebarResizer.isResizing ? " sidebar-resizing" : ""}`}
         style={{
           "--sidebar-width": `${sidebarResizer.width}px`,
           background: "var(--bg-panel)",
           borderRight: "1px solid var(--border)",
-          display: "flex",
-          flexDirection: "column",
-          flexShrink: 0,
           paddingTop: "env(safe-area-inset-top)",
           paddingBottom: "env(safe-area-inset-bottom)",
           zIndex: 200,
         } as React.CSSProperties}
       >
         {sidebarContent}
-      </div>
+      </MotionPanelShell>
       {sidebarOpen && (
         <div
           {...sidebarResizer.separatorProps}
@@ -1161,26 +1258,45 @@ export function AppShell() {
             </div>
           )}
 
-          {/* When the right panel is open, the pin sits on the center toolbar trailing edge.
-              When closed, it sits just left of the fixed "show right panel" button. */}
-          {rightPanelOpen && (
-            <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", flexShrink: 0 }}>
+          {/* Trailing chrome in document flow so it cannot vanish behind the right panel. */}
+          <div
+            className="codex-right-panel-controls"
+            style={{
+              marginLeft: "auto",
+              display: rightPanelMaximized ? "none" : "flex",
+              alignItems: "center",
+              flexShrink: 0,
+            }}
+          >
+            <button
+              type="button"
+              className="app-toolbar-btn"
+              data-active={threadSummaryVisible}
+              title={translate("summary.toggle")}
+              aria-label={translate("summary.toggle")}
+              aria-pressed={threadSummaryVisible}
+              onClick={toggleThreadSummary}
+            >
+              <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                <path d="M5.693 11.056a2.71 2.71 0 0 1 2.432 2.694l-.015.277a2.71 2.71 0 0 1-2.694 2.432l-.276-.015a2.71 2.71 0 0 1-2.418-2.417l-.014-.277a2.709 2.709 0 0 1 2.708-2.708l.277.014Zm-.277 1.316a1.378 1.378 0 1 0 0 2.757 1.378 1.378 0 0 0 0-2.757Zm11.384.727a.665.665 0 0 1 0 1.302l-.134.014h-5.833a.665.665 0 0 1 0-1.33h5.833l.135.014ZM5.693 3.556A2.71 2.71 0 0 1 8.125 6.25l-.015.277A2.71 2.71 0 0 1 5.416 8.96l-.276-.015a2.71 2.71 0 0 1-2.418-2.417l-.014-.277a2.709 2.709 0 0 1 2.708-2.708l.277.014Zm-.277 1.316a1.378 1.378 0 1 0 .001 2.757 1.378 1.378 0 0 0-.001-2.757Zm11.384.727a.665.665 0 0 1 0 1.302l-.134.014h-5.833a.665.665 0 0 1 0-1.33h5.833l.135.014Z" />
+              </svg>
+            </button>
+            {!rightPanelOpen && (
               <button
                 type="button"
                 className="app-toolbar-btn"
-                data-active={threadSummaryVisible}
-                title={translate("summary.toggle")}
-                aria-label={translate("summary.toggle")}
-                aria-pressed={threadSummaryVisible}
-                onClick={toggleThreadSummary}
+                onClick={toggleRightPanel}
+                title={`${translate("layout.showRightPanel")} (Ctrl+Alt+B)`}
+                aria-label={translate("layout.showRightPanel")}
+                aria-pressed={false}
               >
-                {/* Codex thread-summary-panel HeaderButton icon (two dots + list lines) */}
-                <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                  <path d="M5.693 11.056a2.71 2.71 0 0 1 2.432 2.694l-.015.277a2.71 2.71 0 0 1-2.694 2.432l-.276-.015a2.71 2.71 0 0 1-2.418-2.417l-.014-.277a2.709 2.709 0 0 1 2.708-2.708l.277.014Zm-.277 1.316a1.378 1.378 0 1 0 0 2.757 1.378 1.378 0 0 0 0-2.757Zm11.384.727a.665.665 0 0 1 0 1.302l-.134.014h-5.833a.665.665 0 0 1 0-1.33h5.833l.135.014ZM5.693 3.556A2.71 2.71 0 0 1 8.125 6.25l-.015.277A2.71 2.71 0 0 1 5.416 8.96l-.276-.015a2.71 2.71 0 0 1-2.418-2.417l-.014-.277a2.709 2.709 0 0 1 2.708-2.708l.277.014Zm-.277 1.316a1.378 1.378 0 1 0 .001 2.757 1.378 1.378 0 0 0-.001-2.757Zm11.384.727a.665.665 0 0 1 0 1.302l-.134.014h-5.833a.665.665 0 0 1 0-1.33h5.833l.135.014Z" />
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <rect x="3.5" y="4" width="17" height="16" rx="3" />
+                  <path d="M15 4v16" />
                 </svg>
               </button>
-            </div>
-          )}
+            )}
+          </div>
 
           {/* Session statistics moved to the composer footer. The existing
               session panel remains available and is opened from that footer. */}
@@ -1432,7 +1548,7 @@ export function AppShell() {
             cwd={activeCwd}
             projectRoot={activeProjectRoot}
             sessionName={selectedSession?.name ?? sessionStats?.sessionName ?? null}
-            changesCount={changesCount}
+            changesCount={0}
             systemPrompt={systemPrompt}
             branchTree={branchTree}
             branchActiveLeafId={branchActiveLeafId}
@@ -1485,16 +1601,19 @@ export function AppShell() {
           title={`${translate("layout.resizeFilePanel")}: ${translate("layout.resizeHint")}`}
         />
       )}
-      {/* Right panel shell (Codex: open / width / maximize + content surfaces) */}
-      <div
-        ref={rightPanelResizer.panelRef}
+      {/* Right panel shell — Codex k3r: spring outer width + fixed inner content width. */}
+      <MotionPanelShell
+        panelRef={rightPanelResizer.panelRef}
         id="file-panel"
+        side="right"
+        open={rightPanelOpen}
+        maximized={rightPanelMaximized}
+        targetWidth={rightPanelResizer.width}
+        isResizing={rightPanelResizer.isResizing}
+        motionEnabled={rightPanelMotionEnabled}
         className={`right-panel-container${rightPanelOpen ? " right-panel-open" : " right-panel-closed"}${rightPanelMaximized ? " right-panel-maximized" : ""}${rightPanelResizer.isResizing ? " right-panel-resizing" : ""}`}
         style={{
           "--right-panel-width": rightPanelMaximized ? "min(100%, max(420px, 100% - 320px))" : `${rightPanelResizer.width}px`,
-          display: "flex",
-          flexDirection: "column",
-          height: "100%",
           borderLeft: "1px solid var(--border)",
           background: "var(--bg)",
         } as React.CSSProperties}
@@ -1505,18 +1624,19 @@ export function AppShell() {
           activeTabId={activeRightPanelTabId}
           cwd={activeCwd}
           explorerRefreshKey={explorerRefreshKey}
-          changesCollapsed={changesCollapsed}
           explorerOpen={explorerOpen}
+          rightPanelMaximized={rightPanelMaximized}
           canOpenSideChat={Boolean(selectedSession)}
           onSelectPanelTab={handleSelectRightPanelTab}
           onClosePanelTab={handleCloseRightPanelTab}
           onOpenAction={handleOpenRightPanelAction}
           onToggleExplorer={() => setExplorerOpen((value) => !value)}
+          onToggleRightPanelMaximized={toggleRightPanelMaximized}
+          onCloseRightPanel={closeRightPanel}
           onOpenFile={handleOpenFile}
           onAtMention={handleAtMention}
           onAtMentions={handleAtMentions}
           onMentionLines={filesPanelActive ? handleFileLineMention : undefined}
-          onChangesCountChange={setChangesCount}
           sideChat={selectedSession ? (
             <>
               {listSideChatTabs(rightPanelTabs).map((tab) => {
@@ -1542,123 +1662,10 @@ export function AppShell() {
             </>
           ) : null}
         />
-      </div>
+      </MotionPanelShell>
     </div>
-    {/* Codex right-panel chrome: toolbar icon buttons (ghost/secondary), not a capsule cluster. */}
-    <div
-      className="codex-right-panel-controls"
-      style={{
-        position: "fixed",
-        top: 6,
-        right: "calc(10px + env(safe-area-inset-right))",
-        zIndex: 320,
-        display: "flex",
-        alignItems: "center",
-        gap: 2,
-        pointerEvents: "none",
-      }}
-    >
-      {filesPanelActive && changesCount > 0 && (
-        <button
-          type="button"
-          onClick={() => setChangesCollapsed((value) => !value)}
-          title={changesCollapsed ? "Show git changes" : "Hide git changes"}
-          aria-label={changesCollapsed ? "Show git changes" : "Hide git changes"}
-          aria-pressed={!changesCollapsed}
-          className="app-toolbar-btn"
-          data-active={!changesCollapsed}
-          style={{
-            pointerEvents: "auto",
-            width: "auto",
-            minWidth: 30,
-            padding: "0 8px",
-            color: changesCollapsed ? undefined : "var(--accent)",
-          }}
-        >
-          {changesCount}
-        </button>
-      )}
-
-      {rightPanelOpen ? (
-        <div
-          className="codex-panel-control-cluster"
-          style={{
-            pointerEvents: "auto",
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 0,
-          }}
-        >
-          <button
-            type="button"
-            onClick={toggleRightPanelMaximized}
-            title={rightPanelMaximized ? translate("layout.restorePanelWidth") : translate("layout.expandPanel")}
-            aria-label={rightPanelMaximized ? translate("layout.restorePanelWidth") : translate("layout.expandPanel")}
-            aria-pressed={rightPanelMaximized}
-            className="app-toolbar-btn"
-            data-active={rightPanelMaximized}
-          >
-            {rightPanelMaximized ? (
-              /* Codex fRr restore: corners pull inward (filled) */
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-                <path d="M6.1664 8.80845C6.7325 8.80845 7.1918 9.26774 7.1918 9.83384V13.3338C7.19155 13.6236 6.9562 13.8592 6.6664 13.8592C6.37672 13.8591 6.14126 13.6235 6.14101 13.3338V10.5936L2.70547 14.0379C2.50071 14.243 2.16753 14.2435 1.9623 14.0389C1.75709 13.8342 1.75665 13.501 1.96133 13.2957L5.39101 9.85923H2.6664C2.37672 9.85909 2.14126 9.6235 2.14101 9.33384C2.14101 9.04397 2.37657 8.80858 2.6664 8.80845H6.1664Z" />
-                <path d="M13.2943 1.96274C13.4989 1.75743 13.8311 1.75731 14.0365 1.96177C14.2419 2.16637 14.243 2.49854 14.0385 2.70395L10.6127 6.14145H13.3334C13.6233 6.14145 13.8588 6.37689 13.8588 6.66684C13.8587 6.95674 13.6233 7.19223 13.3334 7.19223H9.8334C9.26734 7.19223 8.80807 6.73288 8.80801 6.16684V2.66684C8.80801 2.37689 9.04345 2.14145 9.3334 2.14145C9.62335 2.14145 9.85879 2.37689 9.85879 2.66684V5.41098L13.2943 1.96274Z" />
-              </svg>
-            ) : (
-              /* Codex aA expand: corners push outward (filled) */
-              <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                <path d="M4.33496 11C4.33496 10.6327 4.63273 10.335 5 10.335C5.36727 10.335 5.66504 10.6327 5.66504 11V14.335H9L9.13379 14.3486C9.43692 14.4106 9.66504 14.6786 9.66504 15C9.66504 15.3214 9.43692 15.5894 9.13379 15.6514L9 15.665H5C4.63273 15.665 4.33496 15.3673 4.33496 15V11ZM14.335 9V5.66504H11C10.6327 5.66504 10.335 5.36727 10.335 5C10.335 4.63273 10.6327 4.33496 11 4.33496H15L15.1338 4.34863C15.4369 4.41057 15.665 4.67857 15.665 5V9C15.665 9.36727 15.3673 9.66504 15 9.66504C14.6327 9.66504 14.335 9.36727 14.335 9Z" />
-              </svg>
-            )}
-          </button>
-          <button
-            type="button"
-            onClick={closeRightPanel}
-            title={`${translate("layout.closePanel")} (Ctrl+Alt+B)`}
-            aria-label={translate("layout.closePanel")}
-            className="app-toolbar-btn"
-          >
-            {/* Codex-style panel glyph (sidebar split), no corner X mark */}
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <rect x="3.5" y="4" width="17" height="16" rx="3" />
-              <path d="M15 4v16" />
-            </svg>
-          </button>
-        </div>
-      ) : (
-        <>
-          {/* Right panel collapsed: summary + show-panel, both toolbar chrome. */}
-          <button
-            type="button"
-            className="app-toolbar-btn"
-            data-active={threadSummaryVisible}
-            title={translate("summary.toggle")}
-            aria-label={translate("summary.toggle")}
-            aria-pressed={threadSummaryVisible}
-            onClick={toggleThreadSummary}
-            style={{ pointerEvents: "auto" }}
-          >
-            <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-              <path d="M5.693 11.056a2.71 2.71 0 0 1 2.432 2.694l-.015.277a2.71 2.71 0 0 1-2.694 2.432l-.276-.015a2.71 2.71 0 0 1-2.418-2.417l-.014-.277a2.709 2.709 0 0 1 2.708-2.708l.277.014Zm-.277 1.316a1.378 1.378 0 1 0 0 2.757 1.378 1.378 0 0 0 0-2.757Zm11.384.727a.665.665 0 0 1 0 1.302l-.134.014h-5.833a.665.665 0 0 1 0-1.33h5.833l.135.014ZM5.693 3.556A2.71 2.71 0 0 1 8.125 6.25l-.015.277A2.71 2.71 0 0 1 5.416 8.96l-.276-.015a2.71 2.71 0 0 1-2.418-2.417l-.014-.277a2.709 2.709 0 0 1 2.708-2.708l.277.014Zm-.277 1.316a1.378 1.378 0 1 0 .001 2.757 1.378 1.378 0 0 0-.001-2.757Zm11.384.727a.665.665 0 0 1 0 1.302l-.134.014h-5.833a.665.665 0 0 1 0-1.33h5.833l.135.014Z" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            className="app-toolbar-btn"
-            onClick={toggleRightPanel}
-            title={`${translate("layout.showRightPanel")} (Ctrl+Alt+B)`}
-            aria-label={translate("layout.showRightPanel")}
-            aria-pressed={false}
-            style={{ pointerEvents: "auto" }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <rect x="3.5" y="4" width="17" height="16" rx="3" />
-              <path d="M15 4v16" />
-            </svg>
-          </button>
-        </>
-      )}
-    </div>
+    {/* Closed-panel show/summary buttons live in the center toolbar trailing slot.
+        Open-panel maximize/close live in RightPanelTabBar after-list. */}
 
     {modelsConfigOpen && <ModelsConfig onClose={() => { setModelsConfigOpen(false); setModelsRefreshKey((k) => k + 1); }} />}
     {projectTrustDialogOpen && projectTrustCwd && (

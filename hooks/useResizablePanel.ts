@@ -30,6 +30,8 @@ interface UseResizablePanelOptions {
   maxWidth: number;
   minWidth: number;
   storageKey: string;
+  /** Pixels for fixed-width panels; ratio keeps the width adaptive as the viewport changes. */
+  persistenceMode: "pixels" | "ratio";
   widthRef: MutableRefObject<number>;
 }
 
@@ -38,23 +40,35 @@ interface CommitOptions {
   persist?: boolean;
 }
 
-function readStoredWidth(storageKey: string): number | null {
+function readStoredValue(storageKey: string): number | null {
   try {
     const stored = window.localStorage.getItem(storageKey);
     if (stored === null) return null;
-    const parsed = Number.parseInt(stored, 10);
+    const parsed = Number.parseFloat(stored);
     return Number.isFinite(parsed) ? parsed : null;
   } catch {
     return null;
   }
 }
 
-function writeStoredWidth(storageKey: string, width: number): void {
+function writeStoredValue(storageKey: string, value: number): void {
   try {
-    window.localStorage.setItem(storageKey, String(width));
+    window.localStorage.setItem(storageKey, String(value));
   } catch {
     // Resizing remains available when storage is unavailable.
   }
+}
+
+function clearStoredValue(storageKey: string): void {
+  try {
+    window.localStorage.removeItem(storageKey);
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+function isValidRatio(value: number): boolean {
+  return value >= 0 && value <= 1;
 }
 
 export function useResizablePanel(options: UseResizablePanelOptions) {
@@ -68,11 +82,13 @@ export function useResizablePanel(options: UseResizablePanelOptions) {
     maxWidth,
     minWidth,
     storageKey,
+    persistenceMode,
     widthRef,
   } = options;
   const panelRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragState | null>(null);
   const restoredRef = useRef(false);
+  const widthRatioRef = useRef<number | null>(null);
   const [width, setWidth] = useState(defaultWidth);
   const [isResizing, setIsResizing] = useState(false);
 
@@ -86,6 +102,27 @@ export function useResizablePanel(options: UseResizablePanelOptions) {
     [effectiveMaxWidth, minWidth],
   );
 
+  const getWidthRatio = useCallback((panelWidth: number) => {
+    const max = effectiveMaxWidth();
+    if (max <= minWidth) return 0;
+    return Math.max(0, Math.min(1, (panelWidth - minWidth) / (max - minWidth)));
+  }, [effectiveMaxWidth, minWidth]);
+
+  const getWidthFromRatio = useCallback((ratio: number) => {
+    const max = effectiveMaxWidth();
+    return clampWidth(minWidth + ((max - minWidth) * Math.max(0, Math.min(1, ratio))));
+  }, [clampWidth, effectiveMaxWidth, minWidth]);
+
+  const persistWidth = useCallback((panelWidth: number) => {
+    if (persistenceMode === "ratio") {
+      const ratio = getWidthRatio(panelWidth);
+      widthRatioRef.current = ratio;
+      writeStoredValue(storageKey, Number(ratio.toFixed(6)));
+      return;
+    }
+    writeStoredValue(storageKey, panelWidth);
+  }, [getWidthRatio, persistenceMode, storageKey]);
+
   const applyLiveWidth = useCallback((nextWidth: number) => {
     widthRef.current = nextWidth;
     panelRef.current?.style.setProperty(cssVariable, `${nextWidth}px`);
@@ -97,9 +134,12 @@ export function useResizablePanel(options: UseResizablePanelOptions) {
     const changed = nextWidth !== widthRef.current;
     applyLiveWidth(nextWidth);
     setWidth(nextWidth);
-    if (persist && (changed || forcePersist)) writeStoredWidth(storageKey, nextWidth);
+    if (persistenceMode === "ratio") {
+      widthRatioRef.current = getWidthRatio(nextWidth);
+    }
+    if (persist && (changed || forcePersist)) persistWidth(nextWidth);
     return nextWidth;
-  }, [applyLiveWidth, clampWidth, storageKey, widthRef]);
+  }, [applyLiveWidth, clampWidth, getWidthRatio, persistenceMode, persistWidth, widthRef]);
 
   const restoreBodyState = useCallback((drag: DragState) => {
     document.body.style.cursor = drag.previousCursor;
@@ -181,8 +221,14 @@ export function useResizablePanel(options: UseResizablePanelOptions) {
   }, [commitWidth, defaultWidth, getDefaultWidth]);
 
   const reclampWidth = useCallback(() => {
+    if (persistenceMode === "ratio" && widthRatioRef.current !== null) {
+      const nextWidth = getWidthFromRatio(widthRatioRef.current);
+      applyLiveWidth(nextWidth);
+      setWidth(nextWidth);
+      return;
+    }
     commitWidth(widthRef.current);
-  }, [commitWidth, widthRef]);
+  }, [applyLiveWidth, commitWidth, getWidthFromRatio, persistenceMode, widthRef]);
 
   const onKeyDown = useCallback((event: KeyboardEvent<HTMLDivElement>) => {
     const step = event.shiftKey ? 32 : 12;
@@ -211,24 +257,42 @@ export function useResizablePanel(options: UseResizablePanelOptions) {
     if (restoredRef.current) return;
     restoredRef.current = true;
 
-    const storedWidth = readStoredWidth(storageKey);
-    const candidate = storedWidth ?? getDefaultWidth?.() ?? defaultWidth;
-    const restoredWidth = commitWidth(candidate, { persist: false });
-    if (storedWidth !== null && storedWidth !== restoredWidth) {
-      writeStoredWidth(storageKey, restoredWidth);
+    const storedValue = readStoredValue(storageKey);
+
+    let candidate = getDefaultWidth?.() ?? defaultWidth;
+    if (storedValue !== null) {
+      if (persistenceMode === "ratio") {
+        if (isValidRatio(storedValue)) {
+          widthRatioRef.current = storedValue;
+          candidate = getWidthFromRatio(storedValue);
+        } else {
+          // Ratio keys only accept 0..1; drop garbage instead of soft-falling back forever.
+          clearStoredValue(storageKey);
+        }
+      } else {
+        candidate = storedValue;
+      }
     }
-  }, [commitWidth, defaultWidth, getDefaultWidth, storageKey]);
+    const restoredWidth = commitWidth(candidate, { persist: false });
+    if (persistenceMode === "ratio") {
+      widthRatioRef.current = getWidthRatio(restoredWidth);
+      // Rewrite a clean ratio after restore, or seed one after discarding garbage.
+      if (storedValue !== null) persistWidth(restoredWidth);
+    } else if (storedValue !== null && storedValue !== restoredWidth) {
+      persistWidth(restoredWidth);
+    }
+  }, [commitWidth, defaultWidth, getDefaultWidth, getWidthFromRatio, getWidthRatio, persistenceMode, persistWidth, storageKey]);
 
   useEffect(() => {
     if (!restoredRef.current) return;
-    commitWidth(widthRef.current);
+    reclampWidth();
 
     const onResize = () => {
-      commitWidth(widthRef.current);
+      reclampWidth();
     };
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
-  }, [commitWidth, widthRef]);
+  }, [reclampWidth]);
 
   useEffect(() => {
     if (!isResizing) return;
