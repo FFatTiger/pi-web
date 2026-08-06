@@ -4,9 +4,18 @@ import { motion, useReducedMotion } from "framer-motion";
 import type { CSSProperties, ReactNode } from "react";
 
 /**
- * Codex app-shell panel animation:
- * - outer shell animates width/opacity with spring { duration: 0.5, bounce: 0.1 }
- * - inner content keeps a fixed target width so the tree does not reflow every frame
+ * Codex-aligned split-panel shell (from app.asar `k3r` / `S3r`):
+ *
+ *   outer  → spring-animates `width`  { type:"spring", duration:0.5, bounce:0.1 }
+ *   inner  → fixed target width (no per-frame content reflow)
+ *
+ * Why not pure CSS width transition?
+ * - CSS + React reclamp reflows both the panel tree and the chat column every frame.
+ * Why not only transform?
+ * - Split layout must reserve/release horizontal space; transform alone leaves a blank strip.
+ *
+ * Framer Motion updates width on the compositor-driven style path without React setState.
+ * Inner content keeps a stable pixel width so FileExplorer/Sidebar do not remeasure each frame.
  */
 export const CODEX_PANEL_SPRING = {
   type: "spring" as const,
@@ -57,8 +66,8 @@ export function MotionPanelShell({
   const transition = isResizing || reduceMotion ? CODEX_PANEL_INSTANT : CODEX_PANEL_SPRING;
   const contentWidth = Math.max(0, Math.round(targetWidth));
   const closedBorder = side === "left"
-    ? { borderRight: "none" }
-    : { borderLeft: "none" };
+    ? { borderRight: "none" as const }
+    : { borderLeft: "none" as const };
 
   // Overlay/mobile breakpoints keep CSS transform slides — don't fight them with width spring.
   if (!motionEnabled) {
@@ -96,6 +105,7 @@ export function MotionPanelShell({
           width: "auto",
           minWidth: 0,
           overflow: "hidden",
+          position: "relative",
           ...(side === "right" ? { borderLeft: "none", boxShadow: "none" } : null),
         }}
       >
@@ -128,7 +138,6 @@ export function MotionPanelShell({
       initial={false}
       animate={{
         width: open ? contentWidth : 0,
-        opacity: open ? 1 : 0,
       }}
       transition={transition}
       style={{
@@ -138,12 +147,23 @@ export function MotionPanelShell({
         minWidth: 0,
         overflow: "hidden",
         height: "100%",
-        willChange: isResizing ? "auto" : "width, opacity",
+        position: "relative",
+        // Avoid painting offscreen content while closed.
+        pointerEvents: open ? "auto" : "none",
+        willChange: isResizing ? "auto" : "width",
       }}
     >
+      {/*
+        Codex inner layer: fixed target width. Outer clips via overflow:hidden while springing.
+        This prevents FileExplorer / sidebar lists from remeasuring on every animation frame.
+      */}
       <div
         className="motion-panel-shell-inner"
         style={{
+          position: "absolute",
+          top: 0,
+          bottom: 0,
+          [side]: 0,
           width: contentWidth,
           minWidth: contentWidth,
           height: "100%",
@@ -152,6 +172,8 @@ export function MotionPanelShell({
           minHeight: 0,
           overflow: "hidden",
           contain: "layout paint",
+          transform: "translateZ(0)",
+          backfaceVisibility: "hidden",
         }}
       >
         {children}

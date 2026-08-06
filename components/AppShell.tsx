@@ -319,17 +319,53 @@ export function AppShell() {
     setThreadSummaryOpen((value) => !value);
   }, []);
   // Track center-column width for Codex displayMode math (mainContentTargetWidth).
+  // IMPORTANT: never setState on every RO frame while side panels spring their width —
+  // that re-renders AppShell every animation frame and is the main jank source.
   const centerColumnRef = useRef<HTMLDivElement>(null);
   const [centerColumnWidth, setCenterColumnWidth] = useState(0);
+  const centerWidthRafRef = useRef<number | null>(null);
+  const lastCenterWidthRef = useRef(0);
   useEffect(() => {
     const node = centerColumnRef.current;
     if (!node || typeof ResizeObserver === "undefined") return;
-    const update = () => setCenterColumnWidth(node.getBoundingClientRect().width);
-    update();
-    const ro = new ResizeObserver(update);
+
+    const publish = (width: number) => {
+      // Ignore sub-pixel noise from spring frames.
+      if (Math.abs(width - lastCenterWidthRef.current) < 2) return;
+      lastCenterWidthRef.current = width;
+      setCenterColumnWidth(width);
+    };
+
+    const schedule = () => {
+      if (centerWidthRafRef.current != null) return;
+      centerWidthRafRef.current = window.requestAnimationFrame(() => {
+        centerWidthRafRef.current = null;
+        publish(node.getBoundingClientRect().width);
+      });
+    };
+
+    // Only live-track while summary is open (contentShift depends on it).
+    // While closed, a single sample is enough and panel springs stay smooth.
+    publish(node.getBoundingClientRect().width);
+    if (!threadSummaryVisible) {
+      return () => {
+        if (centerWidthRafRef.current != null) {
+          window.cancelAnimationFrame(centerWidthRafRef.current);
+          centerWidthRafRef.current = null;
+        }
+      };
+    }
+
+    const ro = new ResizeObserver(schedule);
     ro.observe(node);
-    return () => ro.disconnect();
-  }, []);
+    return () => {
+      ro.disconnect();
+      if (centerWidthRafRef.current != null) {
+        window.cancelAnimationFrame(centerWidthRafRef.current);
+        centerWidthRafRef.current = null;
+      }
+    };
+  }, [threadSummaryVisible]);
   const summaryDisplayMode = useMemo(
     () => getSummaryDisplayMode(centerColumnWidth),
     [centerColumnWidth],
@@ -1221,26 +1257,45 @@ export function AppShell() {
             </div>
           )}
 
-          {/* When the right panel is open, the pin sits on the center toolbar trailing edge.
-              When closed, it sits just left of the fixed "show right panel" button. */}
-          {rightPanelOpen && (
-            <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", flexShrink: 0 }}>
+          {/* Trailing chrome in document flow so it cannot vanish behind the right panel. */}
+          <div
+            className="codex-right-panel-controls"
+            style={{
+              marginLeft: "auto",
+              display: rightPanelMaximized ? "none" : "flex",
+              alignItems: "center",
+              flexShrink: 0,
+            }}
+          >
+            <button
+              type="button"
+              className="app-toolbar-btn"
+              data-active={threadSummaryVisible}
+              title={translate("summary.toggle")}
+              aria-label={translate("summary.toggle")}
+              aria-pressed={threadSummaryVisible}
+              onClick={toggleThreadSummary}
+            >
+              <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                <path d="M5.693 11.056a2.71 2.71 0 0 1 2.432 2.694l-.015.277a2.71 2.71 0 0 1-2.694 2.432l-.276-.015a2.71 2.71 0 0 1-2.418-2.417l-.014-.277a2.709 2.709 0 0 1 2.708-2.708l.277.014Zm-.277 1.316a1.378 1.378 0 1 0 0 2.757 1.378 1.378 0 0 0 0-2.757Zm11.384.727a.665.665 0 0 1 0 1.302l-.134.014h-5.833a.665.665 0 0 1 0-1.33h5.833l.135.014ZM5.693 3.556A2.71 2.71 0 0 1 8.125 6.25l-.015.277A2.71 2.71 0 0 1 5.416 8.96l-.276-.015a2.71 2.71 0 0 1-2.418-2.417l-.014-.277a2.709 2.709 0 0 1 2.708-2.708l.277.014Zm-.277 1.316a1.378 1.378 0 1 0 .001 2.757 1.378 1.378 0 0 0-.001-2.757Zm11.384.727a.665.665 0 0 1 0 1.302l-.134.014h-5.833a.665.665 0 0 1 0-1.33h5.833l.135.014Z" />
+              </svg>
+            </button>
+            {!rightPanelOpen && (
               <button
                 type="button"
                 className="app-toolbar-btn"
-                data-active={threadSummaryVisible}
-                title={translate("summary.toggle")}
-                aria-label={translate("summary.toggle")}
-                aria-pressed={threadSummaryVisible}
-                onClick={toggleThreadSummary}
+                onClick={toggleRightPanel}
+                title={`${translate("layout.showRightPanel")} (Ctrl+Alt+B)`}
+                aria-label={translate("layout.showRightPanel")}
+                aria-pressed={false}
               >
-                {/* Codex thread-summary-panel HeaderButton icon (two dots + list lines) */}
-                <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                  <path d="M5.693 11.056a2.71 2.71 0 0 1 2.432 2.694l-.015.277a2.71 2.71 0 0 1-2.694 2.432l-.276-.015a2.71 2.71 0 0 1-2.418-2.417l-.014-.277a2.709 2.709 0 0 1 2.708-2.708l.277.014Zm-.277 1.316a1.378 1.378 0 1 0 0 2.757 1.378 1.378 0 0 0 0-2.757Zm11.384.727a.665.665 0 0 1 0 1.302l-.134.014h-5.833a.665.665 0 0 1 0-1.33h5.833l.135.014ZM5.693 3.556A2.71 2.71 0 0 1 8.125 6.25l-.015.277A2.71 2.71 0 0 1 5.416 8.96l-.276-.015a2.71 2.71 0 0 1-2.418-2.417l-.014-.277a2.709 2.709 0 0 1 2.708-2.708l.277.014Zm-.277 1.316a1.378 1.378 0 1 0 .001 2.757 1.378 1.378 0 0 0-.001-2.757Zm11.384.727a.665.665 0 0 1 0 1.302l-.134.014h-5.833a.665.665 0 0 1 0-1.33h5.833l.135.014Z" />
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <rect x="3.5" y="4" width="17" height="16" rx="3" />
+                  <path d="M15 4v16" />
                 </svg>
               </button>
-            </div>
-          )}
+            )}
+          </div>
 
           {/* Session statistics moved to the composer footer. The existing
               session panel remains available and is opened from that footer. */}
@@ -1608,53 +1663,8 @@ export function AppShell() {
         />
       </MotionPanelShell>
     </div>
-    {/* Main-shell actions shown only while the right panel is closed. Open-panel
-        actions live in RightPanelTabBar's Codex-style after-list. */}
-    {!rightPanelOpen && (
-      <div
-        className="codex-right-panel-controls"
-        style={{
-        position: "fixed",
-        top: 6,
-        right: "calc(10px + env(safe-area-inset-right))",
-        zIndex: 320,
-        display: "flex",
-        alignItems: "center",
-        gap: 2,
-        pointerEvents: "none",
-      }}
-    >
-          {/* Right panel collapsed: summary + show-panel, both toolbar chrome. */}
-          <button
-            type="button"
-            className="app-toolbar-btn"
-            data-active={threadSummaryVisible}
-            title={translate("summary.toggle")}
-            aria-label={translate("summary.toggle")}
-            aria-pressed={threadSummaryVisible}
-            onClick={toggleThreadSummary}
-            style={{ pointerEvents: "auto" }}
-          >
-            <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-              <path d="M5.693 11.056a2.71 2.71 0 0 1 2.432 2.694l-.015.277a2.71 2.71 0 0 1-2.694 2.432l-.276-.015a2.71 2.71 0 0 1-2.418-2.417l-.014-.277a2.709 2.709 0 0 1 2.708-2.708l.277.014Zm-.277 1.316a1.378 1.378 0 1 0 0 2.757 1.378 1.378 0 0 0 0-2.757Zm11.384.727a.665.665 0 0 1 0 1.302l-.134.014h-5.833a.665.665 0 0 1 0-1.33h5.833l.135.014ZM5.693 3.556A2.71 2.71 0 0 1 8.125 6.25l-.015.277A2.71 2.71 0 0 1 5.416 8.96l-.276-.015a2.71 2.71 0 0 1-2.418-2.417l-.014-.277a2.709 2.709 0 0 1 2.708-2.708l.277.014Zm-.277 1.316a1.378 1.378 0 1 0 .001 2.757 1.378 1.378 0 0 0-.001-2.757Zm11.384.727a.665.665 0 0 1 0 1.302l-.134.014h-5.833a.665.665 0 0 1 0-1.33h5.833l.135.014Z" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            className="app-toolbar-btn"
-            onClick={toggleRightPanel}
-            title={`${translate("layout.showRightPanel")} (Ctrl+Alt+B)`}
-            aria-label={translate("layout.showRightPanel")}
-            aria-pressed={false}
-            style={{ pointerEvents: "auto" }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <rect x="3.5" y="4" width="17" height="16" rx="3" />
-              <path d="M15 4v16" />
-            </svg>
-        </button>
-      </div>
-    )}
+    {/* Closed-panel show/summary buttons live in the center toolbar trailing slot.
+        Open-panel maximize/close live in RightPanelTabBar after-list. */}
 
     {modelsConfigOpen && <ModelsConfig onClose={() => { setModelsConfigOpen(false); setModelsRefreshKey((k) => k + 1); }} />}
     {projectTrustDialogOpen && projectTrustCwd && (

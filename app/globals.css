@@ -1956,6 +1956,15 @@ span.linenumber {
   margin-inline-start: 1px;
   background: var(--bg);
 }
+/* Center-toolbar trailing chrome (summary / show-panel). Kept in document flow
+   so open/close never leaves an empty fixed slot or clips under the right panel. */
+.codex-right-panel-controls {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  height: 30px;
+  gap: 0;
+}
 .right-panel-tabbar-actions::before {
   content: "";
   position: absolute;
