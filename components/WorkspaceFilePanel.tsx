@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { getFileName } from "@/lib/file-paths";
 import { useI18n } from "@/hooks/useI18n";
 import type { RightPanelTab, RightPanelTabAction } from "@/lib/right-panel-tabs";
+import { CODEX_PANEL_SPRING_MS } from "./MotionPanelShell";
 import { FileExplorer, type FileExplorerHandle } from "./FileExplorer";
 import { FileViewer } from "./FileViewer";
 import { RightPanelHome } from "./RightPanelHome";
@@ -75,8 +76,8 @@ export function WorkspaceFilePanel(props: WorkspaceFilePanelProps) {
       setContentMounted(true);
       return;
     }
-    // Keep chrome mounted through the Codex spring close (~500ms).
-    const timer = window.setTimeout(() => setContentMounted(false), 520);
+    // Keep chrome mounted through the Codex spring close.
+    const timer = window.setTimeout(() => setContentMounted(false), CODEX_PANEL_SPRING_MS);
     return () => window.clearTimeout(timer);
   }, [open]);
 

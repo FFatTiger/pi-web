@@ -12,7 +12,7 @@ import { ProjectTrustDialog } from "./ProjectTrustDialog";
 import { WorkspaceFilePanel } from "./WorkspaceFilePanel";
 import { SideChatPanel } from "./SideChatPanel";
 import { ThreadSummaryPanel } from "./ThreadSummaryPanel";
-import { MotionPanelShell } from "./MotionPanelShell";
+import { CODEX_PANEL_SPRING_MS, MotionPanelShell } from "./MotionPanelShell";
 import { useTheme } from "@/hooks/useTheme";
 import { useI18n } from "@/hooks/useI18n";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -183,7 +183,8 @@ export function AppShell() {
     growthDirection: "left",
     maxWidth: RIGHT_PANEL_MAX_WIDTH,
     minWidth: RIGHT_PANEL_MIN_WIDTH,
-    storageKey: "app-shell:right-panel-width:v3",
+    // Ratio only — no migration from older pixel keys.
+    storageKey: "app-shell:right-panel-width-ratio",
     persistenceMode: "ratio",
     widthRef: rightPanelWidthRef,
   });
@@ -211,7 +212,7 @@ export function AppShell() {
     const timer = window.setTimeout(() => {
       reclampSidebarWidth();
       reclampRightPanelWidth();
-    }, 520);
+    }, CODEX_PANEL_SPRING_MS);
     return () => window.clearTimeout(timer);
   }, [reclampRightPanelWidth, reclampSidebarWidth, rightPanelOpen]);
   const chatInputRef = useRef<ChatInputHandle | null>(null);

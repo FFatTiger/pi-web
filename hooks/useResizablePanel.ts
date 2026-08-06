@@ -59,6 +59,18 @@ function writeStoredValue(storageKey: string, value: number): void {
   }
 }
 
+function clearStoredValue(storageKey: string): void {
+  try {
+    window.localStorage.removeItem(storageKey);
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+function isValidRatio(value: number): boolean {
+  return value >= 0 && value <= 1;
+}
+
 export function useResizablePanel(options: UseResizablePanelOptions) {
   const {
     ariaLabel,
@@ -250,9 +262,12 @@ export function useResizablePanel(options: UseResizablePanelOptions) {
     let candidate = getDefaultWidth?.() ?? defaultWidth;
     if (storedValue !== null) {
       if (persistenceMode === "ratio") {
-        if (storedValue >= 0 && storedValue <= 1) {
+        if (isValidRatio(storedValue)) {
           widthRatioRef.current = storedValue;
           candidate = getWidthFromRatio(storedValue);
+        } else {
+          // Ratio keys only accept 0..1; drop garbage instead of soft-falling back forever.
+          clearStoredValue(storageKey);
         }
       } else {
         candidate = storedValue;
@@ -261,8 +276,9 @@ export function useResizablePanel(options: UseResizablePanelOptions) {
     const restoredWidth = commitWidth(candidate, { persist: false });
     if (persistenceMode === "ratio") {
       widthRatioRef.current = getWidthRatio(restoredWidth);
-    }
-    if (storedValue !== null && (persistenceMode === "ratio" || storedValue !== restoredWidth)) {
+      // Rewrite a clean ratio after restore, or seed one after discarding garbage.
+      if (storedValue !== null) persistWidth(restoredWidth);
+    } else if (storedValue !== null && storedValue !== restoredWidth) {
       persistWidth(restoredWidth);
     }
   }, [commitWidth, defaultWidth, getDefaultWidth, getWidthFromRatio, getWidthRatio, persistenceMode, persistWidth, storageKey]);

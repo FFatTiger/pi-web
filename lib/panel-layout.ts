@@ -12,6 +12,8 @@ export const RIGHT_PANEL_MAX_WIDTH = 1200;
 
 const COMPACT_CHAT_MIN_WIDTH = 320;
 const DESKTOP_CHAT_MIN_WIDTH = 420;
+/** Reserve for left chrome when sizing the default right panel on first open. */
+const RIGHT_PANEL_DEFAULT_LEFT_RESERVE = 352;
 
 export function clampPanelWidth(width: number, minWidth: number, maxWidth: number): number {
   const finiteWidth = Number.isFinite(width) ? width : minWidth;
@@ -20,7 +22,8 @@ export function clampPanelWidth(width: number, minWidth: number, maxWidth: numbe
 }
 
 export function getDefaultRightPanelWidth(viewportWidth: number): number {
-  return clampPanelWidth(RIGHT_PANEL_DEFAULT_WIDTH, RIGHT_PANEL_MIN_WIDTH, Math.min(640, viewportWidth - 352));
+  const available = Math.max(RIGHT_PANEL_MIN_WIDTH, viewportWidth - RIGHT_PANEL_DEFAULT_LEFT_RESERVE);
+  return clampPanelWidth(RIGHT_PANEL_DEFAULT_WIDTH, RIGHT_PANEL_MIN_WIDTH, available);
 }
 
 export function getSidebarMaxWidth(options: {

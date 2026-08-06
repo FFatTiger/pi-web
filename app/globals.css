@@ -1974,15 +1974,6 @@ span.linenumber {
   pointer-events: none;
   background: linear-gradient(to right, transparent, var(--bg));
 }
-.right-panel-changes-button {
-  width: auto;
-  min-width: 30px;
-  padding-inline: 8px;
-  color: var(--text-muted);
-}
-.right-panel-changes-button[data-active="true"] {
-  color: var(--accent);
-}
 /* Portaled to document.body so right-panel overflow:hidden cannot clip it */
 .right-panel-plus-menu {
   min-width: 240px;

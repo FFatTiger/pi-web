@@ -19,11 +19,8 @@
 
 export type SummaryDisplayMode = "overlay" | "shift" | "gutter";
 
-/** Actual chat content column max width used by ChatWindow. */
+/** Chat content column max width used by ChatWindow and summary side-gutter math. */
 export const CHAT_CONTENT_MAX_WIDTH = 820;
-
-/** Codex reference content width used for side-gutter math. */
-export const CODEX_THREAD_CONTENT_WIDTH = CHAT_CONTENT_MAX_WIDTH;
 
 /** Codex summary panel width (Root style.width). */
 export const CODEX_SUMMARY_PANEL_WIDTH = 300;
@@ -36,7 +33,7 @@ const SHIFT_SIDE_MAX = 400;
 
 export function getSummarySideWidth(
   mainContentWidth: number,
-  contentWidth = CODEX_THREAD_CONTENT_WIDTH,
+  contentWidth = CHAT_CONTENT_MAX_WIDTH,
 ): number {
   return (mainContentWidth - contentWidth) / 2;
 }

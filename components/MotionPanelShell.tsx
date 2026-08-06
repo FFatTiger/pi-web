@@ -4,22 +4,23 @@ import { motion, useReducedMotion } from "framer-motion";
 import type { CSSProperties, ReactNode } from "react";
 
 /**
- * Codex-aligned split-panel shell (from app.asar `k3r` / `S3r`):
+ * Codex-aligned split-panel shell:
  *
- *   outer  → spring-animates `width`  { type:"spring", duration:0.5, bounce:0.1 }
+ *   outer  → spring-animates `width`
  *   inner  → fixed target width (no per-frame content reflow)
  *
  * Why not pure CSS width transition?
  * - CSS + React reclamp reflows both the panel tree and the chat column every frame.
  * Why not only transform?
  * - Split layout must reserve/release horizontal space; transform alone leaves a blank strip.
- *
- * Framer Motion updates width on the compositor-driven style path without React setState.
- * Inner content keeps a stable pixel width so FileExplorer/Sidebar do not remeasure each frame.
  */
+export const CODEX_PANEL_SPRING_DURATION_S = 0.5;
+/** Wall-clock budget for post-spring cleanup (slightly above spring duration). */
+export const CODEX_PANEL_SPRING_MS = 520;
+
 export const CODEX_PANEL_SPRING = {
   type: "spring" as const,
-  duration: 0.5,
+  duration: CODEX_PANEL_SPRING_DURATION_S,
   bounce: 0.1,
 };
 
@@ -119,7 +120,6 @@ export function MotionPanelShell({
             flexDirection: "column",
             minHeight: 0,
             overflow: "hidden",
-            contain: "layout paint",
           }}
         >
           {children}
@@ -150,11 +150,10 @@ export function MotionPanelShell({
         position: "relative",
         // Avoid painting offscreen content while closed.
         pointerEvents: open ? "auto" : "none",
-        willChange: isResizing ? "auto" : "width",
       }}
     >
       {/*
-        Codex inner layer: fixed target width. Outer clips via overflow:hidden while springing.
+        Inner layer: fixed target width. Outer clips via overflow:hidden while springing.
         This prevents FileExplorer / sidebar lists from remeasuring on every animation frame.
       */}
       <div
@@ -171,9 +170,6 @@ export function MotionPanelShell({
           flexDirection: "column",
           minHeight: 0,
           overflow: "hidden",
-          contain: "layout paint",
-          transform: "translateZ(0)",
-          backfaceVisibility: "hidden",
         }}
       >
         {children}
