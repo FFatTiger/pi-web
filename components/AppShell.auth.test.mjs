@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const source = readFileSync(new URL("./AppShell.tsx", import.meta.url), "utf8");
+const tabBar = readFileSync(new URL("./RightPanelTabBar.tsx", import.meta.url), "utf8");
 
 const sidebarContentStart = source.indexOf("const sidebarContent = (");
 const sidebarContentEnd = source.indexOf("return (", sidebarContentStart + 1);
@@ -41,21 +42,14 @@ test("session stats are no longer duplicated in the top bar", () => {
   assert.doesNotMatch(topBarBlock, /\{fmt\(t\.input\)\}/);
 });
 
-test("fixed right corner uses Codex expand/close cluster for the RIGHT panel", () => {
-  const groupStart = source.indexOf("{/* Codex right-panel chrome: floating expand + close cluster");
-  assert.ok(groupStart >= 0, "top-right right-panel cluster marker missing");
-  const groupEnd = source.indexOf("{modelsConfigOpen &&", groupStart);
-  assert.ok(groupEnd > groupStart, "top-right control group end missing");
-  const fixedRegion = source.slice(groupStart, groupEnd);
-  assert.equal(fixedRegion.includes("<AuthControls"), false);
-  assert.match(fixedRegion, /codex-panel-control-cluster/);
-  assert.match(fixedRegion, /toggleRightPanelMaximized/);
-  assert.match(fixedRegion, /closeRightPanel/);
-  assert.match(fixedRegion, /layout\.expandPanel/);
-  assert.match(fixedRegion, /layout\.closePanel/);
-  assert.doesNotMatch(fixedRegion, /handleSidebarToggle/);
-  assert.doesNotMatch(fixedRegion, /toggleSideChatPanel/);
-  assert.doesNotMatch(fixedRegion, /toggleExplorerPanel/);
+test("right panel actions use the Codex tab-strip after-list", () => {
+  assert.match(tabBar, /right-panel-tabbar-actions/);
+  assert.match(tabBar, /onToggleMaximized/);
+  assert.match(tabBar, /onClosePanel/);
+  assert.match(tabBar, /layout\.expandPanel/);
+  assert.match(tabBar, /layout\.closePanel/);
+  assert.match(tabBar, /data-app-shell-tab-controller="right"/);
+  assert.doesNotMatch(source, /codex-panel-control-cluster/);
 });
 
 test("Side Chat open state is remembered per main session", () => {

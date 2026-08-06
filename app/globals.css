@@ -1358,13 +1358,6 @@ span.linenumber {
   display: none;
 }
 
-/* Codex right-panel floating controls: plain toolbar row (no capsule chrome). */
-.codex-panel-control-cluster {
-  display: inline-flex;
-  align-items: center;
-  gap: 0;
-}
-
 /* Codex ThreadSummaryPanel / pinned summary */
 .thread-summary-panel {
   /* Floating content of the center thread column (Codex Root/Content). */
@@ -1702,7 +1695,8 @@ span.linenumber {
   mask-repeat: no-repeat;
 }
 
-/* Desktop sidebar: animate width */
+/* Desktop sidebar shell is driven by MotionPanelShell (spring width).
+   CSS only provides static chrome; do not also transition width here. */
 @media (min-width: 641px) {
   .sidebar-overlay-backdrop {
     display: none !important;
@@ -1710,24 +1704,8 @@ span.linenumber {
   .sidebar-container {
     position: relative;
     overflow: hidden;
-    transition: width 0.2s ease, min-width 0.2s ease;
   }
-  .sidebar-container.sidebar-open {
-    width: var(--sidebar-width, var(--sidebar-default-width, 275px));
-    min-width: var(--sidebar-width, var(--sidebar-default-width, 275px));
-  }
-  .sidebar-container.sidebar-closed {
-    width: 0;
-    min-width: 0;
-    border-right: none !important;
-  }
-  /* keep inner content at fixed width so it doesn't reflow during animation */
-  .sidebar-container > * {
-    width: var(--sidebar-width, var(--sidebar-default-width, 275px));
-    min-width: var(--sidebar-width, var(--sidebar-default-width, 275px));
-  }
-  .sidebar-container.sidebar-resizing,
-  .sidebar-container.sidebar-resizing > * {
+  .sidebar-container.sidebar-resizing {
     transition: none !important;
   }
 }
@@ -1838,7 +1816,8 @@ span.linenumber {
   opacity: 0.7;
 }
 
-/* Codex multi-tab chip bar — match center app-top-toolbar height (46px) */
+/* Codex app shell tab strip: 46px toolbar with a scrollable tab viewport and
+   a non-scrolling after-list action area. */
 .right-panel-tabbar {
   display: flex;
   align-items: center;
@@ -1846,78 +1825,103 @@ span.linenumber {
   box-sizing: border-box;
   height: calc(46px + env(safe-area-inset-top));
   min-height: calc(46px + env(safe-area-inset-top));
-  /* Reserve space for the fixed right-panel expand/close cluster only (no pin here). */
-  padding: env(safe-area-inset-top) 72px 0 10px;
+  padding: env(safe-area-inset-top) 8px 0;
   border-bottom: 1px solid var(--border);
   background: var(--bg);
-  gap: 6px;
-  overflow: visible;
+  gap: 3px;
+  overflow: hidden;
   position: relative;
   z-index: 5;
+  contain: layout paint;
 }
 .right-panel-tabbar-scroll {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 3px;
   flex: 1;
   min-width: 0;
+  height: 100%;
   overflow-x: auto;
   overflow-y: hidden;
+  scroll-padding-inline: 4px;
   scrollbar-width: none;
 }
 .right-panel-tabbar-scroll::-webkit-scrollbar { display: none; }
 .right-panel-tab-chip {
-  display: inline-flex;
+  position: relative;
+  display: flex;
   align-items: center;
-  max-width: 180px;
+  flex: 1 1 132px;
+  min-width: 90px;
+  max-width: 160px;
   height: 28px;
-  padding: 0 4px 0 10px;
-  border: 1px solid transparent;
-  border-radius: 999px;
-  background: var(--bg-hover);
+  padding: 0 8px;
+  border: none;
+  border-radius: var(--radius-md, 8px);
+  background: transparent;
   color: var(--text-muted);
-  flex-shrink: 0;
+  overflow: hidden;
+  flex-shrink: 1;
+  transition: color 0.12s ease, background 0.12s ease;
+}
+.right-panel-tab-chip:hover,
+.right-panel-tab-chip.is-active {
+  background: color-mix(in srgb, var(--text) 5%, var(--bg));
 }
 .right-panel-tab-chip.is-active {
-  background: color-mix(in srgb, var(--bg-selected) 88%, var(--bg));
-  border-color: var(--border);
   color: var(--text);
 }
 .right-panel-tab-chip-main {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
-  max-width: 140px;
+  width: 100%;
   height: 100%;
-  padding: 0;
+  padding: 0 14px 0 0;
   border: none;
   background: transparent;
   color: inherit;
   cursor: pointer;
+  text-align: left;
 }
 .right-panel-tab-chip-label {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
-  font-weight: 500;
+  font-size: 14px;
+  font-weight: 400;
 }
 .right-panel-tab-chip-close {
+  position: absolute;
+  inset-inline-end: 4px;
+  top: 50%;
+  z-index: 2;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 20px;
   height: 20px;
-  margin-left: 2px;
+  padding: 0;
   border: none;
   border-radius: 999px;
   background: transparent;
   color: var(--text-dim);
   cursor: pointer;
+  transform: translateY(-50%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease, color 0.12s ease, background 0.12s ease;
+}
+.right-panel-tab-chip:hover .right-panel-tab-chip-close,
+.right-panel-tab-chip:focus-within .right-panel-tab-chip-close,
+.right-panel-tab-chip.is-active .right-panel-tab-chip-close {
+  opacity: 1;
+  pointer-events: auto;
 }
 .right-panel-tab-chip-close:hover {
-  background: var(--bg-selected);
+  background: color-mix(in srgb, var(--text) 14%, transparent);
   color: var(--text);
 }
 .right-panel-tabbar-plus-wrap {
@@ -1928,37 +1932,47 @@ span.linenumber {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
+  padding: 0;
   border: none;
-  border-radius: 999px;
-  background: var(--bg-hover);
+  border-radius: var(--radius-md, 8px);
+  background: transparent;
   color: var(--text-muted);
   cursor: pointer;
 }
 .right-panel-tabbar-plus:hover,
 .right-panel-tabbar-plus[aria-expanded="true"] {
-  background: var(--bg-selected);
-  color: var(--text);
-}
-.right-panel-tabbar-explorer-toggle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  margin-left: 2px;
-  border: none;
-  border-radius: 999px;
   background: var(--bg-hover);
-  color: var(--text-muted);
-  cursor: pointer;
-  flex-shrink: 0;
-}
-.right-panel-tabbar-explorer-toggle:hover,
-.right-panel-tabbar-explorer-toggle.is-active {
-  background: var(--bg-selected);
   color: var(--text);
+}
+.right-panel-tabbar-actions {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  height: 100%;
+  margin-inline-start: 1px;
+  background: var(--bg);
+}
+.right-panel-tabbar-actions::before {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: -24px;
+  width: 24px;
+  pointer-events: none;
+  background: linear-gradient(to right, transparent, var(--bg));
+}
+.right-panel-changes-button {
+  width: auto;
+  min-width: 30px;
+  padding-inline: 8px;
+  color: var(--text-muted);
+}
+.right-panel-changes-button[data-active="true"] {
+  color: var(--accent);
 }
 /* Portaled to document.body so right-panel overflow:hidden cannot clip it */
 .right-panel-plus-menu {
@@ -2002,42 +2016,21 @@ span.linenumber {
   color: var(--text-muted);
 }
 
-/* Wide desktop file panel: participate in the split layout. */
+/* Wide desktop right panel shell is driven by MotionPanelShell (Codex spring).
+   CSS keeps maximize/chrome rules only — width open/close is motion-driven. */
 @media (min-width: 960px) {
   .right-panel-container {
     overflow: hidden;
-    transition: width 0.2s ease, min-width 0.2s ease;
     flex-shrink: 0;
   }
-  .right-panel-container.right-panel-open {
-    width: var(--right-panel-width, clamp(360px, 42vw, 640px));
-    min-width: 300px;
-  }
-  /* Codex expand panel (matches codex app full-width mode): the center chat
-     column collapses to width:0 + overflow:hidden (set inline in AppShell as
-     flex:none;width:0), and the panel takes the whole main row right of the
-     left sidebar via flex:1. Nothing overlaps the panel's top-right controls. */
   .right-panel-container.right-panel-open.right-panel-maximized {
-    width: auto;
-    min-width: 0;
+    width: auto !important;
+    min-width: 0 !important;
     flex: 1 1 auto;
-  }
-  .right-panel-container.right-panel-closed {
-    width: 0;
-    min-width: 0;
     border-left: none !important;
+    box-shadow: none !important;
   }
-  /* keep inner content at fixed width so it doesn't reflow during animation */
-  .right-panel-container > * {
-    width: var(--right-panel-width, clamp(360px, 42vw, 640px));
-    min-width: 300px;
-  }
-  .right-panel-container.right-panel-open.right-panel-maximized > * {
-    width: 100%;
-    min-width: 0;
-  }
-  .right-panel-container.right-panel-resizing,
-  .right-panel-container.right-panel-resizing > * {
+  .right-panel-container.right-panel-resizing {
     transition: none !important;
   }
 }
@@ -2055,7 +2048,7 @@ span.linenumber {
     background: rgba(0, 0, 0, 0.24);
     opacity: 0;
     pointer-events: none;
-    transition: opacity 0.2s ease;
+    transition: opacity 0.16s ease;
   }
   .right-panel-overlay-backdrop.is-open {
     opacity: 1;
@@ -2071,7 +2064,15 @@ span.linenumber {
     min-width: 300px;
     overflow: hidden;
     box-shadow: -12px 0 32px rgba(0, 0, 0, 0.18);
-    transition: transform 0.2s ease;
+    /* Overlay breakpoints keep transform slide (not width spring). */
+    transition: transform 0.5s cubic-bezier(0.23, 1, 0.32, 1), opacity 0.5s cubic-bezier(0.23, 1, 0.32, 1);
+    will-change: transform;
+  }
+  .right-panel-container.right-panel-maximized {
+    width: calc(100vw - env(safe-area-inset-left) - env(safe-area-inset-right));
+    min-width: 0;
+    border-left: none !important;
+    box-shadow: none;
   }
   .right-panel-container.right-panel-open {
     transform: translateX(0);
@@ -2099,7 +2100,8 @@ span.linenumber {
     width: 280px;
     max-width: 85vw;
     height: var(--app-viewport-height, 100dvh);
-    transition: transform 0.25s ease, box-shadow 0.25s ease;
+    transition: transform 0.16s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.16s ease;
+    will-change: transform;
   }
   .sidebar-container.sidebar-open {
     transform: translateX(0);
@@ -2116,7 +2118,8 @@ span.linenumber {
     height: var(--app-viewport-height, 100dvh);
     z-index: 250;
     overflow: hidden;
-    transition: transform 0.2s ease;
+    transition: transform 0.16s cubic-bezier(0.2, 0.8, 0.2, 1);
+    will-change: transform;
   }
   .right-panel-container.right-panel-open {
     width: auto;
@@ -2169,4 +2172,132 @@ span.linenumber {
   select {
     font-size: 16px !important;
   }
+}
+
+/* Codex-style file tree row: spacing | icon | content | decoration | git | action */
+.file-tree-root {
+  min-height: 100%;
+}
+.file-tree-row {
+  --file-tree-depth: 0;
+  --file-tree-indent: 14px;
+  --file-tree-git-lane-width: 20px;
+  --file-tree-action-lane-width: 72px;
+  position: relative;
+  display: grid;
+  grid-template-columns:
+    auto
+    28px
+    minmax(0, 1fr)
+    auto
+    var(--file-tree-git-lane-width)
+    var(--file-tree-action-lane-width);
+  align-items: center;
+  column-gap: 4px;
+  min-height: 24px;
+  padding-right: 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  user-select: none;
+}
+.file-tree-spacing {
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+}
+.file-tree-spacing-item {
+  width: var(--file-tree-indent);
+  flex-shrink: 0;
+}
+.file-tree-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.file-tree-content {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text);
+}
+.file-tree-decoration {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 14px;
+  gap: 4px;
+}
+.file-tree-upload-dot-wrap,
+.file-tree-git-directory-dot,
+.file-tree-upload-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.file-tree-upload-dot,
+.file-tree-git-directory-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+.file-tree-upload-dot {
+  background: #3b82f6;
+}
+.file-tree-git-directory-dot {
+  background: #d6a84b;
+}
+.file-tree-git-lane {
+  width: var(--file-tree-git-lane-width);
+  min-width: var(--file-tree-git-lane-width);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.file-tree-git-status {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+}
+.file-tree-action {
+  width: var(--file-tree-action-lane-width);
+  min-width: var(--file-tree-action-lane-width);
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  opacity: 0;
+  pointer-events: none;
+}
+.file-tree-action.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+.file-tree-mention-action,
+.file-tree-download-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-panel);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-decoration: none;
+}
+.file-tree-mention-action {
+  color: var(--accent);
+}
+.file-tree-loading {
+  color: var(--text-dim);
 }

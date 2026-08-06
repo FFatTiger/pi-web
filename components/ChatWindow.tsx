@@ -24,6 +24,7 @@ import {
   restoreScrollTop,
   VISIBLE_PAGE_SIZE,
 } from "@/lib/chat-lazy-load";
+import { CHAT_CONTENT_MAX_WIDTH } from "@/lib/thread-summary-layout";
 
 interface Props {
   session: SessionInfo | null;
@@ -526,7 +527,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
             transition: "transform 0.3s cubic-bezier(0.23, 1, 0.32, 1)",
           }}
         >
-          <div style={{ maxWidth: 820, margin: "0 auto" }}>
+          <div style={{ maxWidth: CHAT_CONTENT_MAX_WIDTH, margin: "0 auto" }}>
             <NoticeShelf notices={notices} floating align="right" />
           </div>
         </div>
@@ -546,7 +547,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
             transform: contentShift ? `translateX(${contentShift}px)` : undefined,
             transition: "transform 0.3s cubic-bezier(0.23, 1, 0.32, 1)",
           }}>
-            <div style={{ width: "100%", minWidth: 0, maxWidth: 820, margin: "0 auto" }}>
+            <div style={{ width: "100%", minWidth: 0, maxWidth: CHAT_CONTENT_MAX_WIDTH, margin: "0 auto" }}>
               <ExtensionWidgets widgets={aboveEditorWidgets} />
 
             {(() => {
@@ -822,7 +823,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
               </button>
             </div>
             <div style={{ padding: `0 ${CHAT_COLUMN_PADDING}px` }}>
-              <div style={{ maxWidth: 820, margin: "0 auto" }}>
+              <div style={{ maxWidth: CHAT_CONTENT_MAX_WIDTH, margin: "0 auto" }}>
                 <ExtensionWidgets widgets={belowEditorWidgets} />
               </div>
             </div>
