@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useGlobalKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { SessionSidebar } from "./SessionSidebar";
@@ -32,6 +32,10 @@ import {
   SIDEBAR_MAX_WIDTH,
   SIDEBAR_MIN_WIDTH,
 } from "@/lib/panel-layout";
+import {
+  getSummaryContentShift,
+  getSummaryDisplayMode,
+} from "@/lib/thread-summary-layout";
 import {
   closeRightPanelTab,
   emptyRightPanelTabs,
@@ -257,9 +261,38 @@ export function AppShell() {
   // Session stats popover still uses top panel positioning (opened from composer).
   const [activeTopPanel, setActiveTopPanel] = useState<"session" | null>(null);
   const [topPanelPos, setTopPanelPos] = useState<{ top: number; left: number; width: number } | null>(null);
-  // Codex pinned summary (thread environment / actions).
+  // Codex pinned summary: toolbar toggles open/close. Layout mode is width-driven:
+  // overlay / shift / gutter (see lib/thread-summary-layout.ts).
   const [threadSummaryOpen, setThreadSummaryOpen] = useState(false);
-  const [threadSummaryPinned, setThreadSummaryPinned] = useState(false);
+  const threadSummaryVisible = threadSummaryOpen;
+  const toggleThreadSummary = useCallback(() => {
+    setThreadSummaryOpen((value) => !value);
+  }, []);
+  // Track center-column width for Codex displayMode math (mainContentTargetWidth).
+  const centerColumnRef = useRef<HTMLDivElement>(null);
+  const [centerColumnWidth, setCenterColumnWidth] = useState(0);
+  useEffect(() => {
+    const node = centerColumnRef.current;
+    if (!node || typeof ResizeObserver === "undefined") return;
+    const update = () => setCenterColumnWidth(node.getBoundingClientRect().width);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(node);
+    return () => ro.disconnect();
+  }, []);
+  const summaryDisplayMode = useMemo(
+    () => getSummaryDisplayMode(centerColumnWidth),
+    [centerColumnWidth],
+  );
+  // Codex contentShift: only non-zero in shift mode when open.
+  // Signed px applied as transform:translateX on the content column (not padding).
+  const summaryContentShift = useMemo(
+    () => getSummaryContentShift({
+      open: threadSummaryVisible,
+      mainContentWidth: centerColumnWidth,
+    }),
+    [centerColumnWidth, threadSummaryVisible],
+  );
 
   const toggleSessionStatsPanel = useCallback(() => {
     if (isMobile) setSidebarOpen(false);
@@ -467,9 +500,12 @@ export function AppShell() {
   }, [applySessionFilePanel, captureCurrentSessionFilePanel, router, isMobile]);
 
   const handleNewSession = useCallback((_sessionId: string, fallbackCwd: string, projectRoot = fallbackCwd) => {
-    // Resolve remembered cwd immediately from the ref so project-row + uses the
-    // last worktree without waiting for React state.
-    const cwd = projectCwdsRef.current.get(projectRoot) ?? fallbackCwd;
+    // Project-row "+" passes projectRoot === fallbackCwd and should reuse the
+    // remembered worktree cwd. Recent/temp chats pass an explicit new cwd
+    // (temp-session/.../f-N) that must not be overwritten by projectCwds.
+    const cwd = fallbackCwd !== projectRoot
+      ? fallbackCwd
+      : (projectCwdsRef.current.get(projectRoot) ?? fallbackCwd);
     captureCurrentSessionFilePanel();
     setActiveProjectRoot(projectRoot);
     setActiveCwd(cwd);
@@ -1042,8 +1078,9 @@ export function AppShell() {
         />
       )}
 
-      {/* Center: chat */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
+      {/* Center: chat — Codex full-width mode: collapsed to 0 and clipped so
+          the toolbar cannot overlap the expanded right panel. */}
+      <div style={{ flex: rightPanelMaximized ? "none" : 1, width: rightPanelMaximized ? 0 : undefined, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
         {/* Codex toolbar: 46px row with icon buttons */}
         <div ref={topBarRef} className="app-top-toolbar" style={{ display: "flex", alignItems: "center", flexShrink: 0, height: "calc(46px + env(safe-area-inset-top))", paddingTop: "env(safe-area-inset-top)", paddingInline: 8, gap: 2 }}>
           <button
@@ -1131,22 +1168,15 @@ export function AppShell() {
               <button
                 type="button"
                 className="app-toolbar-btn"
-                data-active={threadSummaryOpen || threadSummaryPinned}
+                data-active={threadSummaryVisible}
                 title={translate("summary.toggle")}
                 aria-label={translate("summary.toggle")}
-                aria-pressed={threadSummaryOpen || threadSummaryPinned}
-                onClick={() => {
-                  if (threadSummaryOpen && !threadSummaryPinned) {
-                    setThreadSummaryOpen(false);
-                    return;
-                  }
-                  setThreadSummaryOpen(true);
-                }}
+                aria-pressed={threadSummaryVisible}
+                onClick={toggleThreadSummary}
               >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M12 17v5" />
-                  <path d="M9 2h6l1 7H8z" />
-                  <path d="M8 9h8v2a4 4 0 0 1-8 0z" />
+                {/* Codex thread-summary-panel HeaderButton icon (two dots + list lines) */}
+                <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                  <path d="M5.693 11.056a2.71 2.71 0 0 1 2.432 2.694l-.015.277a2.71 2.71 0 0 1-2.694 2.432l-.276-.015a2.71 2.71 0 0 1-2.418-2.417l-.014-.277a2.709 2.709 0 0 1 2.708-2.708l.277.014Zm-.277 1.316a1.378 1.378 0 1 0 0 2.757 1.378 1.378 0 0 0 0-2.757Zm11.384.727a.665.665 0 0 1 0 1.302l-.134.014h-5.833a.665.665 0 0 1 0-1.33h5.833l.135.014ZM5.693 3.556A2.71 2.71 0 0 1 8.125 6.25l-.015.277A2.71 2.71 0 0 1 5.416 8.96l-.276-.015a2.71 2.71 0 0 1-2.418-2.417l-.014-.277a2.709 2.709 0 0 1 2.708-2.708l.277.014Zm-.277 1.316a1.378 1.378 0 1 0 .001 2.757 1.378 1.378 0 0 0-.001-2.757Zm11.384.727a.665.665 0 0 1 0 1.302l-.134.014h-5.833a.665.665 0 0 1 0-1.33h5.833l.135.014Z" />
                 </svg>
               </button>
             </div>
@@ -1324,8 +1354,13 @@ export function AppShell() {
 
         </div>
 
-        {/* Chat content */}
-        <div style={{ flex: 1, overflow: "hidden", position: "relative" }}>
+        {/* Chat content. Summary panel is floating content of this column (Codex).
+            contentShift (transform) is width-mode-driven: overlay/gutter = 0,
+            shift = -(300+16)/2. Scrollport stays full-width. */}
+        <div
+          ref={centerColumnRef}
+          style={{ flex: 1, overflow: "hidden", position: "relative" }}
+        >
           {showChat ? (
             <ChatWindow
               key={sessionKey}
@@ -1343,7 +1378,8 @@ export function AppShell() {
               onContextUsageChange={handleContextUsageChange}
               onOpenFile={handleOpenLinkedFile}
               onSendToSideChat={selectedSession ? handleSendToSideChat : undefined}
-              hideMinimap={rightPanelOpen}
+              hideMinimap={rightPanelOpen || (threadSummaryVisible && summaryDisplayMode !== "overlay")}
+              contentShift={summaryContentShift}
             />
           ) : initialCwdStatus === "validating" ? (
             <div
@@ -1389,8 +1425,8 @@ export function AppShell() {
 
           {/* Codex ThreadSummary is floating content of the center thread column. */}
           <ThreadSummaryPanel
-            open={threadSummaryOpen || threadSummaryPinned}
-            pinned={threadSummaryPinned}
+            open={threadSummaryVisible}
+            pinned={threadSummaryVisible}
             hasSession={Boolean(selectedSession)}
             hasWorkspace={Boolean(activeCwd)}
             cwd={activeCwd}
@@ -1417,16 +1453,8 @@ export function AppShell() {
             }
             onClose={() => {
               setThreadSummaryOpen(false);
-              if (!threadSummaryPinned) return;
-              setThreadSummaryPinned(false);
             }}
-            onTogglePinned={() => {
-              setThreadSummaryPinned((value) => {
-                const next = !value;
-                if (next) setThreadSummaryOpen(true);
-                return next;
-              });
-            }}
+            onTogglePinned={toggleThreadSummary}
             onOpenSideChat={() => {
               openSideChatShell({ forceNew: true });
             }}
@@ -1516,7 +1544,7 @@ export function AppShell() {
         />
       </div>
     </div>
-    {/* Codex right-panel chrome: floating expand + close cluster (top-right) */}
+    {/* Codex right-panel chrome: toolbar icon buttons (ghost/secondary), not a capsule cluster. */}
     <div
       className="codex-right-panel-controls"
       style={{
@@ -1526,7 +1554,7 @@ export function AppShell() {
         zIndex: 320,
         display: "flex",
         alignItems: "center",
-        gap: 6,
+        gap: 2,
         pointerEvents: "none",
       }}
     >
@@ -1537,19 +1565,14 @@ export function AppShell() {
           title={changesCollapsed ? "Show git changes" : "Hide git changes"}
           aria-label={changesCollapsed ? "Show git changes" : "Hide git changes"}
           aria-pressed={!changesCollapsed}
-          className="codex-panel-chip"
+          className="app-toolbar-btn"
+          data-active={!changesCollapsed}
           style={{
             pointerEvents: "auto",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            minWidth: 28, height: 28, padding: "0 8px",
-            background: changesCollapsed ? "var(--bg)" : "var(--bg-selected)",
-            border: "1px solid var(--border)",
-            borderRadius: 999,
-            color: changesCollapsed ? "var(--text-dim)" : "var(--accent)",
-            cursor: "pointer",
-            boxShadow: "0 1px 2px rgba(0,0,0,0.06)",
-            fontSize: 11,
-            fontWeight: 600,
+            width: "auto",
+            minWidth: 30,
+            padding: "0 8px",
+            color: changesCollapsed ? undefined : "var(--accent)",
           }}
         >
           {changesCount}
@@ -1563,13 +1586,7 @@ export function AppShell() {
             pointerEvents: "auto",
             display: "inline-flex",
             alignItems: "center",
-            height: 30,
-            padding: 2,
             gap: 0,
-            background: "var(--bg)",
-            border: "1px solid var(--border)",
-            borderRadius: 999,
-            boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
           }}
         >
           <button
@@ -1578,33 +1595,19 @@ export function AppShell() {
             title={rightPanelMaximized ? translate("layout.restorePanelWidth") : translate("layout.expandPanel")}
             aria-label={rightPanelMaximized ? translate("layout.restorePanelWidth") : translate("layout.expandPanel")}
             aria-pressed={rightPanelMaximized}
-            className="codex-panel-control-btn"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: 26,
-              height: 26,
-              border: "none",
-              borderRadius: 999,
-              background: rightPanelMaximized ? "var(--bg-selected)" : "transparent",
-              color: "var(--text-muted)",
-              cursor: "pointer",
-            }}
+            className="app-toolbar-btn"
+            data-active={rightPanelMaximized}
           >
             {rightPanelMaximized ? (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <polyline points="4 14 10 14 10 20" />
-                <polyline points="20 10 14 10 14 4" />
-                <line x1="14" y1="10" x2="21" y2="3" />
-                <line x1="3" y1="21" x2="10" y2="14" />
+              /* Codex fRr restore: corners pull inward (filled) */
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                <path d="M6.1664 8.80845C6.7325 8.80845 7.1918 9.26774 7.1918 9.83384V13.3338C7.19155 13.6236 6.9562 13.8592 6.6664 13.8592C6.37672 13.8591 6.14126 13.6235 6.14101 13.3338V10.5936L2.70547 14.0379C2.50071 14.243 2.16753 14.2435 1.9623 14.0389C1.75709 13.8342 1.75665 13.501 1.96133 13.2957L5.39101 9.85923H2.6664C2.37672 9.85909 2.14126 9.6235 2.14101 9.33384C2.14101 9.04397 2.37657 8.80858 2.6664 8.80845H6.1664Z" />
+                <path d="M13.2943 1.96274C13.4989 1.75743 13.8311 1.75731 14.0365 1.96177C14.2419 2.16637 14.243 2.49854 14.0385 2.70395L10.6127 6.14145H13.3334C13.6233 6.14145 13.8588 6.37689 13.8588 6.66684C13.8587 6.95674 13.6233 7.19223 13.3334 7.19223H9.8334C9.26734 7.19223 8.80807 6.73288 8.80801 6.16684V2.66684C8.80801 2.37689 9.04345 2.14145 9.3334 2.14145C9.62335 2.14145 9.85879 2.37689 9.85879 2.66684V5.41098L13.2943 1.96274Z" />
               </svg>
             ) : (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <polyline points="15 3 21 3 21 9" />
-                <polyline points="9 21 3 21 3 15" />
-                <line x1="21" y1="3" x2="14" y2="10" />
-                <line x1="3" y1="21" x2="10" y2="14" />
+              /* Codex aA expand: corners push outward (filled) */
+              <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                <path d="M4.33496 11C4.33496 10.6327 4.63273 10.335 5 10.335C5.36727 10.335 5.66504 10.6327 5.66504 11V14.335H9L9.13379 14.3486C9.43692 14.4106 9.66504 14.6786 9.66504 15C9.66504 15.3214 9.43692 15.5894 9.13379 15.6514L9 15.665H5C4.63273 15.665 4.33496 15.3673 4.33496 15V11ZM14.335 9V5.66504H11C10.6327 5.66504 10.335 5.36727 10.335 5C10.335 4.63273 10.6327 4.33496 11 4.33496H15L15.1338 4.34863C15.4369 4.41057 15.665 4.67857 15.665 5V9C15.665 9.36727 15.3673 9.66504 15 9.66504C14.6327 9.66504 14.335 9.36727 14.335 9Z" />
               </svg>
             )}
           </button>
@@ -1613,76 +1616,42 @@ export function AppShell() {
             onClick={closeRightPanel}
             title={`${translate("layout.closePanel")} (Ctrl+Alt+B)`}
             aria-label={translate("layout.closePanel")}
-            className="codex-panel-control-btn"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: 26,
-              height: 26,
-              border: "none",
-              borderRadius: 999,
-              background: "transparent",
-              color: "var(--text-muted)",
-              cursor: "pointer",
-            }}
+            className="app-toolbar-btn"
           >
-            {/* Codex: panel glyph with corner close mark */}
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            {/* Codex-style panel glyph (sidebar split), no corner X mark */}
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <rect x="3.5" y="4" width="17" height="16" rx="3" />
               <path d="M15 4v16" />
-              <path d="M17.2 8.2l3.6-3.6" />
-              <path d="M20.8 8.2l-3.6-3.6" />
             </svg>
           </button>
         </div>
       ) : (
         <>
-          {/* Right panel collapsed: pin sits immediately left of the show-panel button. */}
+          {/* Right panel collapsed: summary + show-panel, both toolbar chrome. */}
           <button
             type="button"
-            className={`thread-summary-entry-btn${threadSummaryOpen || threadSummaryPinned ? " is-active" : ""}`}
+            className="app-toolbar-btn"
+            data-active={threadSummaryVisible}
             title={translate("summary.toggle")}
             aria-label={translate("summary.toggle")}
-            aria-pressed={threadSummaryOpen || threadSummaryPinned}
-            onClick={() => {
-              if (threadSummaryOpen && !threadSummaryPinned) {
-                setThreadSummaryOpen(false);
-                return;
-              }
-              setThreadSummaryOpen(true);
-            }}
+            aria-pressed={threadSummaryVisible}
+            onClick={toggleThreadSummary}
             style={{ pointerEvents: "auto" }}
           >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M12 17v5" />
-              <path d="M9 2h6l1 7H8z" />
-              <path d="M8 9h8v2a4 4 0 0 1-8 0z" />
+            <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+              <path d="M5.693 11.056a2.71 2.71 0 0 1 2.432 2.694l-.015.277a2.71 2.71 0 0 1-2.694 2.432l-.276-.015a2.71 2.71 0 0 1-2.418-2.417l-.014-.277a2.709 2.709 0 0 1 2.708-2.708l.277.014Zm-.277 1.316a1.378 1.378 0 1 0 0 2.757 1.378 1.378 0 0 0 0-2.757Zm11.384.727a.665.665 0 0 1 0 1.302l-.134.014h-5.833a.665.665 0 0 1 0-1.33h5.833l.135.014ZM5.693 3.556A2.71 2.71 0 0 1 8.125 6.25l-.015.277A2.71 2.71 0 0 1 5.416 8.96l-.276-.015a2.71 2.71 0 0 1-2.418-2.417l-.014-.277a2.709 2.709 0 0 1 2.708-2.708l.277.014Zm-.277 1.316a1.378 1.378 0 1 0 .001 2.757 1.378 1.378 0 0 0-.001-2.757Zm11.384.727a.665.665 0 0 1 0 1.302l-.134.014h-5.833a.665.665 0 0 1 0-1.33h5.833l.135.014Z" />
             </svg>
           </button>
           <button
             type="button"
+            className="app-toolbar-btn"
             onClick={toggleRightPanel}
             title={`${translate("layout.showRightPanel")} (Ctrl+Alt+B)`}
             aria-label={translate("layout.showRightPanel")}
             aria-pressed={false}
-            style={{
-              pointerEvents: "auto",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: 30,
-              height: 30,
-              padding: 0,
-              background: "var(--bg)",
-              border: "1px solid var(--border)",
-              borderRadius: 999,
-              color: "var(--text-muted)",
-              cursor: "pointer",
-              boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
-            }}
+            style={{ pointerEvents: "auto" }}
           >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <rect x="3.5" y="4" width="17" height="16" rx="3" />
               <path d="M15 4v16" />
             </svg>

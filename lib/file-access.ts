@@ -1,9 +1,8 @@
-import { readdirSync } from "fs";
-import { homedir } from "os";
 import path from "path";
 import { getAdditionalAllowedRoots, normalizeSlashes } from "./allowed-roots";
 import { isExistingPathWithinRoots } from "./path-security";
 import { listAllSessions } from "./session-reader";
+import { getTempSessionRoot } from "./temp-session";
 export { allowFileRoot, normalizeSlashes } from "./allowed-roots";
 
 // Short-TTL cache for the allowed-roots set. Without this, every file list/read
@@ -35,15 +34,11 @@ export async function getAllowedFileRoots(): Promise<Set<string>> {
     if (s.projectRoot) roots.add(normalizeSlashes(s.projectRoot));
   }
 
-  // Also allow ~/pi-cwd-* directories created by the default-cwd endpoint.
+  // Codex-style temporary session root: ~/.pi/agent/temp-session
   try {
-    for (const name of readdirSync(homedir())) {
-      if (/^pi-cwd-\d{8}$/.test(name)) {
-        roots.add(normalizeSlashes(path.join(homedir(), name)));
-      }
-    }
+    roots.add(normalizeSlashes(getTempSessionRoot()));
   } catch {
-    // ignore if home is unreadable
+    // ignore if agent dir is unavailable
   }
 
   for (const root of getAdditionalAllowedRoots()) roots.add(root);

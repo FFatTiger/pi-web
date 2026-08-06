@@ -9,6 +9,7 @@ import { MessageView } from "./MessageView";
 import { ChatInput, type ChatInputHandle } from "./ChatInput";
 import { SessionInfoBar } from "./SessionInfoBar";
 import { ChatMinimap, useMessageRefs } from "./ChatMinimap";
+import { PiLogo } from "./PiLogo";
 import { ExtensionStatusBar } from "./ExtensionStatusBar";
 import { useI18n } from "@/hooks/useI18n";
 import { useAgentSession, type AgentPhase, type NoticeItem } from "@/hooks/useAgentSession";
@@ -42,6 +43,12 @@ interface Props {
   onSendToSideChat?: (message: string) => void;
   /** Hide minimap while a right-side panel (side chat / file) is open. */
   hideMinimap?: boolean;
+  /**
+   * Codex contentShift (signed px). Applied as transform:translateX on the
+   * content column only — scrollport/scrollbar stay full-width.
+   * Negative = shift left (shift mode). 0 in overlay/gutter.
+   */
+  contentShift?: number;
 }
 
 function phaseLabel(phase: AgentPhase, t: (key: string, params?: Record<string, string | number>) => string): string | null {
@@ -173,7 +180,7 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, children, t }: { mes
   );
 }
 
-export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsChange, onSessionStatsPanelOpen, onContextUsageChange, onOpenFile, onSendToSideChat, hideMinimap = false }: Props) {
+export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsChange, onSessionStatsPanelOpen, onContextUsageChange, onOpenFile, onSendToSideChat, hideMinimap = false, contentShift = 0 }: Props) {
   const { t } = useI18n();
   const { soundEnabled, onSoundToggle, playDoneSound, unlockAudio } = useAudio();
   const isMobile = useIsMobile();
@@ -490,34 +497,13 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
       )}
 
       {isEmptyNew ? (
-        <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto px-4 py-8">
-          <div className="w-full max-w-[820px]">
-            <div
-              className="mb-3"
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 12,
-                marginLeft: 16,
-                marginRight: 16,
-                fontFamily: "var(--font-mono)",
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "baseline", gap: 10, minWidth: 0, flex: 1, lineHeight: 1.4, overflow: "hidden" }}>
-                <span style={{ fontSize: 28, fontWeight: 700, letterSpacing: 0, color: "var(--text)", flexShrink: 0, whiteSpace: "nowrap" }}>π</span>
-                <span style={{ fontSize: 22, color: "var(--text)", fontWeight: 700, letterSpacing: 0, flexShrink: 0, whiteSpace: "nowrap" }}>Pi Web</span>
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, flexShrink: 0 }}>
-                <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                  web <span style={{ color: "var(--text)" }}>v{process.env.NEXT_PUBLIC_APP_VERSION ?? "0.0.0"}</span>
-                </span>
-                <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                  pi <span style={{ color: "var(--text)" }}>v{process.env.NEXT_PUBLIC_PI_VERSION ?? "0.0.0"}</span>
-                </span>
-              </div>
-            </div>
-            <NoticeShelf notices={notices} align="right" />
+        <div className="new-chat-hero">
+          <div className="new-chat-hero-logo" aria-hidden="true">
+            <PiLogo size={76} />
+          </div>
+          <h1 className="new-chat-hero-title">{t("chat.heroTitle")}</h1>
+          <div className="new-chat-hero-composer">
+            <NoticeShelf notices={notices} align="center" />
             {chatInputElement}
             {sessionInfoBarElement}
           </div>
@@ -535,6 +521,9 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
             zIndex: 40,
             padding: `0 ${CHAT_COLUMN_PADDING}px`,
             pointerEvents: "none",
+            // Codex: shift notice shelf with content column (contentShift).
+            transform: contentShift ? `translateX(${contentShift}px)` : undefined,
+            transition: "transform 0.3s cubic-bezier(0.23, 1, 0.32, 1)",
           }}
         >
           <div style={{ maxWidth: 820, margin: "0 auto" }}>
@@ -549,7 +538,14 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
             scrollPaddingBottom: composerFooterHeight + 16,
           }}
         >
-          <div style={{ minWidth: 0, padding: `0 ${CHAT_COLUMN_PADDING}px ${composerFooterHeight + 24}px` }}>
+          <div style={{
+            minWidth: 0,
+            padding: `0 ${CHAT_COLUMN_PADDING}px ${composerFooterHeight + 24}px`,
+            // Codex contentShift: transform on content column only.
+            // Scrollport stays full-width so the scrollbar does not move.
+            transform: contentShift ? `translateX(${contentShift}px)` : undefined,
+            transition: "transform 0.3s cubic-bezier(0.23, 1, 0.32, 1)",
+          }}>
             <div style={{ width: "100%", minWidth: 0, maxWidth: 820, margin: "0 auto" }}>
               <ExtensionWidgets widgets={aboveEditorWidgets} />
 
@@ -773,7 +769,14 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
           className="thread-composer-footer"
         >
           <div className="thread-composer-footer-fade" aria-hidden="true" />
-          <div className="thread-composer-footer-inner">
+          <div
+            className="thread-composer-footer-inner"
+            style={{
+              // Codex contentShift: move composer with the content column.
+              transform: contentShift ? `translateX(${contentShift}px)` : undefined,
+              transition: "transform 0.3s cubic-bezier(0.23, 1, 0.32, 1)",
+            }}
+          >
             <div className="relative h-0">
               <button
                 type="button"
@@ -861,14 +864,14 @@ function ExtensionWidgets({ widgets }: { widgets: Array<{ key: string; lines: st
   );
 }
 
-function NoticeShelf({ notices, floating = false, align = "left" }: { notices: NoticeItem[]; floating?: boolean; align?: "left" | "right" }) {
+function NoticeShelf({ notices, floating = false, align = "left" }: { notices: NoticeItem[]; floating?: boolean; align?: "left" | "center" | "right" }) {
   if (notices.length === 0) return null;
   return (
     <div
       style={{
         display: "flex",
         flexDirection: "column",
-        alignItems: align === "right" ? "flex-end" : "stretch",
+        alignItems: align === "right" ? "flex-end" : align === "center" ? "center" : "stretch",
         marginBottom: floating ? 0 : 10,
       }}
     >

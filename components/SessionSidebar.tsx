@@ -33,6 +33,14 @@ import {
   type SidebarProjectGroup,
   type SidebarSessionTreeNode,
 } from "@/lib/sidebar-projects";
+import {
+  loadSidebarPreferences,
+  saveSidebarPreferences,
+  type SidebarChatSortMode,
+  type SidebarOrganizeMode,
+  type SidebarPreferences,
+} from "@/lib/sidebar-preferences";
+import { sortSessionsForChatMode } from "@/lib/sidebar-session-sort";
 
 declare global {
   interface Window {
@@ -62,6 +70,7 @@ const EXPANDED_PROJECTS_STORAGE_KEY = "pi-web:expanded-projects";
 const PROJECT_ORDER_STORAGE_KEY = "pi-web:project-order";
 const PROJECT_SESSION_ORDERS_STORAGE_KEY = "pi-web:project-session-orders";
 const DND_MIME = "application/x-pi-sidebar-dnd";
+const GLOBAL_SESSION_ORDER_KEY = "__recent__";
 
 type DragPayload =
   | { kind: "project"; root: string }
@@ -121,8 +130,9 @@ function getAnchorRect(node: HTMLElement): AnchorRect {
 /** Fixed project menu that can open below or above the trigger to avoid clipping. */
 function getProjectMenuStyle(anchor: AnchorRect): CSSProperties {
   const viewport = getViewportSize();
-  const width = Math.min(180, viewport.width - 16);
-  const estimatedHeight = 92;
+  const width = Math.min(220, viewport.width - 16);
+  // Organize menu (mode + sort) is taller than the project context menu.
+  const estimatedHeight = 280;
   const gap = 6;
   const spaceBelow = viewport.height - anchor.bottom - 8;
   const openUpward = spaceBelow < estimatedHeight && anchor.top > spaceBelow;
@@ -177,6 +187,20 @@ function formatRelativeTime(dateStr: string): string {
   if (hours < 24) return `${hours}h ago`;
   if (days < 7) return `${days}d ago`;
   return date.toLocaleDateString();
+}
+
+/** Codex "Recent" short time: "now", "5m", "2h", "3d" */
+function formatRelativeTimeShort(dateStr: string): string {
+  const date = new Date(dateStr);
+  const diff = Date.now() - date.getTime();
+  const mins = Math.floor(diff / 60000);
+  const hours = Math.floor(diff / 3600000);
+  const days = Math.floor(diff / 86400000);
+  if (mins < 1) return "now";
+  if (mins < 60) return `${mins}m`;
+  if (hours < 24) return `${hours}h`;
+  if (days < 7) return `${days}d`;
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 const DROPDOWN_ANIMATION_MS = 140;
@@ -299,6 +323,7 @@ function PiWebTitle() {
   return (
     <button
       onClick={handleClick}
+      title={showVersion ? "Pi Web" : "Pi Web — click for version"}
       style={{
         background: "none", border: "none", padding: 0, cursor: "default",
         fontWeight: 700, fontSize: 15, letterSpacing: "-0.01em",
@@ -353,6 +378,12 @@ export function SessionSidebar({
     return parseExpandedProjects(window.localStorage.getItem(EXPANDED_PROJECTS_STORAGE_KEY));
   });
   const [showAllSessionProjects, setShowAllSessionProjects] = useState<Set<string>>(() => new Set());
+  // Codex flat-project-sidebar-preferences-v1: organize mode + chat sort + section collapse
+  const [sidebarPrefs, setSidebarPrefs] = useState<SidebarPreferences>(() => loadSidebarPreferences());
+  const [organizeMenuOpen, setOrganizeMenuOpen] = useState(false);
+  const [organizeMenuRect, setOrganizeMenuRect] = useState<AnchorRect | null>(null);
+  const organizeMenuButtonRef = useRef<HTMLButtonElement>(null);
+  const organizeMenuPanelRef = useRef<HTMLDivElement>(null);
   const customPathInputRef = useRef<HTMLInputElement>(null);
   const directoryPopoverRef = useRef<HTMLDivElement>(null);
   const initializedExpansionRef = useRef(false);
@@ -510,6 +541,10 @@ export function SessionSidebar({
   }, [expandedProjects]);
 
   useEffect(() => {
+    saveSidebarPreferences(sidebarPrefs);
+  }, [sidebarPrefs]);
+
+  useEffect(() => {
     const previous = previousRunningSessionIdsRef.current;
     const completedInBackground = [...previous].filter((id) => !runningSessionIds.has(id) && id !== selectedSessionId);
     const newlyRunning = [...runningSessionIds];
@@ -559,10 +594,28 @@ export function SessionSidebar({
     () => partitionSidebarProjects(projectGroups),
     [projectGroups],
   );
-  const temporarySessions = useMemo(
-    () => flattenTemporarySessions(temporaryProjects),
-    [temporaryProjects],
+
+  // Codex:
+  // - mode=project → recent = projectless/temp sessions only
+  // - mode=list    → recent = all sessions in one flat list
+  // No live "now" boost for updated_at (selecting/running must not invent recency).
+  // Priority mode still uses runningSessionIds / unreadSessionIds ranks.
+  const recentSessionsRaw = useMemo(() => {
+    if (sidebarPrefs.mode === "list") return allSessions;
+    return flattenTemporarySessions(temporaryProjects);
+  }, [allSessions, sidebarPrefs.mode, temporaryProjects]);
+
+  const recentSessions = useMemo(
+    () => sortSessionsForChatMode(recentSessionsRaw, {
+      mode: sidebarPrefs.chatSortMode,
+      runningSessionIds,
+      unreadSessionIds,
+      manualOrder: sessionOrders[GLOBAL_SESSION_ORDER_KEY],
+    }),
+    [recentSessionsRaw, runningSessionIds, sessionOrders, sidebarPrefs.chatSortMode, unreadSessionIds],
   );
+
+  const showProjectsSection = sidebarPrefs.mode === "project" && regularProjects.length > 0;
 
   useEffect(() => {
     if (initializedExpansionRef.current || projectGroups.length === 0) return;
@@ -655,18 +708,6 @@ export function SessionSidebar({
     }
   }, [commitCustomPath]);
 
-  const handleDefaultCwd = useCallback(async () => {
-    try {
-      const res = await fetch("/api/default-cwd", { method: "POST" });
-      const data = await res.json() as { cwd?: string; error?: string };
-      if (data.cwd) {
-        activateManualProject(data.cwd);
-      }
-    } catch {
-      // ignore
-    }
-  }, [activateManualProject]);
-
   // Close directory popover on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -706,6 +747,76 @@ export function SessionSidebar({
     // AppShell resolves the remembered per-project cwd from projectCwds.
     onNewSession?.(tempId, group.root, group.root);
   }, [onNewSession]);
+
+  /** Codex newProjectlessTask / Recent "New chat" → temp-session/YYYY-MM-DD/f[-N] */
+  const startRecentSession = useCallback(async () => {
+    try {
+      const res = await fetch("/api/default-cwd", { method: "POST" });
+      const data = await res.json() as { cwd?: string; projectRoot?: string; error?: string };
+      if (!data.cwd) return;
+      const tempId = typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+      // Prefer shared temp-session root as projectRoot so all recent chats group together.
+      const projectRoot = data.projectRoot ?? data.cwd;
+      onNewSession?.(tempId, data.cwd, projectRoot);
+      setSidebarPrefs((prev) => ({
+        ...prev,
+        collapsed: { ...prev.collapsed, recent: false },
+      }));
+    } catch {
+      // ignore
+    }
+  }, [onNewSession]);
+
+  // Codex projectless default: create temp-session cwd and open a new chat there.
+  const handleDefaultCwd = useCallback(async () => {
+    setDirectoryOpen(false);
+    await startRecentSession();
+  }, [startRecentSession]);
+
+  const setOrganizeMode = useCallback((mode: SidebarOrganizeMode) => {
+    setSidebarPrefs((prev) => ({ ...prev, mode }));
+    setOrganizeMenuOpen(false);
+  }, []);
+
+  const setChatSortMode = useCallback((chatSortMode: SidebarChatSortMode) => {
+    setSidebarPrefs((prev) => ({ ...prev, chatSortMode }));
+    setOrganizeMenuOpen(false);
+  }, []);
+
+  const toggleSectionCollapsed = useCallback((section: "projects" | "recent") => {
+    setSidebarPrefs((prev) => ({
+      ...prev,
+      collapsed: { ...prev.collapsed, [section]: !prev.collapsed[section] },
+    }));
+  }, []);
+
+  const openOrganizeMenu = useCallback(() => {
+    const button = organizeMenuButtonRef.current;
+    if (!button) return;
+    setOrganizeMenuRect(getAnchorRect(button));
+    setOrganizeMenuOpen((open) => !open);
+  }, []);
+
+  useEffect(() => {
+    if (!organizeMenuOpen) return;
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (organizeMenuButtonRef.current?.contains(target)) return;
+      if (organizeMenuPanelRef.current?.contains(target)) return;
+      setOrganizeMenuOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOrganizeMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [organizeMenuOpen]);
 
   const readDragPayload = useCallback((event: React.DragEvent): DragPayload | null => {
     try {
@@ -796,6 +907,8 @@ export function SessionSidebar({
     toId: string,
     position: DropPosition,
   ) => {
+    // Only persist drag order in manual sort mode (Codex chatSortMode=manual).
+    if (sidebarPrefs.chatSortMode !== "manual") return;
     const group = projectGroups.find((item) => item.root === projectRoot);
     if (!group) return;
     const baseOrder = mergeSessionOrder(
@@ -807,7 +920,25 @@ export function SessionSidebar({
       ...previous,
       [projectRoot]: nextOrder,
     }));
-  }, [projectGroups, sessionOrders]);
+  }, [projectGroups, sessionOrders, sidebarPrefs.chatSortMode]);
+
+  /** Manual order for the Recent flat list (Codex codex-sidebar-chat-order-v1). */
+  const reorderRecentSession = useCallback((
+    fromId: string,
+    toId: string,
+    position: DropPosition,
+  ) => {
+    if (sidebarPrefs.chatSortMode !== "manual") return;
+    const baseOrder = mergeSessionOrder(
+      sessionOrders[GLOBAL_SESSION_ORDER_KEY],
+      recentSessionsRaw.map((session) => session.id),
+    );
+    const nextOrder = reorderIds(baseOrder, fromId, toId, position);
+    setSessionOrders((previous) => ({
+      ...previous,
+      [GLOBAL_SESSION_ORDER_KEY]: nextOrder,
+    }));
+  }, [recentSessionsRaw, sessionOrders, sidebarPrefs.chatSortMode]);
 
   type ProjectDialogMode = "clear" | "remove";
   const [projectDialog, setProjectDialog] = useState<{ group: SidebarProjectGroup; mode: ProjectDialogMode } | null>(null);
@@ -918,15 +1049,26 @@ export function SessionSidebar({
     const expanded = expandedProjects.has(group.root);
     const selected = activeProjectRoot === group.root;
     const activity = getProjectActivity(group.sessions, runningSessionIds, unreadSessionIds);
-    const fullTree = buildSidebarSessionTree(group.sessions);
-    const visibility = getSidebarSessionVisibility(group.sessions, {
+    // Codex projectSortMode mirrors chatSortMode here: only manual uses stored order.
+    const sortedGroupSessions = sortSessionsForChatMode(group.sessions, {
+      mode: sidebarPrefs.chatSortMode,
+      runningSessionIds,
+      unreadSessionIds,
+      manualOrder: sessionOrders[group.root],
+    });
+    const fullTree = buildSidebarSessionTree(sortedGroupSessions);
+    const visibility = getSidebarSessionVisibility(sortedGroupSessions, {
       runningSessionIds,
       unreadSessionIds,
       selectedSessionId,
     });
     const showAllSessions = showAllSessionProjects.has(group.root);
     const baseTree = showAllSessions ? fullTree : visibility.tree;
-    const orderedTree = applySessionOrderToTree(baseTree, sessionOrders[group.root]);
+    // Enforce sort order on the tree (manual order ids or recency-sorted ids).
+    const orderedTree = applySessionOrderToTree(
+      baseTree,
+      sortedGroupSessions.map((session) => session.id),
+    );
     const projectDragKey = `project:${group.root}`;
     return (
       <ProjectGroup
@@ -1033,15 +1175,18 @@ export function SessionSidebar({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
-      {/* Header */}
+      {/* Header — 46px row aligned with the center Codex toolbar */}
       <div
         style={{
-          padding: "12px 10px 10px",
+          height: 46,
+          display: "flex",
+          alignItems: "center",
+          padding: "0 10px",
           borderBottom: "1px solid var(--border)",
           flexShrink: 0,
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", minWidth: 0 }}>
           <PiWebTitle />
           <div style={{ display: "flex", gap: 6, position: "relative" }} ref={directoryPopoverRef}>
             <button
@@ -1261,44 +1406,139 @@ export function SessionSidebar({
             {error}
           </div>
         )}
-        {!loading && !error && projectGroups.length === 0 && (
+        {!loading && !error && projectGroups.length === 0 && recentSessions.length === 0 && (
           <div style={{ padding: "16px 14px", color: "var(--text-muted)", fontSize: 12 }}>
-            Open a directory to get started
+            {t("sidebar.emptyHint")}
           </div>
         )}
 
-        {/* Wait until sessions hydrate before painting projects — otherwise
-            manual-only roots (e.g. avatar-client) flash alone at the top. */}
-        {!loading && !error && regularProjects.length > 0 && (
-          <SidebarSection label={t("sidebar.projectsSection")}>
+        {/* Codex: Projects (mode=project) then Recent; mode=list flattens into Recent. */}
+        {!loading && !error && showProjectsSection && (
+          <CollapsibleSection
+            label={t("sidebar.projectsSection")}
+            collapsed={sidebarPrefs.collapsed.projects}
+            onToggle={() => toggleSectionCollapsed("projects")}
+            actions={(
+              <>
+                <OrganizeMenuButton
+                  buttonRef={organizeMenuButtonRef}
+                  open={organizeMenuOpen}
+                  onToggle={openOrganizeMenu}
+                  title={t("sidebar.projectOptions")}
+                />
+                <IconActionButton
+                  title={t("sidebar.addProject")}
+                  onClick={() => void handleDirectoryButtonClick()}
+                >
+                  <PlusIcon />
+                </IconActionButton>
+              </>
+            )}
+          >
             {regularProjects.map((group) => renderProjectGroup(group))}
-          </SidebarSection>
+          </CollapsibleSection>
         )}
 
-        {!loading && !error && (temporaryProjects.length > 0 || temporarySessions.length > 0) && (
-          <SidebarSection label={t("sidebar.temporarySection")}>
-            {temporarySessions.length === 0 ? (
-              <div style={{ padding: "6px 14px 10px 34px", fontSize: 12, color: "var(--text-dim)" }}>
+        {!loading && !error && (
+          <CollapsibleSection
+            label={t("sidebar.recentSection")}
+            collapsed={sidebarPrefs.collapsed.recent}
+            onToggle={() => toggleSectionCollapsed("recent")}
+            actions={(
+              <>
+                {!showProjectsSection && (
+                  <OrganizeMenuButton
+                    buttonRef={organizeMenuButtonRef}
+                    open={organizeMenuOpen}
+                    onToggle={openOrganizeMenu}
+                    title={t("sidebar.projectOptions")}
+                  />
+                )}
+                <IconActionButton
+                  title={t("sidebar.newRecentChat")}
+                  onClick={() => void startRecentSession()}
+                >
+                  <PlusIcon />
+                </IconActionButton>
+              </>
+            )}
+          >
+            {recentSessions.length === 0 ? (
+              <div style={{ padding: "4px 14px 8px 16px", fontSize: 12, color: "var(--text-dim)" }}>
                 {t("sidebar.noChats")}
               </div>
             ) : (
-              temporarySessions.map((session) => (
-                <SessionItem
-                  key={session.id}
-                  session={session}
-                  isSelected={session.id === selectedSessionId}
-                  isRunning={runningSessionIds.has(session.id)}
-                  isUnread={unreadSessionIds.has(session.id)}
-                  onClick={() => onSelectSession(session)}
-                  onRenamed={loadSessions}
-                  onDeleted={(id) => {
-                    onSessionDeleted?.(id);
-                    void loadSessions();
-                  }}
-                />
-              ))
+              recentSessions.map((session) => {
+                const dragKey = `session:${GLOBAL_SESSION_ORDER_KEY}:${session.id}`;
+                const title = session.name || session.firstMessage.slice(0, 50) || session.id.slice(0, 12);
+                const canDrag = sidebarPrefs.chatSortMode === "manual";
+                return (
+                  <SessionItem
+                    key={session.id}
+                    session={session}
+                    isSelected={session.id === selectedSessionId}
+                    isRunning={runningSessionIds.has(session.id)}
+                    isUnread={unreadSessionIds.has(session.id)}
+                    onClick={() => onSelectSession(session)}
+                    onRenamed={loadSessions}
+                    onDeleted={(id) => {
+                      onSessionDeleted?.(id);
+                      void loadSessions();
+                    }}
+                    isDragging={draggingKey === dragKey}
+                    onDragStart={canDrag ? (event) => {
+                      writeDragPayload(event, {
+                        kind: "session",
+                        projectRoot: GLOBAL_SESSION_ORDER_KEY,
+                        sessionId: session.id,
+                      });
+                      setDraggingKey(dragKey);
+                      startDragOverlay(event, "session", title);
+                    } : undefined}
+                    onDragOver={canDrag ? (event) => {
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = "move";
+                      setDragOverKey(dragKey);
+                      setDragOverPosition(getDropPosition(event, event.currentTarget));
+                    } : undefined}
+                    onDragLeave={canDrag ? () => {
+                      setDragOverKey((current) => (current === dragKey ? null : current));
+                      setDragOverPosition((current) => (dragOverKey === dragKey ? null : current));
+                    } : undefined}
+                    onDrop={canDrag ? (event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      const payload = readDragPayload(event);
+                      const position = getDropPosition(event, event.currentTarget);
+                      clearDragUi();
+                      if (!payload || payload.kind !== "session") return;
+                      if (payload.projectRoot !== GLOBAL_SESSION_ORDER_KEY) return;
+                      reorderRecentSession(payload.sessionId, session.id, position);
+                    } : undefined}
+                    onDragEnd={canDrag ? () => clearDragUi() : undefined}
+                  />
+                );
+              })
             )}
-          </SidebarSection>
+          </CollapsibleSection>
+        )}
+
+        {organizeMenuOpen && organizeMenuRect && createPortal(
+          <div ref={organizeMenuPanelRef} role="menu" style={getProjectMenuStyle(organizeMenuRect)}>
+            <div style={{ padding: "6px 10px 4px", fontSize: 11, color: "var(--text-dim)", fontWeight: 500 }}>
+              {t("sidebar.organizeSidebar")}
+            </div>
+            <MenuRadioItem checked={sidebarPrefs.mode === "project"} label={t("sidebar.byProject")} onClick={() => setOrganizeMode("project")} />
+            <MenuRadioItem checked={sidebarPrefs.mode === "list"} label={t("sidebar.inOneList")} onClick={() => setOrganizeMode("list")} />
+            <div style={{ height: 1, background: "var(--border)", margin: "6px 0" }} />
+            <div style={{ padding: "4px 10px 4px", fontSize: 11, color: "var(--text-dim)", fontWeight: 500 }}>
+              {t("sidebar.sortChatsBy")}
+            </div>
+            <MenuRadioItem checked={sidebarPrefs.chatSortMode === "priority"} label={t("sidebar.sortPriority")} onClick={() => setChatSortMode("priority")} />
+            <MenuRadioItem checked={sidebarPrefs.chatSortMode === "updated_at"} label={t("sidebar.sortUpdated")} onClick={() => setChatSortMode("updated_at")} />
+            <MenuRadioItem checked={sidebarPrefs.chatSortMode === "manual"} label={t("sidebar.sortManual")} onClick={() => setChatSortMode("manual")} />
+          </div>,
+          document.body,
         )}
       </div>
 
@@ -1359,24 +1599,202 @@ export function SessionSidebar({
   );
 }
 
-function SidebarSection({ label, children }: { label: string; children: ReactNode }) {
+function PlusIcon() {
   return (
-    <div style={{ marginTop: 4, marginBottom: 8 }}>
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 5v14" /><path d="M5 12h14" />
+    </svg>
+  );
+}
+
+function IconActionButton({
+  title,
+  onClick,
+  children,
+}: {
+  title: string;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={title}
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
+      className="sidebar-icon-button sidebar-hover-icon-button-tint"
+      style={{
+        display: "inline-flex", alignItems: "center", justifyContent: "center",
+        width: 24, height: 24, padding: 0, border: "none", borderRadius: 8,
+        background: "transparent", color: "var(--text-dim)", cursor: "pointer",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function OrganizeMenuButton({
+  buttonRef,
+  open,
+  onToggle,
+  title,
+}: {
+  buttonRef: React.RefObject<HTMLButtonElement | null>;
+  open: boolean;
+  onToggle: () => void;
+  title: string;
+}) {
+  return (
+    <button
+      ref={buttonRef}
+      type="button"
+      title={title}
+      aria-label={title}
+      aria-expanded={open}
+      onClick={(e) => { e.stopPropagation(); onToggle(); }}
+      className="sidebar-icon-button sidebar-hover-icon-button-tint"
+      style={{
+        display: "inline-flex", alignItems: "center", justifyContent: "center",
+        width: 24, height: 24, padding: 0, border: "none", borderRadius: 8,
+        background: open ? "var(--bg-selected)" : "transparent",
+        color: "var(--text-dim)", cursor: "pointer",
+      }}
+    >
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <circle cx="5" cy="12" r="1.5" />
+        <circle cx="12" cy="12" r="1.5" />
+        <circle cx="19" cy="12" r="1.5" />
+      </svg>
+    </button>
+  );
+}
+
+function CollapsibleSection({
+  label,
+  collapsed,
+  onToggle,
+  actions,
+  children,
+}: {
+  label: string;
+  collapsed: boolean;
+  onToggle: () => void;
+  actions?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div style={{ marginTop: 2, marginBottom: 6 }}>
       <div
         className="sidebar-section-heading"
         style={{
-          padding: "8px 14px 4px",
-          fontSize: "var(--text-xs, 11px)",
-          fontWeight: 500,
-          color: "var(--text-dim)",
-          letterSpacing: "0.01em",
+          display: "flex",
+          alignItems: "center",
+          gap: 4,
+          minHeight: 32,
+          padding: "4px 8px 4px 10px",
           userSelect: "none",
         }}
       >
-        {label}
+        <button
+          type="button"
+          onClick={onToggle}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            flex: 1,
+            minWidth: 0,
+            padding: "4px 4px",
+            margin: 0,
+            border: "none",
+            borderRadius: 8,
+            background: "transparent",
+            color: "var(--text-dim)",
+            cursor: "pointer",
+            textAlign: "left",
+          }}
+        >
+          <span
+            style={{
+              display: "inline-flex",
+              transform: collapsed ? "rotate(-90deg)" : "rotate(0deg)",
+              transition: "transform 0.12s ease",
+              flexShrink: 0,
+            }}
+            aria-hidden="true"
+          >
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="2 3.5 5 6.5 8 3.5" />
+            </svg>
+          </span>
+          <span
+            style={{
+              fontSize: "var(--text-xs, 11px)",
+              fontWeight: 500,
+              letterSpacing: "0.01em",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {label}
+          </span>
+        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0 }}>
+          {actions}
+        </div>
       </div>
-      <div>{children}</div>
+      {!collapsed && <div>{children}</div>}
     </div>
+  );
+}
+
+function MenuRadioItem({
+  checked,
+  label,
+  onClick,
+}: {
+  checked: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitemradio"
+      aria-checked={checked}
+      onClick={onClick}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        width: "100%",
+        padding: "7px 10px",
+        border: "none",
+        borderRadius: 7,
+        background: checked ? "var(--bg-selected)" : "transparent",
+        color: "var(--text)",
+        cursor: "pointer",
+        fontSize: 13,
+        textAlign: "left",
+      }}
+      onMouseEnter={(e) => {
+        if (!checked) e.currentTarget.style.background = "var(--bg-hover)";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = checked ? "var(--bg-selected)" : "transparent";
+      }}
+    >
+      <span style={{ width: 14, flexShrink: 0, color: "var(--accent)" }} aria-hidden="true">
+        {checked ? (
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+        ) : null}
+      </span>
+      <span>{label}</span>
+    </button>
   );
 }
 
@@ -1538,9 +1956,11 @@ function ProjectGroup({
           padding: "0 var(--padding-row-x, 8px)",
           margin: "1px 6px",
           cursor: isDragging ? "grabbing" : "grab",
-          background: selected || hovered || menuOpen
-            ? "var(--bg-hover)"
-            : "transparent",
+          background: selected
+            ? "var(--bg-selected)"
+            : hovered || menuOpen
+              ? "var(--bg-hover)"
+              : "transparent",
           borderRadius: "var(--radius-row, 10px)",
           border: "1px solid transparent",
           opacity: isDragging ? 0.2 : 1,
@@ -1768,7 +2188,9 @@ function ProjectGroup({
       {expanded && (
         group.sessions.length === 0 ? (
           <div style={{
-            padding: "4px 14px 8px 36px",
+            // Codex nested list under project: ~px-8 inset from row edge.
+            padding: "4px 8px 8px 32px",
+            margin: "0 6px",
             fontSize: 12,
             color: "var(--text-dim)",
           }}>
@@ -1807,9 +2229,11 @@ function ProjectGroup({
                 }}
                 aria-expanded={showAllSessions}
                 style={{
-                  width: "100%",
+                  width: "calc(100% - 12px)",
                   height: 28,
-                  padding: "0 14px 0 36px",
+                  // Codex nested "Show more": j===`nested` && `px-8`
+                  margin: "0 6px",
+                  padding: "0 8px 0 32px",
                   display: "flex",
                   alignItems: "center",
                   background: "transparent",
@@ -2022,7 +2446,8 @@ function SessionTreeItem({
         {depth > 0 && (
           <div style={{
             position: "absolute",
-            left: depth * 12 + 6,
+            // Codex nested rail under grouped/forked rows.
+            left: 20 + depth * 12,
             top: 0, bottom: 0,
             width: 1,
             background: "var(--border)",
@@ -2039,6 +2464,7 @@ function SessionTreeItem({
           onRenamed={onRenamed}
           onDeleted={(id) => onSessionDeleted?.(id)}
           depth={depth}
+          nested
           hasChildren={hasChildren}
           collapsed={collapsed}
           onToggleCollapse={() => setCollapsed((v) => !v)}
@@ -2147,7 +2573,7 @@ function RunningSessionIndicator() {
         alignItems: "center",
         justifyContent: "center",
         flexShrink: 0,
-        color: "var(--text-dim)",
+        color: "var(--accent)",
       }}
     >
       <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true" style={{ display: "block" }}>
@@ -2204,6 +2630,8 @@ function SessionItem({
   onRenamed,
   onDeleted,
   depth = 0,
+  /** Codex isGrouped/nested: indent under a project. Recent/flat is edge (no extra indent). */
+  nested = false,
   hasChildren = false,
   collapsed = false,
   onToggleCollapse,
@@ -2222,6 +2650,7 @@ function SessionItem({
   onRenamed?: () => void;
   onDeleted?: (id: string) => void;
   depth?: number;
+  nested?: boolean;
   hasChildren?: boolean;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
@@ -2303,9 +2732,9 @@ function SessionItem({
   return (
     <div
       className="sidebar-item"
-      draggable={!confirmDelete && !renaming && !deleting}
+      draggable={Boolean(onDragStart) && !confirmDelete && !renaming && !deleting}
       onDragStart={(event) => {
-        if (confirmDelete || renaming || deleting) {
+        if (!onDragStart || confirmDelete || renaming || deleting) {
           event.preventDefault();
           return;
         }
@@ -2314,7 +2743,7 @@ function SessionItem({
           event.preventDefault();
           return;
         }
-        onDragStart?.(event);
+        onDragStart(event);
       }}
       onDragOver={(event) => {
         if (!onDragOver) return;
@@ -2331,15 +2760,21 @@ function SessionItem({
         display: "flex",
         alignItems: "center",
         margin: "1px 6px",
-        paddingLeft: depth > 0 ? depth * 12 + 28 : 34,
+        // Codex: Recent/flat = edge (padding-row-x only).
+        // Project children = nested (~px-8 / 32px); forks nest further.
+        paddingLeft: nested
+          ? 32 + depth * 12
+          : "var(--padding-row-x, 8px)",
         paddingRight: "var(--padding-row-x, 8px)",
-        cursor: confirmDelete || renaming ? "default" : isDragging ? "grabbing" : "grab",
+        cursor: confirmDelete || renaming || !onDragStart ? "default" : isDragging ? "grabbing" : "grab",
         userSelect: "none",
         background: confirmDelete
           ? "rgba(239,68,68,0.06)"
-          : isSelected || hovered
-            ? "var(--bg-hover)"
-            : "transparent",
+          : isSelected
+            ? "var(--bg-selected)"
+            : hovered
+              ? "var(--bg-hover)"
+              : "transparent",
         borderRadius: "var(--radius-row, 10px)",
         border: "1px solid transparent",
         boxShadow: confirmDelete ? "inset 2px 0 0 #ef4444" : "none",
@@ -2482,7 +2917,9 @@ function SessionItem({
               </IconButton>
             </div>
           ) : (
-            <span style={{ width: 18, flexShrink: 0 }} aria-hidden="true" />
+            <span style={{ fontSize: "var(--text-xs, 11px)", color: "var(--text-dim)", flexShrink: 0, marginLeft: 4, letterSpacing: "-0.01em" }}>
+              {formatRelativeTimeShort(session.modified)}
+            </span>
           )}
         </>
       )}
