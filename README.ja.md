@@ -15,13 +15,13 @@ Pi Web には Node.js 22.19.0 以降が必要です。現在のバージョン�
 **インストールせずに実行：**
 
 ```bash
-npx @agegr/pi-web@latest
+npx @fffattiger/pi-web@latest
 ```
 
 **またはグローバルにインストール：**
 
 ```bash
-npm install -g @agegr/pi-web
+npm install -g @fffattiger/pi-web
 pi-web
 ```
 
@@ -57,7 +57,7 @@ macOS または Linux：
 HTTP_PROXY=http://127.0.0.1:7890 \
 HTTPS_PROXY=http://127.0.0.1:7890 \
 NO_PROXY=localhost,127.0.0.1 \
-npx @agegr/pi-web@latest
+npx @fffattiger/pi-web@latest
 ```
 
 Windows PowerShell：
@@ -66,7 +66,7 @@ Windows PowerShell：
 $env:HTTP_PROXY = "http://127.0.0.1:7890"
 $env:HTTPS_PROXY = "http://127.0.0.1:7890"
 $env:NO_PROXY = "localhost,127.0.0.1"
-npx @agegr/pi-web@latest
+npx @fffattiger/pi-web@latest
 ```
 
 ## 機能

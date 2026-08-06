@@ -15,13 +15,13 @@
 **Запуск без установки:**
 
 ```bash
-npx @agegr/pi-web@latest
+npx @fffattiger/pi-web@latest
 ```
 
 **Или глобальная установка:**
 
 ```bash
-npm install -g @agegr/pi-web
+npm install -g @fffattiger/pi-web
 pi-web
 ```
 
@@ -57,7 +57,7 @@ API-запросы принимаются для loopback-имён, IP-адре�
 HTTP_PROXY=http://127.0.0.1:7890 \
 HTTPS_PROXY=http://127.0.0.1:7890 \
 NO_PROXY=localhost,127.0.0.1 \
-npx @agegr/pi-web@latest
+npx @fffattiger/pi-web@latest
 ```
 
 В Windows PowerShell:
@@ -66,7 +66,7 @@ npx @agegr/pi-web@latest
 $env:HTTP_PROXY = "http://127.0.0.1:7890"
 $env:HTTPS_PROXY = "http://127.0.0.1:7890"
 $env:NO_PROXY = "localhost,127.0.0.1"
-npx @agegr/pi-web@latest
+npx @fffattiger/pi-web@latest
 ```
 
 ## Возможности

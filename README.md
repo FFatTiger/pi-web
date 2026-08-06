@@ -21,7 +21,7 @@ This repository is the [`FFatTiger/pi-web`](https://github.com/FFatTiger/pi-web)
 | Security boundaries | Restricted file roots, streaming request limits, and the password gate layered on top of upstream host/origin API protections. |
 
 > [!IMPORTANT]
-> The npm package `@agegr/pi-web` is published by the upstream project. The `npx` and global-install commands below install upstream, not the fork-specific changes described above.
+> This fork publishes its own npm package: [`@fffattiger/pi-web`](https://www.npmjs.com/package/@fffattiger/pi-web). That package includes the fork features below. The upstream package remains `@agegr/pi-web` and does **not** include this fork's gate / multi-project / mobile changes.
 
 **Upstream baseline:** this fork is rebased on upstream **v0.8.6**, including Pi 0.83.0, Node.js >=22.19, loopback-default bind with explicit LAN scripts, PWA support, i18n, model discovery/catalog, project trust, request/path security and upload body limits, session-title/path hardening, model runtime reload/errors, markdown images/Mermaid/LaTeX, selected-file-line mentions, ChatInput history, minimap, and related security fixes. Fork-only production features above remain (password gate, multi-project UX, mobile polish). Compare [`agegr/pi-web`](https://github.com/agegr/pi-web) before the next rebase or release.
 
@@ -40,18 +40,18 @@ npm run dev
 
 Then open [http://localhost:30141](http://localhost:30141). `npm run dev` binds to `127.0.0.1` by default; use `npm run dev:lan` to listen on `0.0.0.0` on a trusted network.
 
-### Run the upstream npm release
+### Run this fork from npm
 
 **Run without installing:**
 
 ```bash
-npx @agegr/pi-web@latest
+npx @fffattiger/pi-web@latest
 ```
 
 **Or install globally:**
 
 ```bash
-npm install -g @agegr/pi-web
+npm install -g @fffattiger/pi-web
 pi-web
 ```
 
@@ -82,7 +82,7 @@ On macOS or Linux:
 HTTP_PROXY=http://127.0.0.1:7890 \
 HTTPS_PROXY=http://127.0.0.1:7890 \
 NO_PROXY=localhost,127.0.0.1 \
-npx @agegr/pi-web@latest
+npx @fffattiger/pi-web@latest
 ```
 
 On Windows PowerShell:
@@ -91,7 +91,7 @@ On Windows PowerShell:
 $env:HTTP_PROXY = "http://127.0.0.1:7890"
 $env:HTTPS_PROXY = "http://127.0.0.1:7890"
 $env:NO_PROXY = "localhost,127.0.0.1"
-npx @agegr/pi-web@latest
+npx @fffattiger/pi-web@latest
 ```
 
 ## Features

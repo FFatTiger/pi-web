@@ -1,9 +1,9 @@
 # Release Checklist
 
-This repo publishes two artifacts for each release:
+This fork publishes two artifacts for each release:
 
-- npm package: `@agegr/pi-web`
-- GitHub Release: `agegr/pi-web`
+- npm package: `@fffattiger/pi-web`
+- GitHub Release: `FFatTiger/pi-web`
 
 Use this checklist from a clean `main` checkout.
 
@@ -14,14 +14,15 @@ git status --short --branch
 git log --oneline --decorate -5
 gh auth status
 npm whoami
-node -e "const p=require('./package.json'); console.log(p.version)"
+node -e "const p=require('./package.json'); console.log(p.name, p.version)"
 ```
 
 Expected:
 
 - `git status` is clean, or only contains changes you intentionally plan to release.
-- GitHub is authenticated as an account that can push and create releases.
-- npm is authenticated as an account that can publish `@agegr/pi-web`.
+- GitHub is authenticated as an account that can push and create releases on `FFatTiger/pi-web`.
+- npm is authenticated as `fffattiger` (or another account that can publish `@fffattiger/pi-web`).
+- `package.json` name is `@fffattiger/pi-web`.
 
 ## 2. Publish to npm
 
@@ -39,16 +40,16 @@ Notes:
 
 - This bumps `package.json` and `package-lock.json`.
 - It intentionally runs a production build. Do not run `next build` during normal development; release work is the exception.
-- If `npm view @agegr/pi-web version` briefly shows the previous version, check the exact version instead:
+- If `npm view @fffattiger/pi-web version` briefly shows the previous version, check the exact version instead:
 
 ```bash
-npm view @agegr/pi-web@<version> version --registry https://registry.npmjs.org/
-npm view @agegr/pi-web versions --json --registry https://registry.npmjs.org/
+npm view @fffattiger/pi-web@<version> version --registry https://registry.npmjs.org/
+npm view @fffattiger/pi-web versions --json --registry https://registry.npmjs.org/
 ```
 
 ## 3. Commit the Version Bump
 
-Replace `<version>` with the new package version, for example `0.7.5`.
+Replace `<version>` with the new package version, for example `0.8.10`.
 
 ```bash
 git diff -- package.json package-lock.json
@@ -67,7 +68,7 @@ Confirm the tag does not already exist before creating it when unsure:
 
 ```bash
 git ls-remote --tags origin v<version>
-gh release view v<version> --repo agegr/pi-web
+gh release view v<version> --repo FFatTiger/pi-web
 ```
 
 ## 5. Generate Release Notes from Commits
@@ -103,7 +104,7 @@ Suggested structure:
 
 ### 内部调整
 
-- 发布 npm 包 `@agegr/pi-web@<version>`。
+- 发布 npm 包 `@fffattiger/pi-web@<version>`。
 
 ## English
 
@@ -123,7 +124,7 @@ Prepared from commits in `v<previous>..v<version>`.
 
 ### Internal
 
-- Published npm package `@agegr/pi-web@<version>`.
+- Published npm package `@fffattiger/pi-web@<version>`.
 ```
 
 ## 6. Create or Update the GitHub Release
@@ -132,7 +133,7 @@ Create a new release:
 
 ```bash
 gh release create v<version> \
-  --repo agegr/pi-web \
+  --repo FFatTiger/pi-web \
   --verify-tag \
   --title "v<version>" \
   --notes-file release-notes.md
@@ -142,14 +143,14 @@ If the release already exists and only the notes need updating:
 
 ```bash
 gh release edit v<version> \
-  --repo agegr/pi-web \
+  --repo FFatTiger/pi-web \
   --notes-file release-notes.md
 ```
 
 You can avoid a temporary file by passing notes through stdin:
 
 ```bash
-gh release edit v<version> --repo agegr/pi-web --notes-file - <<'EOF'
+gh release edit v<version> --repo FFatTiger/pi-web --notes-file - <<'EOF'
 ## 中文
 
 ...
@@ -163,8 +164,8 @@ EOF
 ## 7. Final Verification
 
 ```bash
-gh release view v<version> --repo agegr/pi-web
-npm view @agegr/pi-web@<version> version --registry https://registry.npmjs.org/
+gh release view v<version> --repo FFatTiger/pi-web
+npm view @fffattiger/pi-web@<version> version --registry https://registry.npmjs.org/
 git status --short --branch
 git log --oneline --decorate -3
 ```
@@ -172,6 +173,11 @@ git log --oneline --decorate -3
 Expected:
 
 - GitHub Release exists and is not a draft unless intentionally published as one.
-- npm exact version resolves.
+- npm exact version resolves for `@fffattiger/pi-web`.
 - `main` is aligned with `origin/main`.
 - `HEAD` points at the release commit and `v<version>` tag.
+
+## Notes
+
+- Upstream package `@agegr/pi-web` is owned by the upstream project and is **not** published from this fork.
+- CLI binary name remains `pi-web` for familiarity: `npx @fffattiger/pi-web@latest` still launches `pi-web`.
