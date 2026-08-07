@@ -1555,13 +1555,15 @@ export function AppShell() {
             autoNameStatus={autoNameStatus}
             canGenerateTitle={Boolean(
               selectedSession
-              && (sessionStats?.userMessages ?? selectedSession.messageCount) > 0
+              // After compaction the live window may have no user messages; also
+              // consult the persisted session message count.
+              && ((sessionStats?.userMessages ?? 0) > 0 || selectedSession.messageCount > 0)
               && autoNameStatus.kind !== "naming",
             )}
             generateTitleDisabledReason={
               !selectedSession
                 ? translate("title.unsaved")
-                : (sessionStats?.userMessages ?? selectedSession.messageCount) <= 0
+                : ((sessionStats?.userMessages ?? 0) <= 0 && selectedSession.messageCount <= 0)
                   ? translate("title.noMessages")
                   : autoNameStatus.kind === "error"
                     ? autoNameStatus.message
