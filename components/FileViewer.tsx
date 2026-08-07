@@ -1016,7 +1016,9 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onRevealPa
   }, [fetchGitDiff, filePath, gitRefreshKey]);
 
   useEffect(() => {
-    if (data?.language === "markdown" && initialDisplayMode !== "diff") {
+    // HTML gets the same rendered-first treatment as markdown: a generated page
+    // is usually more useful viewed than read as source.
+    if ((data?.language === "markdown" || data?.language === "html") && initialDisplayMode !== "diff") {
       setDisplayMode("preview");
     }
   }, [data?.language, initialDisplayMode]);

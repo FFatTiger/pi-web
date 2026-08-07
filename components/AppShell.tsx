@@ -1319,10 +1319,22 @@ export function AppShell() {
                   padding: "12px 16px",
                 }}>
                   {sessionStats ? (() => {
+                    const formatDuration = (ms: number) => {
+                      if (ms <= 0) return "0s";
+                      const totalSec = Math.floor(ms / 1000);
+                      const h = Math.floor(totalSec / 3600);
+                      const m = Math.floor((totalSec % 3600) / 60);
+                      const s = totalSec % 60;
+                      if (h > 0) return `${h}h ${m}m`;
+                      if (m > 0) return `${m}m ${s}s`;
+                      return `${s}s`;
+                    };
+                    const totalActiveMs = sessionStats.totalActiveMs ?? 0;
                     const sessionRows = [
                       ...(sessionStats.sessionName ? [{ label: "Name", value: sessionStats.sessionName, copyField: null }] : []),
                       { label: "File", value: sessionStats.sessionFile ?? "In-memory", copyField: "file" as const },
                       { label: "ID", value: sessionStats.sessionId, copyField: "id" as const },
+                      ...(totalActiveMs > 0 ? [{ label: translate("session.totalActive"), value: formatDuration(totalActiveMs), copyField: null }] : []),
                     ];
                     const messageRows = [
                       ["User", sessionStats.userMessages.toLocaleString()],
