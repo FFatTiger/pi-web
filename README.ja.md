@@ -45,7 +45,9 @@ PI_WEB_NO_OPEN=1 pi-web         # バックグラウンドサービスとして�
 この Fork はログインページ、署名付きセッション、`/api/gate/*` を使う fail-closed のアプリケーションゲートを提供します。これはモデルプロバイダーのログインとは別です。パスワードが未設定、設定が無効、または設定ファイルがない場合もロックされたままで、`PI_WEB_AUTH_DISABLED=true`（または設定ファイルの `auth.disabled: true`）を明示した場合にのみ無効になります。
 
 Pi Web は高権限のエージェントを呼び出せます。リモートアクセスではゲートを有効に保ち、信頼できるリバースプロキシの HTTPS または信頼できる VPN を使用してください。
-API リクエストでは、loopback 名、IP リテラル、選択したバインドホスト名、および `PI_WEB_ALLOWED_HOSTS` にカンマ区切りで指定した完全一致のホスト名のみを受け入れます。信頼できるリバースプロキシが異なる外部ホスト名を使用する場合は、この変数を設定してください。
+API リクエストでは、loopback 名、IP リテラル、選択したバインドホスト名、および `PI_WEB_ALLOWED_HOSTS` にカンマ区切りで指定した完全一致のホスト名のみを受け入れます。信頼できるリバースプロキシ / frp が異なる外部ホスト名を使用する場合は、この変数を設定してください。
+
+HTTPS トンネルではブラウザの Origin が `https://…`、Next 内部が `http://…` になることがあります。Host 許可後は同一 host+port の Origin を scheme 違いでも許可し、非 loopback Host では先頭の `X-Forwarded-Proto` を参照します（プロキシ側でクライアント値を上書きしてください）。`next dev` では同じホストを `allowedDevOrigins` に渡し、glob は `PI_WEB_ALLOWED_DEV_ORIGINS` で追加できます。
 
 ## HTTP プロキシ
 
