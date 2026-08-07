@@ -8,11 +8,19 @@ import type {
   ExtensionWidgetItem,
   SessionInfo,
   SessionTreeNode,
+  UserMessage,
 } from "@/lib/types";
 import { normalizeToolCalls } from "@/lib/normalize";
 import { sendAgentCommand } from "@/lib/agent-client";
 import { getToolNamesForPreset, type ToolEntry } from "@/lib/tool-presets";
 import type { SessionStatsInfo } from "@/lib/pi-types";
+import {
+  createPromptRecoverySnapshot,
+  removeOptimisticPrompt,
+  shouldRestoreFailedPrompt,
+  userMessageKey,
+  type PromptRecoverySnapshot,
+} from "@/lib/prompt-recovery";
 
 export interface SessionData {
   sessionId: string;
@@ -250,52 +258,6 @@ function noticeReducer(state: NoticeState, action: NoticeAction): NoticeState {
   }
 }
 
-function extractMessageText(message: Partial<AgentMessage>): string {
-  const content = (message as { content?: unknown }).content;
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content
-    .map((block) =>
-      block && typeof block === "object"
-        && (block as { type?: string }).type === "text"
-        && typeof (block as { text?: unknown }).text === "string"
-        ? (block as { text: string }).text
-        : "")
-    .filter(Boolean)
-    .join("\n");
-}
-
-function imageSignature(block: unknown): string {
-  if (!block || typeof block !== "object" || (block as { type?: unknown }).type !== "image") return "";
-  const source = (block as { source?: unknown }).source;
-  if (source && typeof source === "object") {
-    const src = source as { type?: unknown; media_type?: unknown; data?: unknown; url?: unknown };
-    return [
-      src.type === "url" ? "url" : "base64",
-      typeof src.media_type === "string" ? src.media_type : "",
-      typeof src.data === "string" ? src.data : "",
-      typeof src.url === "string" ? src.url : "",
-    ].join(":");
-  }
-  const flat = block as { data?: unknown; mimeType?: unknown };
-  return [
-    "base64",
-    typeof flat.mimeType === "string" ? flat.mimeType : "",
-    typeof flat.data === "string" ? flat.data : "",
-    "",
-  ].join(":");
-}
-
-function userMessageKey(message: Partial<AgentMessage>): string {
-  const content = (message as { content?: unknown }).content;
-  if (typeof content === "string") return JSON.stringify({ text: content, images: [] });
-  if (!Array.isArray(content)) return JSON.stringify({ text: "", images: [] });
-  return JSON.stringify({
-    text: extractMessageText(message),
-    images: content.map(imageSignature).filter(Boolean),
-  });
-}
-
 function readCompactResult(result: unknown, reason: string): CompactResultInfo | null {
   if (!result || typeof result !== "object") return null;
   const r = result as CompactCommandResult;
@@ -306,6 +268,7 @@ function readCompactResult(result: unknown, reason: string): CompactResultInfo |
 export interface ChatInputHandle {
   insertText: (text: string) => void;
   insertIfEmpty: (content: string) => void;
+  replaceMessage: (message: UserMessage) => void;
   prependText: (text: string) => void;
   addImages: (files: File[]) => void;
 }
@@ -317,6 +280,7 @@ export interface AttachedImage {
 }
 
 type SelectedModel = { provider: string; modelId: string };
+type PromptRecoveryState = PromptRecoverySnapshot & { failed: boolean };
 type ModelEntry = { id: string; name: string; provider: string };
 type ModelsResponse = {
   models: Record<string, string>;
@@ -411,9 +375,15 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const thinkingLevelOverrideRef = useRef<Exclude<ThinkingLevelOption, "auto"> | null>(null);
   const promptRunIdRef = useRef(0);
   const optimisticUserMessageKeyRef = useRef<string | null>(null);
+  const promptRecoveryRef = useRef<PromptRecoveryState | null>(null);
+  const messagesRef = useRef(messages);
   const modelSwitchPendingRef = useRef(false);
 
   const setToolPresetState = opts.setToolPreset ?? setToolPreset;
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   const currentModel = currentModelOverride ?? data?.context.model ?? pendingModel ?? null;
   const displayModel = isNew ? (newSessionModel ?? newSessionDefaultModel) : currentModel;
@@ -475,9 +445,18 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const d = await res.json() as SessionData;
       if (sessionIdRef.current !== sid) return null;
+      const persistedMessages = d.context.messages;
+      const recovery = promptRecoveryRef.current;
+      if (recovery?.failed && recovery.runId === promptRunIdRef.current) {
+        promptRecoveryRef.current = null;
+        if (shouldRestoreFailedPrompt(recovery, persistedMessages)) {
+          opts.chatInputRef?.current?.replaceMessage(recovery.message);
+        }
+      }
       setData(d);
       setActiveLeafId(d.leafId);
-      setMessages(d.context.messages);
+      messagesRef.current = persistedMessages;
+      setMessages(persistedMessages);
       setEntryIds(d.context.entryIds ?? []);
       setCurrentModelOverride((current) => modelSwitchPendingRef.current ? current : null);
       setError(null);
@@ -517,7 +496,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } finally {
       if (showLoading && !messagesLoaded) setLoading(false);
     }
-  }, []);
+  }, [opts.chatInputRef]);
 
   const loadContext = useCallback(async (sid: string, leafId: string | null) => {
     try {
@@ -916,6 +895,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       rpcPromptPendingRef.current = false;
       sdkAgentActiveRef.current = false;
       optimisticUserMessageKeyRef.current = null;
+      if (promptRecoveryRef.current?.runId === runId && !promptRecoveryRef.current.failed) {
+        promptRecoveryRef.current = null;
+      }
       const wasRunning = settleUiStage();
       if (promptWasPending) {
         notifyPromptStage(runId);
@@ -1097,6 +1079,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           const promptWasPending = rpcPromptPendingRef.current;
           rpcPromptPendingRef.current = false;
           optimisticUserMessageKeyRef.current = null;
+          if (promptRecoveryRef.current?.runId === runId && !promptRecoveryRef.current.failed) {
+            promptRecoveryRef.current = null;
+          }
           const firstNotification = notifyPromptStage(runId);
           if (!promptWasPending && !firstNotification) break;
 
@@ -1111,9 +1096,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           }
         }
         break;
-      case "prompt_error":
+      case "prompt_error": {
+        const recovery = promptRecoveryRef.current;
+        if (recovery?.runId === promptRunIdRef.current) recovery.failed = true;
         addNotice({ type: "error", message: (event.errorMessage as string | undefined) ?? "Command failed" });
         break;
+      }
       case "extension_error":
         addNotice({
           type: "error",
@@ -1250,6 +1238,14 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         : message,
       timestamp: Date.now(),
     };
+    promptRecoveryRef.current = {
+      ...createPromptRecoverySnapshot(
+        promptRunId,
+        userMsg as UserMessage,
+        messagesRef.current,
+      ),
+      failed: false,
+    };
     setMessages((prev) => [...prev, userMsg]);
     optimisticUserMessageKeyRef.current = userMessageKey(userMsg);
     promptRunIdRef.current = promptRunId;
@@ -1269,23 +1265,22 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         const existingSid = sessionIdRef.current ?? await ensuringNewSessionRef.current;
         const sid = existingSid ?? await ensureNewSession();
 
-        if (sid) {
-          sentSessionId = sid;
-          if (selectedModel) {
-            setPendingModel(selectedModel);
-            if (existingSid) {
-              await sendAgentCommand(sid, { type: "set_model", provider: selectedModel.provider, modelId: selectedModel.modelId });
-            }
+        if (!sid) throw new Error("Unable to create a session for the prompt");
+        sentSessionId = sid;
+        if (selectedModel) {
+          setPendingModel(selectedModel);
+          if (existingSid) {
+            await sendAgentCommand(sid, { type: "set_model", provider: selectedModel.provider, modelId: selectedModel.modelId });
           }
-          await ensureEventsConnected(sid);
-          promptRequestStarted = true;
-          await sendAgentCommand(sid, {
-            type: "prompt",
-            message,
-            ...(piImages?.length ? { images: piImages } : {}),
-          });
-          promoteNewSession(1, message);
         }
+        await ensureEventsConnected(sid);
+        promptRequestStarted = true;
+        await sendAgentCommand(sid, {
+          type: "prompt",
+          message,
+          ...(piImages?.length ? { images: piImages } : {}),
+        });
+        promoteNewSession(1, message);
       } else if (session) {
         sentSessionId = session.id;
         await ensureEventsConnected(session.id);
@@ -1301,9 +1296,15 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       }
     } catch (e) {
       console.error("Failed to send message:", e);
+      const errorMessage = e instanceof Error ? e.message : String(e);
+      const recovery = promptRecoveryRef.current?.runId === promptRunId
+        ? promptRecoveryRef.current
+        : null;
+      if (recovery) recovery.failed = true;
+      addNotice({ type: "error", message: errorMessage });
       // A failed prompt POST is ambiguous: the server may have accepted it
       // before the response connection was lost. Keep SSE alive until the
-      // server confirms idle so a real run cannot continue unseen.
+      // server confirms idle, then compare the session file before restoring.
       if (promptRequestStarted && sentSessionId) {
         void waitForPromptSettlement(sentSessionId, promptRunId);
         return;
@@ -1311,21 +1312,14 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       rpcPromptPendingRef.current = false;
       agentRunningRef.current = false;
       closeEvents();
-      if (e instanceof EventStreamConnectionError) {
-        const optimisticKey = optimisticUserMessageKeyRef.current;
-        if (optimisticKey) {
-          setMessages((prev) => {
-            const last = prev[prev.length - 1];
-            return last?.role === "user" && userMessageKey(last) === optimisticKey
-              ? prev.slice(0, -1)
-              : prev;
-          });
+      if (recovery) {
+        const withoutOptimistic = removeOptimisticPrompt(messagesRef.current, recovery);
+        messagesRef.current = withoutOptimistic;
+        setMessages(withoutOptimistic);
+        if (shouldRestoreFailedPrompt(recovery, withoutOptimistic)) {
+          opts.chatInputRef?.current?.replaceMessage(recovery.message);
         }
-        addNotice({ type: "error", message: e.message });
-        // The prompt never reached the agent, so restore the user's text into
-        // the input instead of losing it. Mirrors the shell-command recovery in
-        // executeBash; insertIfEmpty avoids clobbering anything typed since.
-        if (message) opts.chatInputRef?.current?.insertIfEmpty(message);
+        promptRecoveryRef.current = null;
       }
       optimisticUserMessageKeyRef.current = null;
       setAgentRunning(false);
