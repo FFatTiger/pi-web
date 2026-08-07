@@ -67,10 +67,13 @@ pi-web --no-open                # do not open the browser automatically
 
 PORT=8080 pi-web                # environment variable is also supported
 PI_WEB_HOSTNAME=0.0.0.0 pi-web  # explicit network exposure
+PI_WEB_ALLOWED_HOSTS=pi-web.example.com pi-web  # reverse proxy / frp public hostname
 PI_WEB_NO_OPEN=1 pi-web         # useful when running as a background service
 ```
 
 Pi Web listens on `127.0.0.1` by default. This fork adds a fail-closed password gate; still prefer loopback unless you intentionally expose a trusted LAN bind.
+
+Behind HTTPS tunnels (frp, nginx, Caddy) the browser Origin is `https://…` while Next often sees `http://…`. API host checks still require the public hostname in `PI_WEB_ALLOWED_HOSTS` (comma-separated exact hosts). For `next dev` only, the same value is also fed into Next `allowedDevOrigins`; optional globs can go in `PI_WEB_ALLOWED_DEV_ORIGINS` (e.g. `*.tunnel.example.com`).
 
 ## HTTP Proxy
 
@@ -142,7 +145,6 @@ PI_WEB_AUTH_DISABLED=true pi-web
 ### Progressive Web App
 
 This fork keeps the **upstream** installable PWA: Web App Manifest, service worker, offline fallback page, and icons. There is no fork-specific PWA update banner and no Web Push / completion-notification channel.
-
 
 ## Development
 

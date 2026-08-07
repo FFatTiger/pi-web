@@ -56,7 +56,9 @@ PI_WEB_NO_OPEN=1 pi-web         # 适用于后台服务或开机自启
 ```
 
 Pi Web 默认仅监听 `127.0.0.1`。**上游版本没有应用层身份验证**；本 Fork 则提供下文所述的 fail-closed 密码门禁。无论使用哪个版本，都不应把高权限 agent 直接暴露到互联网；非 loopback 监听仅应在可信网络使用。
-API 请求仅接受 loopback 名称、IP 字面量、当前监听主机名，以及 `PI_WEB_ALLOWED_HOSTS` 中以逗号分隔的精确主机名。可信反向代理使用不同的外部主机名时，请配置该变量。
+API 请求仅接受 loopback 名称、IP 字面量、当前监听主机名，以及 `PI_WEB_ALLOWED_HOSTS` 中以逗号分隔的精确主机名。可信反向代理 / frp 使用不同的外部主机名时，请配置该变量。
+
+HTTPS 隧道场景下，浏览器 Origin 常为 `https://…`，而 Next 内部 URL 仍是 `http://…`；request-security 会按主机名匹配 Origin，并优先读取 `X-Forwarded-Proto`。`next dev` 时同一 `PI_WEB_ALLOWED_HOSTS` 也会写入 Next 的 `allowedDevOrigins`；若需要 glob（如 `*.tunnel.example.com`），可另设 `PI_WEB_ALLOWED_DEV_ORIGINS`。
 
 ## HTTP 代理
 

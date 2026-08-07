@@ -26,6 +26,24 @@ try {
 	/* package not found, use default */
 }
 
+/** Hostnames/globs Next.js should accept in `next dev` (tunnel / reverse-proxy). */
+function allowedDevOriginsFromEnvironment(): string[] {
+	const defaults = ["192.168.*.*", "127.0.0.1"];
+	// Reuse API host allow-list so frp/public hostnames only need one env var.
+	// Optional PI_WEB_ALLOWED_DEV_ORIGINS for globs that are not exact API hosts.
+	const configured = [
+		process.env.PI_WEB_HOSTNAME,
+		...(process.env.PI_WEB_ALLOWED_HOSTS?.split(",") ?? []),
+		...(process.env.PI_WEB_ALLOWED_DEV_ORIGINS?.split(",") ?? []),
+	]
+		.map((value) => value?.trim())
+		.filter((value): value is string => Boolean(value))
+		// Next expects hostnames / globs, not full URLs or host:port.
+		.map((value) => value.replace(/^https?:\/\//i, "").replace(/:\d+$/, ""))
+		.filter((value) => value.length > 0 && value !== "0.0.0.0");
+	return [...new Set([...defaults, ...configured])];
+}
+
 const nextConfig: NextConfig = {
 	// Nested git worktrees can sit under a monorepo with another lockfile.
 	// Pin tracing to this package so production output does not follow the parent root.
@@ -37,12 +55,8 @@ const nextConfig: NextConfig = {
 		"@earendil-works/pi-ai",
 		"@earendil-works/pi-tui",
 	],
-	allowedDevOrigins: [
-		"192.168.*.*",
-		"127.0.0.1",
-		// frp / reverse-proxy public hostnames (HTTPS tunnel)
-		"*.t.huu.im",
-	],
+	// No personal tunnel hostnames here — set PI_WEB_ALLOWED_HOSTS / PI_WEB_ALLOWED_DEV_ORIGINS.
+	allowedDevOrigins: allowedDevOriginsFromEnvironment(),
 	async headers() {
 		return [
 			{
