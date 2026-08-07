@@ -20,6 +20,20 @@ function hostnameFromAuthority(value: string): string | null {
   }
 }
 
+/** Explicit port from a Host authority, or null when absent/default. */
+function explicitPortFromAuthority(value: string): string | null {
+  if (!value || /[\s/@\\]/.test(value)) return null;
+  try {
+    const parsed = new URL(`http://${value}`);
+    if (parsed.username || parsed.password || parsed.pathname !== "/" || parsed.search || parsed.hash) {
+      return null;
+    }
+    return parsed.port || null;
+  } catch {
+    return null;
+  }
+}
+
 function normalizeConfiguredHostname(value: string | undefined): string | null {
   const trimmed = value?.trim();
   if (!trimmed) return null;
@@ -45,10 +59,61 @@ function canonicalOrigin(value: string): string | null {
   }
 }
 
-function getRequestOrigin(request: Request): string | null {
-  const requestUrl = new URL(request.url);
+function defaultPortForProtocol(protocol: string): string {
+  return protocol === "https:" ? "443" : "80";
+}
+
+function requestProtocol(request: Request): string {
+  // TLS is often terminated at a reverse proxy / tunnel (frp, nginx, Caddy).
+  // Only trust X-Forwarded-Proto for non-loopback, non-IP Host values (operator-
+  // allowlisted public names). Proxies should overwrite client-supplied values.
   const host = request.headers.get("host");
-  return host ? canonicalOrigin(`${requestUrl.protocol}//${host}`) : null;
+  const hostname = host ? hostnameFromAuthority(host) : null;
+  const trustForwarded = hostname !== null
+    && !isLoopbackHostname(hostname)
+    && !isIP(hostname);
+  if (trustForwarded) {
+    const forwarded = request.headers
+      .get("x-forwarded-proto")
+      ?.split(",")[0]
+      ?.trim()
+      .toLowerCase();
+    if (forwarded === "https" || forwarded === "http") return `${forwarded}:`;
+  }
+  try {
+    return new URL(request.url).protocol;
+  } catch {
+    return "http:";
+  }
+}
+
+function getRequestOrigin(request: Request): string | null {
+  const host = request.headers.get("host");
+  return host ? canonicalOrigin(`${requestProtocol(request)}//${host}`) : null;
+}
+
+/**
+ * Match Origin host+port against the Host header, ignoring scheme differences
+ * caused by upstream TLS termination (https Origin vs http internal URL).
+ * Non-default ports must still agree; a bare Host only implies 80/443.
+ */
+function isOriginMatchingRequestHost(origin: string, hostHeader: string): boolean {
+  let originUrl: URL;
+  try {
+    originUrl = new URL(origin);
+  } catch {
+    return false;
+  }
+  if (originUrl.protocol !== "http:" && originUrl.protocol !== "https:") return false;
+
+  const requestHostname = hostnameFromAuthority(hostHeader);
+  if (!requestHostname) return false;
+  if (normalizeHostname(originUrl.hostname) !== requestHostname) return false;
+
+  const originPort = originUrl.port || defaultPortForProtocol(originUrl.protocol);
+  const hostPort = explicitPortFromAuthority(hostHeader);
+  if (hostPort !== null) return originPort === hostPort;
+  return originPort === "80" || originPort === "443";
 }
 
 function isUserInitiatedSessionExportNavigation(request: Request): boolean {
@@ -95,7 +160,12 @@ export function isApiRequestOriginAllowed(request: Request): boolean {
   if (!origin) return true;
 
   const requestOrigin = getRequestOrigin(request);
-  return requestOrigin !== null && canonicalOrigin(origin) === requestOrigin;
+  if (requestOrigin !== null && canonicalOrigin(origin) === requestOrigin) return true;
+
+  // Behind HTTPS tunnels the browser Origin is https://host while Next may see
+  // http://host. Host was already allow-listed; require host+port agreement.
+  const host = request.headers.get("host");
+  return host !== null && isOriginMatchingRequestHost(origin, host);
 }
 
 export function shouldCheckApiRequestOrigin(request: Request): boolean {

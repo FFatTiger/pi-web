@@ -45,3 +45,6 @@ next-env.d.ts
 
 # local planning docs - do not publish
 /docs/superpowers/
+
+# local frp tunnel (contains tokens)
+frpc.toml
