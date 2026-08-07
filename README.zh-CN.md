@@ -19,7 +19,7 @@
 > [!IMPORTANT]
 > 本 Fork 发布自己的 npm 包：[`@fffattiger/pi-web`](https://www.npmjs.com/package/@fffattiger/pi-web)，包含下方 Fork 特性。上游包仍是 `@agegr/pi-web`，不包含本 Fork 的门禁/多项目/移动端改动。
 
-**上游基线：** 本 Fork 基于上游 **v0.8.6**，包括 Pi 0.83.0、Node.js >=22.19、默认 loopback 监听与显式 LAN 脚本、PWA、i18n、模型发现/目录、项目可信任模式、请求/路径安全、上传限制、会话标题/路径加固、模型运行时错误处理、Markdown 图片/Mermaid/LaTeX、选中代码行 mention、输入历史和 minimap 等。上方的密码门禁、多项目体验和移动端优化仍是 Fork 独有能力。
+**上游基线：** 本 Fork 已选择性同步上游至 **v0.8.7 / Pi 0.84.0**（保留 Codex 多项目壳），包括 Node.js >=22.19、默认 loopback 监听与显式 LAN 脚本、PWA、i18n、模型发现/目录、项目可信任模式、请求/路径安全、上传限制、会话标题/路径加固、模型运行时错误处理、Markdown 图片/Mermaid/LaTeX、斜杠命令折叠、turn 写文件列表、会话活跃时长、factory extension widgets、选中行/整文件 mention、输入历史和 minimap 等。上方的密码门禁、多项目体验和移动端优化仍是 Fork 独有能力。
 
 ## 快速开始
 
