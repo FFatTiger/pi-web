@@ -146,6 +146,7 @@ export function WorkspaceFilePanel(props: WorkspaceFilePanelProps) {
                         window.setTimeout(() => explorerRef.current?.revealPath(path), explorerOpen ? 0 : 50);
                       }}
                       onMentionLines={onMentionLines}
+                      onAtMention={onAtMention}
                       gitRefreshKey={explorerRefreshKey}
                       initialDisplayMode={activeFileTab!.initialDisplayMode}
                     />

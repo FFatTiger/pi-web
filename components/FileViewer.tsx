@@ -37,6 +37,8 @@ interface Props {
   /** Reveal a directory/file in the explorer tree (breadcrumb click). */
   onRevealPath?: (path: string) => void;
   onMentionLines?: (relativePath: string, startLine: number, endLine: number) => void;
+  /** Insert this file's relative path into the chat input (@ mention). */
+  onAtMention?: (relativePath: string, isDir: boolean) => void;
   gitRefreshKey?: number;
   initialDisplayMode?: DisplayMode;
 }
@@ -900,6 +902,7 @@ export function FileViewer({
   onOpenFile,
   onRevealPath,
   onMentionLines,
+  onAtMention,
   gitRefreshKey,
   initialDisplayMode,
 }: Props) {
@@ -920,13 +923,14 @@ export function FileViewer({
       onOpenFile={onOpenFile}
       onRevealPath={onRevealPath}
       onMentionLines={onMentionLines}
+      onAtMention={onAtMention}
       gitRefreshKey={gitRefreshKey}
       initialDisplayMode={initialDisplayMode}
     />
   );
 }
 
-function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onRevealPath, onMentionLines, gitRefreshKey, initialDisplayMode }: Props) {
+function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onRevealPath, onMentionLines, onAtMention, gitRefreshKey, initialDisplayMode }: Props) {
   const { isDark } = useTheme();
   const codeTheme = useMemo(
     () => normalizeCodeTheme(isDark ? vscDarkPlus : vs),
@@ -1079,10 +1083,6 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onRevealPa
     );
   }, [cwd, filePath, onMentionLines]);
 
-  const handleMentionSelectedLines = useCallback(() => {
-    mentionLineRange(selectedLineRange);
-  }, [mentionLineRange, selectedLineRange]);
-
   useEffect(() => {
     if (!onMentionLines || displayMode !== "source") return;
 
@@ -1197,39 +1197,52 @@ function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onRevealPa
             </div>
           )}
 
+          {(onAtMention || onMentionLines) && (
+            <button
+              type="button"
+              onPointerDown={(event) => event.preventDefault()}
+              onClick={() => {
+                // Mention selected lines when a range is active; otherwise
+                // fall back to a whole-file @mention. Same button, both modes.
+                if (selectedLineRange && onMentionLines) {
+                  mentionLineRange(selectedLineRange);
+                } else {
+                  onAtMention?.(getRelativeFilePath(filePath, cwd), false);
+                }
+              }}
+              title={
+                selectedLineRange && onMentionLines
+                  ? `${t("i18n.mentionSelectedLines")} (L${selectedLineRange.startLine}${selectedLineRange.startLine !== selectedLineRange.endLine ? `-L${selectedLineRange.endLine}` : ""})`
+                  : t("files.insertPath")
+              }
+              aria-label={t("files.mention")}
+              disabled={!onAtMention && !onMentionLines}
+              className="file-viewer-icon-button"
+            >
+              <MentionIcon />
+            </button>
+          )}
+
           {effectiveDisplayMode === "source" && (
-            <>
-              <button
-                type="button"
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={handleMentionSelectedLines}
-                title={t("i18n.mentionSelectedLines")}
-                aria-label={t("i18n.mentionSelectedLines")}
-                disabled={!selectedLineRange}
-                className="file-viewer-icon-button"
-              >
-                <MentionIcon />
-              </button>
-              <button
-                type="button"
-                onClick={() => setWrapLines((value) => !value)}
-                title={wrapLines ? t("i18n.disableWrap") : t("i18n.enableWrap")}
-                aria-label={wrapLines ? t("i18n.disableWrap") : t("i18n.enableWrap")}
-                aria-pressed={wrapLines}
-                className="file-viewer-icon-button"
-                style={{
-                  background: wrapLines ? "var(--bg-selected)" : "transparent",
-                  color: wrapLines ? "var(--text)" : "var(--text-muted)",
-                }}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M3 6h18" />
-                  <path d="M3 12h15a3 3 0 1 1 0 6h-4" />
-                  <path d="m16 16-2 2 2 2" />
-                  <path d="M3 18h7" />
-                </svg>
-              </button>
-            </>
+            <button
+              type="button"
+              onClick={() => setWrapLines((value) => !value)}
+              title={wrapLines ? t("i18n.disableWrap") : t("i18n.enableWrap")}
+              aria-label={wrapLines ? t("i18n.disableWrap") : t("i18n.enableWrap")}
+              aria-pressed={wrapLines}
+              className="file-viewer-icon-button"
+              style={{
+                background: wrapLines ? "var(--bg-selected)" : "transparent",
+                color: wrapLines ? "var(--text)" : "var(--text-muted)",
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M3 6h18" />
+                <path d="M3 12h15a3 3 0 1 1 0 6h-4" />
+                <path d="m16 16-2 2 2 2" />
+                <path d="M3 18h7" />
+              </svg>
+            </button>
           )}
 
           {!isDeletedDiff && (

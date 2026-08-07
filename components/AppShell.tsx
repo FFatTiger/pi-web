@@ -20,6 +20,7 @@ import { useViewportHeight } from "@/hooks/useViewportHeight";
 import { useResizablePanel } from "@/hooks/useResizablePanel";
 import { copyText } from "@/lib/clipboard";
 import { getFileName } from "@/lib/file-paths";
+import { loadExplorerOpen, saveExplorerOpen } from "@/lib/file-explorer-state";
 import { buildAtMentionText, buildFileAtMentionsText, buildFileLineMentionText } from "@/lib/file-fuzzy";
 import { getInitialNavigation } from "@/lib/initial-navigation";
 import {
@@ -407,8 +408,22 @@ export function AppShell() {
   }, [activeTopPanel]);
 
   // Codex: folder tree is independently collapsible from the open-file tabs.
+  // Default open until hydration; then restore the global preference (session
+  // snapshots may still override when switching sessions).
   const [explorerOpen, setExplorerOpen] = useState(true);
   explorerOpenRef.current = explorerOpen;
+
+  useEffect(() => {
+    setExplorerOpen(loadExplorerOpen());
+  }, []);
+
+  const setExplorerOpenPersisted = useCallback((next: boolean | ((prev: boolean) => boolean)) => {
+    setExplorerOpen((prev) => {
+      const value = typeof next === "function" ? next(prev) : next;
+      saveExplorerOpen(value);
+      return value;
+    });
+  }, []);
 
   const activeRightPanelTab = rightPanelTabs.find((tab) => tab.id === activeRightPanelTabId) ?? null;
   const filesPanelActive = rightPanelOpen
@@ -462,23 +477,36 @@ export function AppShell() {
     const hasTabs = nextTabs.length > 0;
     setRightPanelOpen(savedPanel?.open ?? hasTabs);
     setRightPanelMaximized(hasTabs && (savedPanel?.maximized ?? false));
-    setExplorerOpen(savedPanel?.explorerOpen ?? true);
+    // Session snapshot wins when present; otherwise keep the global preference.
+    setExplorerOpen(savedPanel?.explorerOpen ?? loadExplorerOpen());
   }, []);
 
   // Same @mention format as the chat input's @ autocomplete, so the agent's
   // read tool resolves it the same way (it strips the @ prefix).
   const handleAtMention = useCallback((relativePath: string, isDir: boolean) => {
     chatInputRef.current?.insertText(buildAtMentionText(relativePath, isDir));
-  }, []);
+    if (isMobile) {
+      setRightPanelOpen(false);
+      setSidebarOpen(false);
+    }
+  }, [isMobile]);
 
   const handleAtMentions = useCallback((relativePaths: string[]) => {
     const mentions = buildFileAtMentionsText(relativePaths);
     if (mentions) chatInputRef.current?.insertText(mentions);
-  }, []);
+    if (isMobile) {
+      setRightPanelOpen(false);
+      setSidebarOpen(false);
+    }
+  }, [isMobile]);
 
   const handleFileLineMention = useCallback((relativePath: string, startLine: number, endLine: number) => {
     chatInputRef.current?.insertText(buildFileLineMentionText(relativePath, startLine, endLine));
-  }, []);
+    if (isMobile) {
+      setRightPanelOpen(false);
+      setSidebarOpen(false);
+    }
+  }, [isMobile]);
 
   const [activeCwd, setActiveCwd] = useState<string | null>(null);
   const [activeProjectRoot, setActiveProjectRoot] = useState<string | null>(null);
@@ -843,12 +871,12 @@ export function AppShell() {
     // If files surface already open, just toggle the tree. Otherwise open files shell.
     const hasFilesSurface = rightPanelTabsRef.current.some((tab) => tab.kind === "files" || tab.kind === "file");
     if (rightPanelOpen && hasFilesSurface) {
-      setExplorerOpen((value) => !value);
+      setExplorerOpenPersisted((value) => !value);
       return;
     }
-    setExplorerOpen(true);
+    setExplorerOpenPersisted(true);
     openRightPanelKind("files");
-  }, [activeCwd, isMobile, openRightPanelKind, rightPanelOpen]);
+  }, [activeCwd, isMobile, openRightPanelKind, rightPanelOpen, setExplorerOpenPersisted]);
 
   const toggleSideChatPanel = useCallback(() => {
     if (!selectedSession) return;
@@ -1590,7 +1618,7 @@ export function AppShell() {
             }}
             onOpenFiles={() => {
               if (!activeCwd) return;
-              setExplorerOpen(true);
+              setExplorerOpenPersisted(true);
               openRightPanelKind("files");
             }}
             onViewFullHistory={handleViewFullHistory}
@@ -1644,7 +1672,7 @@ export function AppShell() {
           onSelectPanelTab={handleSelectRightPanelTab}
           onClosePanelTab={handleCloseRightPanelTab}
           onOpenAction={handleOpenRightPanelAction}
-          onToggleExplorer={() => setExplorerOpen((value) => !value)}
+          onToggleExplorer={() => setExplorerOpenPersisted((value) => !value)}
           onToggleRightPanelMaximized={toggleRightPanelMaximized}
           onCloseRightPanel={closeRightPanel}
           onOpenFile={handleOpenFile}
