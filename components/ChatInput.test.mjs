@@ -8,7 +8,7 @@ const jiti = createJiti(import.meta.url, {
   jsx: { runtime: "automatic" },
   tsconfigPaths: true,
 });
-const { ChatInput, ModelErrorBanner, ModelScopeWarningBanner, filterModelOptions } = await jiti.import("./ChatInput.tsx");
+const { ChatInput, ModelErrorBanner, ModelScopeWarningBanner, canRestoreUserMessage, filterModelOptions, getUserMessageText, getUserMessageDraftImages } = await jiti.import("./ChatInput.tsx");
 // Import via the same alias ChatInput uses so React context shares one module instance.
 const { I18nProvider } = await jiti.import("@/hooks/useI18n");
 
@@ -61,6 +61,30 @@ test("keeps the model selector visible when a model error leaves no options", ()
   assert.match(html, /aria-label="No available models"|title="No available models"/);
 });
 
+test("shows and locks the optimistic model while a switch is pending", () => {
+  const html = renderToStaticMarkup(
+    React.createElement(
+      I18nProvider,
+      null,
+      React.createElement(ChatInput, {
+        onSend() {},
+        onAbort() {},
+        onModelChange() {},
+        isStreaming: false,
+        model: { provider: "deepseek", modelId: "deepseek-v4-flash" },
+        modelList: [{ provider: "deepseek", id: "deepseek-v4-flash", name: "DeepSeek V4 Flash" }],
+        modelSwitching: true,
+      }),
+    ),
+  );
+
+  assert.match(html, /title="Switching model"/);
+  assert.match(html, /aria-busy="true"/);
+  assert.match(html, /disabled=""/);
+  assert.match(html, />DeepSeek V4 Flash</);
+  assert.match(html, /animation:spin 0\.8s linear infinite/);
+});
+
 test("filters model options by name and id", () => {
   const options = [
     { provider: "ollama", modelId: "qwen3:latest", name: "Qwen 3" },
@@ -74,6 +98,41 @@ test("filters model options by name and id", () => {
   assert.equal(filterModelOptions(options, "anthropic/claude").length, 0);
   assert.equal(filterModelOptions(options, "missing").length, 0);
   assert.equal(filterModelOptions(options, "  "), options);
+});
+
+test("restores text and base64 images when editing a user message", () => {
+  const message = {
+    role: "user",
+    content: [
+      { type: "text", text: "Review this image @src/example.ts " },
+      { type: "image", source: { type: "base64", media_type: "image/png", data: "AQID" } },
+    ],
+  };
+
+  assert.equal(getUserMessageText(message), "Review this image @src/example.ts ");
+  assert.deepEqual(getUserMessageDraftImages(message), [
+    { data: "AQID", mimeType: "image/png" },
+  ]);
+});
+
+test("restores legacy flat image entries when editing a user message", () => {
+  const message = {
+    role: "user",
+    content: [
+      { type: "image", data: "AQID", mimeType: "image/jpeg" },
+    ],
+  };
+
+  assert.deepEqual(getUserMessageDraftImages(message), [
+    { data: "AQID", mimeType: "image/jpeg" },
+  ]);
+});
+
+test("does not restore a historical message over a pending image attachment", () => {
+  assert.equal(canRestoreUserMessage("", 0, 0), true);
+  assert.equal(canRestoreUserMessage("", 1, 0), false);
+  assert.equal(canRestoreUserMessage("", 0, 1), false);
+  assert.equal(canRestoreUserMessage("draft", 0, 0), false);
 });
 
 test("renders compact errors above the input as a wrapping alert", () => {

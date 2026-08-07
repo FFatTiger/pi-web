@@ -2670,17 +2670,26 @@ function SessionItem({
 
   const title = session.name || session.firstMessage.slice(0, 50) || session.id.slice(0, 12);
 
+  // Select the whole name once the rename input is mounted (startRename's
+  // immediate setTimeout can fire before the input exists).
+  useEffect(() => {
+    if (!renaming) return;
+    const id = requestAnimationFrame(() => inputRef.current?.select());
+    return () => cancelAnimationFrame(id);
+  }, [renaming]);
+
   const startRename = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
-    setRenameValue(session.name ?? "");
+    setRenameValue(session.name || session.firstMessage.slice(0, 50) || session.id.slice(0, 12));
     setRenaming(true);
-    setTimeout(() => inputRef.current?.select(), 0);
-  }, [session.name]);
+  }, [session.name, session.firstMessage, session.id]);
 
   const commitRename = useCallback(async () => {
     const name = renameValue.trim();
     setRenaming(false);
-    if (name === (session.name ?? "")) return;
+    // No-op when unchanged: the fallback title (first message / id) isn't a
+    // real stored name, so don't persist it as one.
+    if (renameValue === title || name === (session.name ?? "")) return;
     try {
       await fetch(`/api/sessions/${encodeURIComponent(session.id)}`, {
         method: "PATCH",
@@ -2691,7 +2700,7 @@ function SessionItem({
     } catch {
       // ignore
     }
-  }, [renameValue, session.id, session.name, onRenamed]);
+  }, [renameValue, session.id, session.name, onRenamed, title]);
 
   const performDelete = useCallback(async () => {
     setConfirmDelete(false);

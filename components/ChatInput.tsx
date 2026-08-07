@@ -4,6 +4,7 @@ import React, { useRef, useState, useCallback, useEffect, useImperativeHandle, f
 import { createPortal } from "react-dom";
 import type { BuiltinSlashCommandResult, CompactResultInfo, QueuedMessages, SlashCommandInfo } from "@/hooks/useAgentSession";
 import type { SkillsResponse } from "@/lib/api-types";
+import type { TextContent, UserMessage } from "@/lib/types";
 import { clearDraft, getDraft, setDraft, type ChatDraftImage } from "@/lib/draft-store";
 import {
   MAX_ATTACHED_IMAGE_BYTES,
@@ -94,6 +95,8 @@ interface Props {
   /** Diagnostics from resolving `enabledModels`, e.g. a pattern that matched nothing. */
   modelScopeWarnings?: string[];
   onModelChange?: (provider: string, modelId: string) => void;
+  /** True while an existing-session set_model + reload is in flight. */
+  modelSwitching?: boolean;
   compactError?: string | null;
   compactResult?: CompactResultInfo | null;
   toolPreset?: "none" | "default" | "full";
@@ -122,6 +125,7 @@ interface Props {
 export interface ChatInputHandle {
   insertText: (text: string) => void;
   insertIfEmpty: (text: string) => void;
+  replaceMessage: (message: UserMessage) => void;
   prependText: (text: string) => void;
   addImages: (files: File[]) => void;
 }
@@ -258,6 +262,38 @@ function draftImagesToAttachedImages(images: ChatDraftImage[] | undefined): Atta
     .map(draftImageToAttachedImage);
 }
 
+export function canRestoreUserMessage(
+  value: string,
+  attachedImageCount: number,
+  pendingImageCount: number,
+): boolean {
+  return !value.trim() && attachedImageCount === 0 && pendingImageCount === 0;
+}
+
+export function getUserMessageText(message: UserMessage): string {
+  if (typeof message.content === "string") return message.content;
+  return message.content
+    .filter((block): block is TextContent => block.type === "text")
+    .map((block) => block.text)
+    .join("\n");
+}
+
+export function getUserMessageDraftImages(message: UserMessage): ChatDraftImage[] {
+  if (typeof message.content === "string") return [];
+  return message.content.flatMap((block) => {
+    if (block.type !== "image") return [];
+
+    // Support both the current nested image format and older flat pi-ai entries.
+    const flat = block as unknown as { data?: unknown; mimeType?: unknown };
+    const data = block.source?.type === "base64" ? block.source.data : flat.data;
+    const mimeType = block.source?.type === "base64" ? block.source.media_type : flat.mimeType;
+    if (typeof data !== "string" || typeof mimeType !== "string") return [];
+
+    const image = { data, mimeType };
+    return isBase64ImageWithinLimits(image) ? [image] : [];
+  });
+}
+
 function revokeImagePreview(image: AttachedImage): void {
   if (image.previewUrl.startsWith("blob:")) {
     URL.revokeObjectURL(image.previewUrl);
@@ -359,7 +395,7 @@ export function ModelScopeWarningBanner({ warnings }: { warnings?: string[] }) {
 }
 
 export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
-  onSend, onAbort, onSteer, onFollowUp, isStreaming, model, isAutoModelSelection, modelNames, modelList, modelError, modelScopeWarnings, onModelChange,
+  onSend, onAbort, onSteer, onFollowUp, isStreaming, model, isAutoModelSelection, modelNames, modelList, modelError, modelScopeWarnings, onModelChange, modelSwitching,
   compactError, compactResult, toolPreset, onToolPresetChange,
   thinkingLevel, onThinkingLevelChange, availableThinkingLevels, thinkingLevelMap,
   retryInfo, queuedMessages, inputHistory = [], onRecallQueue,
@@ -437,6 +473,25 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       if (current.trim()) return;
       setValue(text);
       setAtQuery(null);
+      requestAnimationFrame(() => {
+        if (!ta) return;
+        ta.focus();
+        ta.style.height = "auto";
+        ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
+      });
+    },
+    replaceMessage(message: UserMessage) {
+      const ta = textareaRef.current;
+      const current = ta ? ta.value : value;
+      if (!canRestoreUserMessage(current, attachedImagesRef.current.length, pendingImageCountRef.current)) return;
+
+      setValue(getUserMessageText(message));
+      setAtQuery(null);
+      setHistoryMenuOpen(false);
+      setAttachedImages((prev) => {
+        prev.forEach(revokeImagePreview);
+        return draftImagesToAttachedImages(getUserMessageDraftImages(message));
+      });
       requestAnimationFrame(() => {
         if (!ta) return;
         ta.focus();
@@ -2072,7 +2127,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               </div>
             )}
 
-            {/* Model selector — visible always, disabled during streaming */}
+            {/* Model selector — visible always, disabled while streaming or switch is busy */}
             {onModelChange && (
                 <div ref={dropdownRef} className="chat-input-toolbar-model" style={{ position: "relative", flex: isMobile ? "1 1 auto" : undefined, minWidth: 0 }}>
                   <button
@@ -2088,7 +2143,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                         return !open;
                       });
                     }}
-                    disabled={isStreaming}
+                    disabled={isStreaming || modelSwitching}
+                    aria-busy={modelSwitching || undefined}
                     style={{
                       display: "flex", alignItems: "center", gap: 6,
                       justifyContent: isMobile ? "flex-start" : undefined,
@@ -2101,13 +2157,13 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                       border: "none",
                       borderRadius: 6,
                       color: "var(--text-muted)",
-                      cursor: isStreaming ? "not-allowed" : "pointer",
+                      cursor: isStreaming || modelSwitching ? "not-allowed" : "pointer",
                       fontSize: 12,
-                      opacity: isStreaming ? 0.5 : 1,
+                      opacity: isStreaming || modelSwitching ? 0.5 : 1,
                       transition: "background-color 120ms ease, color 120ms ease, transform 120ms cubic-bezier(0.23, 1, 0.32, 1)",
                     }}
                     onMouseEnter={(e) => {
-                      if (isStreaming) return;
+                      if (isStreaming || modelSwitching) return;
                       e.currentTarget.style.background = "var(--bg-hover)";
                       e.currentTarget.style.color = "var(--text)";
                     }}
@@ -2115,12 +2171,18 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                       e.currentTarget.style.background = modelDropdownOpen ? "var(--bg-hover)" : "none";
                       e.currentTarget.style.color = "var(--text-muted)";
                     }}
-                    title={modelOptions.length > 0 ? t("chat.changeModel") : t("chat.noAvailableModels")}
-                    aria-label={modelOptions.length > 0 ? t("chat.changeModel") : t("chat.noAvailableModels")}
+                    title={modelSwitching ? "Switching model" : modelOptions.length > 0 ? t("chat.changeModel") : t("chat.noAvailableModels")}
+                    aria-label={modelSwitching ? "Switching model" : modelOptions.length > 0 ? t("chat.changeModel") : t("chat.noAvailableModels")}
                     aria-expanded={modelDropdownOpen}
                     aria-haspopup="dialog"
                   >
-                    <ProviderIcon id={model?.provider ?? "unknown"} size={14} />
+                    {modelSwitching ? (
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" style={{ animation: "spin 0.8s linear infinite", flexShrink: 0 }} aria-hidden="true">
+                        <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+                      </svg>
+                    ) : (
+                      <ProviderIcon id={model?.provider ?? "unknown"} size={14} />
+                    )}
                     <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
                       {currentName ?? (modelOptions.length > 0 ? t("chat.selectModel") : t("chat.noAvailableModels"))}
                     </span>
