@@ -367,6 +367,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [forkingEntryId, setForkingEntryId] = useState<string | null>(null);
   const [currentModelOverride, setCurrentModelOverride] = useState<{ provider: string; modelId: string } | null>(null);
   const [pendingModel, setPendingModel] = useState<{ provider: string; modelId: string } | null>(null);
+  const [modelSwitching, setModelSwitching] = useState(false);
   const [isCompacting, setIsCompacting] = useState(false);
   const [compactError, setCompactError] = useState<string | null>(null);
   const [compactResult, setCompactResult] = useState<CompactResultInfo | null>(null);
@@ -410,6 +411,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const thinkingLevelOverrideRef = useRef<Exclude<ThinkingLevelOption, "auto"> | null>(null);
   const promptRunIdRef = useRef(0);
   const optimisticUserMessageKeyRef = useRef<string | null>(null);
+  const modelSwitchPendingRef = useRef(false);
 
   const setToolPresetState = opts.setToolPreset ?? setToolPreset;
 
@@ -477,7 +479,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       setActiveLeafId(d.leafId);
       setMessages(d.context.messages);
       setEntryIds(d.context.entryIds ?? []);
-      setCurrentModelOverride(null);
+      setCurrentModelOverride((current) => modelSwitchPendingRef.current ? current : null);
       setError(null);
       if (d.context.thinkingLevel && d.context.thinkingLevel !== "off") {
         setThinkingLevel(d.context.thinkingLevel as ThinkingLevelOption);
@@ -1435,14 +1437,34 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       return;
     }
     const sid = sessionIdRef.current;
-    if (!sid) return;
+    if (!sid || modelSwitchPendingRef.current) return;
+    const target = { provider, modelId };
+    const previousOverride = currentModelOverride;
+    modelSwitchPendingRef.current = true;
+    setCurrentModelOverride(target);
+    setModelSwitching(true);
     try {
       await sendAgentCommand(sid, { type: "set_model", provider, modelId });
-      setCurrentModelOverride({ provider, modelId });
+      // Pi persists model_change synchronously. Reload the canonical session so
+      // the model, thinking level, and active leaf all advance together.
+      modelSwitchPendingRef.current = false;
+      await loadSession(sid);
     } catch (e) {
       console.error("Failed to set model:", e);
+      modelSwitchPendingRef.current = false;
+      setCurrentModelOverride(previousOverride);
+      addNotice({
+        type: "error",
+        message: `Failed to switch model: ${e instanceof Error ? e.message : String(e)}`,
+      });
+      // A failed response can still follow a server-side write (for example, a
+      // dropped connection), so let the session file settle the displayed model.
+      await loadSession(sid);
+    } finally {
+      modelSwitchPendingRef.current = false;
+      setModelSwitching(false);
     }
-  }, [isNew, setNewSessionModel]);
+  }, [addNotice, currentModelOverride, isNew, loadSession, setNewSessionModel]);
 
   const handleCompact = useCallback(async () => {
     const sid = sessionIdRef.current;
@@ -1933,7 +1955,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     data, loading, error, activeLeafId, messages, entryIds, streamState,
     agentRunning, modelNames, modelList, modelError, modelScopeWarnings, modelThinkingLevels, modelThinkingLevelMaps, newSessionModel, toolPreset, thinkingLevel,
     retryInfo, contextUsage, systemPrompt, forkingEntryId,
-    isCompacting, compactError, compactResult, currentModel, displayModel, sessionStats,
+    isCompacting, compactError, compactResult, currentModel, displayModel, modelSwitching, sessionStats,
     slashCommands, slashCommandsLoading, queuedMessages,
     notices: noticeState.visible, extensionDialog, extensionCustomUi, extensionStatuses, extensionWidgets, respondToExtensionUi, sendExtensionCustomInput,
     isAutoModelSelection: isNew && newSessionModel === null,

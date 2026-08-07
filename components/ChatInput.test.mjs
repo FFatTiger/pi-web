@@ -61,6 +61,30 @@ test("keeps the model selector visible when a model error leaves no options", ()
   assert.match(html, /aria-label="No available models"|title="No available models"/);
 });
 
+test("shows and locks the optimistic model while a switch is pending", () => {
+  const html = renderToStaticMarkup(
+    React.createElement(
+      I18nProvider,
+      null,
+      React.createElement(ChatInput, {
+        onSend() {},
+        onAbort() {},
+        onModelChange() {},
+        isStreaming: false,
+        model: { provider: "deepseek", modelId: "deepseek-v4-flash" },
+        modelList: [{ provider: "deepseek", id: "deepseek-v4-flash", name: "DeepSeek V4 Flash" }],
+        modelSwitching: true,
+      }),
+    ),
+  );
+
+  assert.match(html, /title="Switching model"/);
+  assert.match(html, /aria-busy="true"/);
+  assert.match(html, /disabled=""/);
+  assert.match(html, />DeepSeek V4 Flash</);
+  assert.match(html, /animation:spin 0\.8s linear infinite/);
+});
+
 test("filters model options by name and id", () => {
   const options = [
     { provider: "ollama", modelId: "qwen3:latest", name: "Qwen 3" },
