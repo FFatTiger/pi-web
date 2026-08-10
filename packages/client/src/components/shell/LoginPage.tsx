@@ -1,10 +1,28 @@
-import { useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useGateLogin, useGateStatus } from "@/features/gate/useGate";
 import { HttpError } from "@/api/http-client";
+import { isMeaningfulNext, resolveSafeNext } from "@/lib/safe-next";
 
 export interface LoginPageProps {
   next?: string;
+}
+
+/**
+ * Post-login navigation uses TanStack Router typed `to` + `search`.
+ * `next` may be a full path+query from buildLoginRedirect; resolveSafeNext
+ * splits it so session/cwd deep links survive.
+ */
+export async function navigateAfterLogin(
+  navigate: ReturnType<typeof useNavigate>,
+  next: string | undefined,
+): Promise<void> {
+  const target = resolveSafeNext(next);
+  await navigate({
+    to: target.to,
+    search: target.search,
+    replace: true,
+  });
 }
 
 export function LoginPage({ next = "/" }: LoginPageProps) {
@@ -14,14 +32,15 @@ export function LoginPage({ next = "/" }: LoginPageProps) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  const safeNext = next.startsWith("/") && !next.startsWith("//") ? next : "/";
+  const safeTarget = useMemo(() => resolveSafeNext(next), [next]);
+  const showNextHint = isMeaningfulNext(safeTarget);
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
     setError(null);
     try {
       await login.mutateAsync({ password });
-      await navigate({ to: safeNext });
+      await navigateAfterLogin(navigate, next);
     } catch (err) {
       if (err instanceof HttpError) {
         setError(err.message || `Login failed (${err.status})`);
@@ -76,8 +95,8 @@ export function LoginPage({ next = "/" }: LoginPageProps) {
           <Link to="/" search={{}}>
             Back to workstation
           </Link>
-          {safeNext !== "/" ? (
-            <span className="login-next"> · next: {safeNext}</span>
+          {showNextHint ? (
+            <span className="login-next"> · next: {safeTarget.href}</span>
           ) : null}
         </p>
       </form>

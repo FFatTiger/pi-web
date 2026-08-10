@@ -10,12 +10,15 @@ describe("v1Url", () => {
 });
 
 describe("assertV1Path", () => {
-  it("accepts /v1", () => {
+  it("accepts /v1 and nested paths", () => {
+    expect(() => assertV1Path("/v1")).not.toThrow();
     expect(() => assertV1Path("/v1/gate/status")).not.toThrow();
   });
 
-  it("rejects legacy route-handler paths", () => {
+  it("rejects non-/v1 paths including legacy route handlers", () => {
     const legacy = ["", "api", "gate", "status"].join("/");
     expect(() => assertV1Path(legacy)).toThrow(/Only \/v1/);
+    expect(() => assertV1Path("/v2/x")).toThrow(/Only \/v1/);
+    expect(() => assertV1Path("v1/gate")).toThrow(/Only \/v1/);
   });
 });

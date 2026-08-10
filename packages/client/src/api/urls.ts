@@ -36,13 +36,9 @@ export const urls = {
   },
 } as const;
 
-const LEGACY_API_PREFIX = "/" + "api";
-
+/** Reject anything that is not under `/v1`. */
 export function assertV1Path(path: string): void {
-  if (!path.startsWith("/v1")) {
+  if (!path.startsWith("/v1/") && path !== "/v1") {
     throw new Error(`Only /v1 paths are allowed, got: ${path}`);
-  }
-  if (path === LEGACY_API_PREFIX || path.startsWith(`${LEGACY_API_PREFIX}/`)) {
-    throw new Error(`Legacy host paths are forbidden: ${path}`);
   }
 }
