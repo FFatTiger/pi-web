@@ -29,5 +29,9 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     include: ["src/**/*.{test,spec}.{ts,tsx}"],
+    // React 19 only exports `act` from the development build; keep tests off production entry.
+    env: {
+      NODE_ENV: "test",
+    },
   },
 });

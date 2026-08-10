@@ -125,7 +125,8 @@ export function buildLoginRedirect(nextPath?: string): string {
       ? `${window.location.pathname}${window.location.search}`
       : "/");
   const params = new URLSearchParams();
-  if (next && next !== "/login") {
+  // Avoid nesting login→login; bare /login has no useful return target.
+  if (next && next !== "/login" && !next.startsWith("/login?")) {
     params.set("next", next);
   }
   const qs = params.toString();
