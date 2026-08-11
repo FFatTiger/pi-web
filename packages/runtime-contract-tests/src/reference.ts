@@ -37,7 +37,7 @@ export function createReferenceHarness(options?: { baseDir?: string }): AdapterC
     async createFactory(factoryOptions?: HarnessFactoryOptions): Promise<AgentRuntimeFactory> {
       const factory = new ReferenceRuntimeFactory({
         ...factoryOptions,
-        baseDir: options?.baseDir,
+        ...(options?.baseDir === undefined ? {} : { baseDir: options.baseDir }),
       });
       factories.add(factory);
       return factory;

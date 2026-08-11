@@ -2,7 +2,8 @@
   "name": "@fffattiger/pi-web-runtime-contract-tests",
   "version": "0.1.0",
   "private": true,
-  "description": "Reusable adapter contract suite + reference fake for the pi-web agent runtime ports",
+  "description": "TEST-ONLY reusable adapter contract suite and reference fake; excluded from production package allowlists",
+  "keywords": ["test-only", "adapter-contract"],
   "type": "module",
   "exports": {
     ".": {
@@ -24,8 +25,12 @@
     "dist"
   ],
   "scripts": {
+    "build:core": "npm run build --workspace @fffattiger/pi-web-runtime-core",
+    "prebuild": "npm run build:core",
     "build": "tsc -p tsconfig.json",
+    "pretypecheck": "npm run build:core",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prebuild:test": "npm run build:core",
     "build:test": "tsc -p tsconfig.test.json",
     "test": "npm run build:test && node --test \"dist-test/**/*.test.js\"",
     "clean": "rm -rf dist dist-test"

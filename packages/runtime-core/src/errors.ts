@@ -66,8 +66,8 @@ export function makeRuntimeError(
     code,
     message,
     retryable: options?.retryable ?? false,
-    cause: options?.cause,
-    details: options?.details,
+    ...(options?.cause === undefined ? {} : { cause: options.cause }),
+    ...(options?.details === undefined ? {} : { details: options.details }),
   };
 }
 

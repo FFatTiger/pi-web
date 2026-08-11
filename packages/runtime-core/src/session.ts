@@ -14,6 +14,10 @@ export interface SessionListFilter {
 export interface SessionHeader {
   sessionId: string;
   sessionFile?: string;
+  /** Canonical working directory recorded by the session. */
+  cwd: string;
+  /** Canonical project root used for grouping and trust policy. */
+  projectRoot: string;
   title?: string;
   createdAt?: number;
   updatedAt?: number;
@@ -32,13 +36,14 @@ export interface SessionDetail extends SessionHeader {
 
 export interface SessionEntry {
   entryId: string;
+  parentEntryId?: string;
   message: AgentMessage;
 }
 
 export interface SessionContext {
   sessionId: string;
   leafId?: string;
-  messages: readonly AgentMessage[];
+  entries: readonly SessionEntry[];
 }
 
 /** Activation location for a session (used by the sessiond / worker shell). */

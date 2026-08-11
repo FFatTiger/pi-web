@@ -6,7 +6,7 @@
  * pass the same suite. Capability degradation is exercised by restricting the
  * harness-reported capability set; the suite never assumes a backend type.
  */
-import { describe, it } from "node:test";
+import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import type {
   AgentRuntimeFactory,
@@ -20,6 +20,8 @@ import type {
 } from "@fffattiger/pi-web-runtime-core";
 import {
   isRuntimeError,
+  RUNTIME_CAPABILITIES,
+  RUNTIME_COMMAND_CAPABILITIES,
   RUNTIME_COMMAND_TYPES,
 } from "@fffattiger/pi-web-runtime-core";
 import type { AdapterContractHarness, HarnessFactoryOptions } from "./harness.js";
@@ -93,7 +95,7 @@ async function newRuntime(
   const factory = await harness.createFactory(options);
   const port = await factory.create({
     cwd: options?.cwd ?? "/workspace",
-    name: start?.name,
+    ...(start?.name === undefined ? {} : { name: start.name }),
   });
   return { factory, port };
 }
@@ -176,6 +178,9 @@ function fixtureFor(type: RuntimeCommandType): RuntimeCommand {
  */
 export function createRuntimeAdapterSuite(harness: AdapterContractHarness): void {
   describe("agent runtime adapter contract", () => {
+    after(async () => {
+      await harness.teardown();
+    });
     /* ---------------------------------------------------------------- */
     describe("lifecycle", () => {
       it("create returns a runtime with identity", async () => {
@@ -296,6 +301,32 @@ export function createRuntimeAdapterSuite(harness: AdapterContractHarness): void
         const supported = await port.execute({ type: "prompt", message: "hi" });
         assert.equal(supported.ok, true);
         await port.close("user");
+      });
+
+      it("every declared capability gates every mapped command", async () => {
+        const mapped = new Set(
+          Object.values(RUNTIME_COMMAND_CAPABILITIES).filter(
+            (capability): capability is (typeof RUNTIME_CAPABILITIES)[number] =>
+              capability !== null,
+          ),
+        );
+        assert.deepEqual(
+          [...mapped].sort(),
+          [...RUNTIME_CAPABILITIES].sort(),
+          "every canonical capability must gate at least one command",
+        );
+
+        for (const [type, capability] of Object.entries(RUNTIME_COMMAND_CAPABILITIES)) {
+          if (capability === null) continue;
+          const factory = await harness.createFactory({
+            capabilities: RUNTIME_CAPABILITIES.filter((item) => item !== capability),
+          });
+          const port = await factory.create({ cwd: "/workspace" });
+          const result = await port.execute(fixtureFor(type as RuntimeCommandType));
+          assertErrorCode(result, "unsupported_capability");
+          assert.equal(result.error.message.includes(capability), true);
+          await port.close("user");
+        }
       });
 
       it("invalid input returns invalid_input", async () => {
@@ -444,6 +475,38 @@ export function createRuntimeAdapterSuite(harness: AdapterContractHarness): void
         await port.close("user");
       });
 
+      it("abort cancels pending confirm and clears the reconnect snapshot", async () => {
+        const { port } = await newRuntime(harness);
+        const collector = new EventCollector(port);
+        const pending = port.execute({ type: "prompt", message: "confirm please" });
+        await collector.waitFor((event) => event.type === "extension_ui_request");
+        await port.interrupt({ type: "abort" });
+        const result = await pending;
+        assertErrorCode(result, "interrupted");
+        const snapshot = await port.getSnapshot();
+        assert.equal(snapshot.state.pendingExtensionUi?.length, 0);
+        assert.equal(collector.ofType("agent_end").length, 1);
+        assert.equal(collector.ofType("agent_settled").length, 1);
+        await port.close("user");
+      });
+
+      it("abort cancels pending input and settles exactly once", async () => {
+        const { port } = await newRuntime(harness);
+        const collector = new EventCollector(port);
+        const pending = port.execute({ type: "prompt", message: "input-request" });
+        await collector.waitFor(
+          (event) => event.type === "extension_ui_request" && event.request.method === "input",
+        );
+        await port.interrupt({ type: "abort" });
+        await port.interrupt({ type: "abort" });
+        const result = await pending;
+        assertErrorCode(result, "interrupted");
+        assert.equal((await port.getSnapshot()).state.pendingExtensionUi?.length, 0);
+        assert.equal(collector.ofType("agent_end").length, 1);
+        assert.equal(collector.ofType("agent_settled").length, 1);
+        await port.close("user");
+      });
+
       it("abort_bash preempts a running bash", async () => {
         const { port } = await newRuntime(harness);
         const collector = new EventCollector(port);
@@ -458,6 +521,26 @@ export function createRuntimeAdapterSuite(harness: AdapterContractHarness): void
         assert.ok(cancelled, "bash_update must report cancelled");
         const snapshot = await port.getSnapshot();
         assert.equal(snapshot.state.isBashRunning, false);
+        await port.close("user");
+      });
+
+      it("running bash is fully recoverable from a mid-operation snapshot", async () => {
+        const { port } = await newRuntime(harness);
+        const pending = port.execute({
+          type: "bash",
+          command: "printf lines",
+          excludeFromContext: true,
+        });
+        const snapshot = await waitForSnapshot(
+          port,
+          (value) => value.state.isBashRunning && (value.state.bash?.updateCount ?? 0) >= 2,
+        );
+        assert.equal(snapshot.state.bash?.command, "printf lines");
+        assert.ok(snapshot.state.bash?.output.includes("line 1"));
+        assert.equal(snapshot.state.bash?.excludeFromContext, true);
+        assert.equal(snapshot.state.bash?.completed, false);
+        await port.interrupt({ type: "abort_bash" });
+        await pending;
         await port.close("user");
       });
 
@@ -519,6 +602,28 @@ export function createRuntimeAdapterSuite(harness: AdapterContractHarness): void
         await port.close("user");
       });
 
+      it("unsubscribe during streaming loses events but final snapshot is authoritative", async () => {
+        const { port } = await newRuntime(harness);
+        const collector = new EventCollector(port);
+        const pending = port.execute({ type: "prompt", message: "long stream" });
+        await collector.waitFor((event) => event.type === "message_update");
+        collector.dispose();
+        const countAtDisconnect = collector.events.length;
+        const result = await pending;
+        assert.equal(result.ok, true);
+        assert.equal(collector.events.length, countAtDisconnect);
+        const snapshot = await port.getSnapshot();
+        assert.equal(snapshot.state.isStreaming, false);
+        assert.equal(snapshot.streaming?.active, false);
+        assert.equal(snapshot.state.messageCount, 3);
+        assert.ok(
+          snapshot.messages?.some(
+            (message) => message.role === "assistant" && message.content.length > 0,
+          ),
+        );
+        await port.close("user");
+      });
+
       it("snapshot clears streaming state after completion", async () => {
         const { port } = await newRuntime(harness);
         const result = await port.execute({ type: "prompt", message: "stream me" });
@@ -571,6 +676,22 @@ export function createRuntimeAdapterSuite(harness: AdapterContractHarness): void
           (snapshot.state.tools ?? []).every((tool) => !tool.active),
           "no active tools when all-tools-off",
         );
+        await port.close("user");
+      });
+
+      it("factory all-tools-off and thinking pins apply atomically at startup", async () => {
+        const factory = await harness.createFactory();
+        const port = await factory.create({
+          cwd: "/workspace",
+          toolNames: [],
+          thinkingLevel: "high",
+          thinkingLevelPinned: true,
+        });
+        const snapshot = await port.getSnapshot();
+        assert.equal(snapshot.state.systemPrompt, "");
+        assert.ok((snapshot.state.tools ?? []).every((tool) => !tool.active));
+        assert.equal(snapshot.state.thinkingLevel, "high");
+        assert.equal(snapshot.state.thinkingLevelPinned, true);
         await port.close("user");
       });
 
@@ -705,18 +826,23 @@ export function createRuntimeAdapterSuite(harness: AdapterContractHarness): void
 
     /* ---------------------------------------------------------------- */
     describe("queue", () => {
-      it("steer/follow_up while running are queued with queue_update and snapshot", async () => {
+      it("steer/follow_up while running preserve text and images in snapshot", async () => {
         const { port } = await newRuntime(harness);
         const collector = new EventCollector(port);
         const pending = port.execute({ type: "prompt", message: "long prompt" });
         await delay(30);
-        const steer = await port.execute({ type: "steer", message: "steer me" });
-        const followUp = await port.execute({ type: "follow_up", message: "follow me" });
+        const image = { type: "image", mimeType: "image/png", data: "aW1hZ2U=" } as const;
+        const steer = await port.execute({ type: "steer", message: "steer me", images: [image] });
+        const followUp = await port.execute({ type: "follow_up", message: "follow me", images: [image] });
         assert.equal(steer.ok, true);
         assert.equal(followUp.ok, true);
         const snapshot = await port.getSnapshot();
-        assert.deepEqual(snapshot.state.queuedMessages?.steering, ["steer me"]);
-        assert.deepEqual(snapshot.state.queuedMessages?.followUp, ["follow me"]);
+        assert.deepEqual(snapshot.state.queuedMessages?.steering, [
+          { message: "steer me", images: [image] },
+        ]);
+        assert.deepEqual(snapshot.state.queuedMessages?.followUp, [
+          { message: "follow me", images: [image] },
+        ]);
         assert.ok(collector.ofType("queue_update").length >= 2);
         await port.interrupt({ type: "abort" });
         await pending;
@@ -871,6 +997,33 @@ export function createRuntimeAdapterSuite(harness: AdapterContractHarness): void
         await port.close("user");
       });
 
+      it("running compaction is fully recoverable from a mid-operation snapshot", async () => {
+        const { port } = await newRuntime(harness);
+        const pending = port.execute({ type: "compact", customInstructions: "keep decisions" });
+        const snapshot = await waitForSnapshot(port, (value) => value.state.isCompacting);
+        assert.equal(snapshot.state.compaction?.reason, "manual");
+        assert.equal(snapshot.state.compaction?.status, "running");
+        assert.equal(snapshot.state.compaction?.customInstructions, "keep decisions");
+        assert.ok((snapshot.state.compaction?.startedAt ?? 0) > 0);
+        await pending;
+        await port.close("user");
+      });
+
+      it("auto compaction exposes recoverable state while running", async () => {
+        const { port } = await newRuntime(harness);
+        await port.execute({ type: "set_auto_compaction", enabled: true });
+        const pending = port.execute({ type: "prompt", message: "auto-compact now" });
+        const snapshot = await waitForSnapshot(
+          port,
+          (value) => value.state.compaction?.reason === "auto",
+        );
+        assert.equal(snapshot.state.isCompacting, true);
+        assert.equal(snapshot.state.compaction?.status, "running");
+        await pending;
+        assert.equal((await port.getSnapshot()).state.compaction, undefined);
+        await port.close("user");
+      });
+
       it("auto compaction emits start/end when enabled", async () => {
         const { port } = await newRuntime(harness);
         await port.execute({ type: "set_auto_compaction", enabled: true });
@@ -887,8 +1040,7 @@ export function createRuntimeAdapterSuite(harness: AdapterContractHarness): void
 
     /* ---------------------------------------------------------------- */
     describe("fork", () => {
-      const needsPorts = harness.createPorts ? describe : describe.skip;
-      needsPorts("fork contract (requires createPorts)", () => {
+      describe("fork contract (requires createPorts)", () => {
         it("fork returns a new session id and ends the old runtime after the result", async () => {
           const factory = await harness.createFactory();
           const port = await factory.create({ cwd: "/workspace" });
@@ -898,7 +1050,18 @@ export function createRuntimeAdapterSuite(harness: AdapterContractHarness): void
           const entryId = detail.entries?.[0]?.entryId;
           assert.ok(entryId, "fork point entry must exist");
           const collector = new EventCollector(port);
-          const result = await port.execute({ type: "fork", entryId: entryId! });
+          let resultSettled = false;
+          const executePromise = port.execute({ type: "fork", entryId: entryId! });
+          executePromise.then(() => {
+            resultSettled = true;
+          });
+          const result = await executePromise;
+          assert.equal(resultSettled, true, "fork result promise must settle first");
+          assert.equal(
+            collector.ofType("runtime_closed").length,
+            0,
+            "runtime_closed must not be observable before the fork result",
+          );
           assert.equal(result.ok, true);
           if (result.ok && result.type === "fork") {
             assert.ok(result.forkedSessionId.length > 0);
@@ -1007,6 +1170,9 @@ export function createRuntimeAdapterSuite(harness: AdapterContractHarness): void
         assert.ok(result.error.message.includes("[REDACTED]"));
         assert.equal(result.error.retryable, false);
         assert.equal(result.error.cause?.kind, "backend");
+        const entirePayload = JSON.stringify(result.error);
+        assert.ok(!entirePayload.includes("secret-token-abc123"));
+        assert.ok(!entirePayload.includes("sk-nested-secret"));
         assert.ok(!(result.error instanceof Error), "must be a plain canonical object");
         assert.equal(collector.ofType("prompt_error").length, 1);
         await port.close("user");
@@ -1037,8 +1203,7 @@ export function createRuntimeAdapterSuite(harness: AdapterContractHarness): void
     });
 
     /* ---------------------------------------------------------------- */
-    const catalogPorts = harness.createPorts ? describe : describe.skip;
-    catalogPorts("catalog & locator (requires createPorts)", () => {
+    describe("catalog & locator (requires createPorts)", () => {
       it("list/read/context via SessionCatalogPort", async () => {
         const factory = await harness.createFactory();
         const port = await factory.create({ cwd: "/workspace", name: "Sess A" });
@@ -1049,7 +1214,13 @@ export function createRuntimeAdapterSuite(harness: AdapterContractHarness): void
         const detail = await ports.sessionCatalog.readSession(port.identity.sessionId);
         assert.equal(detail.messageCount, 3);
         const context = await ports.sessionCatalog.readSessionContext(port.identity.sessionId);
-        assert.equal(context.messages.length, 3);
+        assert.equal(context.entries.length, 3);
+        assert.ok(context.entries.every((entry) => entry.entryId.length > 0));
+        assert.equal(context.entries[1]?.parentEntryId, context.entries[0]?.entryId);
+        assert.equal(detail.cwd, "/workspace");
+        assert.equal(detail.projectRoot, "/workspace");
+        const filtered = await ports.sessionCatalog.listSessions({ cwd: "/workspace" });
+        assert.ok(filtered.some((header) => header.sessionId === port.identity.sessionId));
         await port.close("user");
       });
 
@@ -1068,8 +1239,7 @@ export function createRuntimeAdapterSuite(harness: AdapterContractHarness): void
     });
 
     /* ---------------------------------------------------------------- */
-    const needsModel = harness.createPorts ? describe : describe.skip;
-    needsModel("model catalog (requires createPorts)", () => {
+    describe("model catalog (requires createPorts)", () => {
       it("listModels/getDefaultModel/resolveModel", async () => {
         const factory = await harness.createFactory();
         const ports = await harness.createPorts!(factory);
@@ -1089,13 +1259,19 @@ export function createRuntimeAdapterSuite(harness: AdapterContractHarness): void
     });
 
     /* ---------------------------------------------------------------- */
-    const needsAuth = harness.createPorts ? describe : describe.skip;
-    needsAuth("credential store (requires createPorts)", () => {
+    describe("credential store (requires createPorts)", () => {
       it("provider status never exposes raw credentials", async () => {
         const factory = await harness.createFactory();
         const ports = await harness.createPorts!(factory);
         const providers = await ports.credentialStore.listProviders();
         assert.ok(providers.length >= 2);
+        const openai = providers.find((provider) => provider.id === "openai");
+        assert.deepEqual(openai?.methods, ["apiKey", "oauth"]);
+        assert.equal(
+          providers.filter((provider) => provider.id === "openai").length,
+          1,
+          "dual-auth providers must not be duplicated",
+        );
         const before = await ports.credentialStore.getProviderStatus("anthropic");
         assert.equal(before.authorized, false);
         const result = await ports.credentialStore.authorize("anthropic", {
@@ -1121,8 +1297,7 @@ export function createRuntimeAdapterSuite(harness: AdapterContractHarness): void
     });
 
     /* ---------------------------------------------------------------- */
-    const needsResources = harness.createPorts ? describe : describe.skip;
-    needsResources("resources & trust (requires createPorts)", () => {
+    describe("resources & trust (requires createPorts)", () => {
       it("skills/plugins/commands listing", async () => {
         const factory = await harness.createFactory();
         const ports = await harness.createPorts!(factory);
@@ -1132,6 +1307,30 @@ export function createRuntimeAdapterSuite(harness: AdapterContractHarness): void
         assert.ok(plugins.some((plugin) => plugin.name === "pi-web-side-chat"));
         const commands = await ports.resourceCatalog.listCommands();
         assert.ok(commands.some((command) => command.name === "compact"));
+
+        const plugin = await ports.resourceCatalog.writePlugin({
+          name: "local-plugin",
+          content: "export default {}",
+          enabled: false,
+        });
+        assert.equal(plugin.enabled, false);
+        assert.equal(
+          (await ports.resourceCatalog.setPluginEnabled("local-plugin", true)).enabled,
+          true,
+        );
+        const installed = await ports.resourceCatalog.installSkill({
+          source: "https://example.com/skills/new-skill",
+          name: "new-skill",
+        });
+        assert.equal(installed.enabled, true);
+        assert.equal(
+          (await ports.resourceCatalog.setSkillEnabled("new-skill", false)).enabled,
+          false,
+        );
+        assert.equal(
+          (await ports.resourceCatalog.updateSkill("new-skill")).version,
+          "updated",
+        );
       });
 
       it("project trust gate controls resource reload", async () => {
@@ -1149,24 +1348,23 @@ export function createRuntimeAdapterSuite(harness: AdapterContractHarness): void
     });
 
     /* ---------------------------------------------------------------- */
-    if (harness.getSideChatSnapshot) {
-      describe("side chat snapshot DTO", () => {
-        it("main snapshot is a serializable canonical DTO", async () => {
-          const { port } = await newRuntime(harness);
-          await port.execute({ type: "prompt", message: "hi" });
-          const snapshot = await harness.getSideChatSnapshot!(port.identity.sessionId);
-          assert.ok(snapshot, "side chat snapshot must be available");
-          assert.equal(snapshot!.sessionId, port.identity.sessionId);
-          assert.ok(snapshot!.systemPrompt && snapshot!.systemPrompt.length > 0);
-          assert.ok(snapshot!.writtenFiles.some((path) => path.endsWith(".md")));
-          assert.ok(snapshot!.activity.length >= 1);
-          assert.equal(typeof snapshot!.version, "number");
-          const roundTrip = JSON.parse(JSON.stringify(snapshot));
-          assert.deepEqual(roundTrip, snapshot, "DTO must survive JSON round-trip");
-          assert.ok(structuredClone(snapshot));
-          await port.close("user");
-        });
+    const sideChatSuite = harness.getSideChatSnapshot ? describe : describe.skip;
+    sideChatSuite("side chat snapshot DTO (future-optional)", () => {
+      it("main snapshot is a serializable canonical DTO", async () => {
+        const { port } = await newRuntime(harness);
+        await port.execute({ type: "prompt", message: "hi" });
+        const snapshot = await harness.getSideChatSnapshot!(port.identity.sessionId);
+        assert.ok(snapshot, "side chat snapshot must be available");
+        assert.equal(snapshot!.sessionId, port.identity.sessionId);
+        assert.ok(snapshot!.systemPrompt && snapshot!.systemPrompt.length > 0);
+        assert.ok(snapshot!.writtenFiles.some((path) => path.endsWith(".md")));
+        assert.ok(snapshot!.activity.length >= 1);
+        assert.equal(typeof snapshot!.version, "number");
+        const roundTrip = JSON.parse(JSON.stringify(snapshot));
+        assert.deepEqual(roundTrip, snapshot, "DTO must survive JSON round-trip");
+        assert.ok(structuredClone(snapshot));
+        await port.close("user");
       });
-    }
+    });
   });
 }

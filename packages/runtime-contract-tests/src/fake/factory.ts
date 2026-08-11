@@ -27,23 +27,36 @@ export class ReferenceRuntimeFactory implements AgentRuntimeFactory {
   readonly modelCatalog = new ReferenceModelCatalog();
 
   constructor(private readonly options: ReferenceFactoryOptions = {}) {
-    this.store = new ReferenceSessionStore({ baseDir: options.baseDir });
+    this.store = new ReferenceSessionStore(
+      options.baseDir === undefined ? undefined : { baseDir: options.baseDir },
+    );
   }
 
   async create(input: RuntimeStartInput): Promise<AgentRuntimePort> {
-    const session = this.store.createSession({ title: input.name });
+    const session = this.store.createSession({
+      ...(input.name === undefined ? {} : { title: input.name }),
+      cwd: input.cwd,
+      projectRoot: input.cwd,
+    });
     const model = input.model
       ? this.resolveOrThrow(input.model)
       : await this.modelCatalog.getDefaultModel();
+    const reloadCapabilities = this.reloadCapabilities();
     return new ReferenceAgentRuntime({
       store: this.store,
       session,
       cwd: input.cwd,
       capabilities: this.initialCapabilities(),
-      reloadCapabilities: this.reloadCapabilities(),
+      ...(reloadCapabilities === undefined ? {} : { reloadCapabilities }),
       model,
       resolveModel: (selector) => this.modelCatalog.resolve(selector),
-      initialTools: input.toolNames,
+      ...(input.toolNames === undefined ? {} : { initialTools: input.toolNames }),
+      ...(input.thinkingLevel === undefined
+        ? {}
+        : { initialThinkingLevel: input.thinkingLevel }),
+      ...(input.thinkingLevelPinned === undefined
+        ? {}
+        : { initialThinkingLevelPinned: input.thinkingLevelPinned }),
     });
   }
 
@@ -55,12 +68,13 @@ export class ReferenceRuntimeFactory implements AgentRuntimeFactory {
     const model = input.model
       ? this.resolveOrThrow(input.model)
       : session.model ?? (await this.modelCatalog.getDefaultModel());
+    const reloadCapabilities = this.reloadCapabilities();
     return new ReferenceAgentRuntime({
       store: this.store,
       session,
-      cwd: input.cwd ?? "/workspace",
+      cwd: input.cwd ?? session.cwd,
       capabilities: this.initialCapabilities(),
-      reloadCapabilities: this.reloadCapabilities(),
+      ...(reloadCapabilities === undefined ? {} : { reloadCapabilities }),
       model,
       resolveModel: (selector) => this.modelCatalog.resolve(selector),
     });

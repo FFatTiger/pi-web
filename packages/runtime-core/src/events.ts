@@ -14,6 +14,7 @@ import type {
 } from "./extension.js";
 import type { RuntimeCloseReason } from "./identity.js";
 import type { AgentMessage, StreamingAgentMessage } from "./messages.js";
+import type { QueuedTurn } from "./queue.js";
 import type { RuntimeError } from "./errors.js";
 
 export interface RuntimeEventBase {
@@ -85,8 +86,8 @@ export interface ToolExecutionEndEvent extends RuntimeEventBase {
 
 export interface QueueUpdateEvent extends RuntimeEventBase {
   type: "queue_update";
-  steering?: readonly string[];
-  followUp?: readonly string[];
+  steering?: readonly QueuedTurn[];
+  followUp?: readonly QueuedTurn[];
 }
 
 export interface AutoRetryStartEvent extends RuntimeEventBase {

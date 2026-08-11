@@ -38,6 +38,26 @@ export interface StreamingProjection {
   phase?: StreamingPhase;
 }
 
+export interface BashProjection {
+  command: string;
+  output: string;
+  excludeFromContext: boolean;
+  truncated: boolean;
+  cancelled: boolean;
+  completed: boolean;
+  exitCode?: number;
+  fullOutputPath?: string;
+  /** Monotonic emitted chunk/update count for reconnect progress UIs. */
+  updateCount: number;
+}
+
+export interface CompactionProjection {
+  reason: "manual" | "auto";
+  status: "running" | "aborting";
+  customInstructions?: string;
+  startedAt: number;
+}
+
 /** Canonical runtime state (get_state / snapshot). */
 export interface RuntimeState {
   sessionId: string;
@@ -47,6 +67,8 @@ export interface RuntimeState {
   isPromptRunning: boolean;
   isBashRunning: boolean;
   isCompacting: boolean;
+  bash?: BashProjection;
+  compaction?: CompactionProjection;
   autoCompactionEnabled?: boolean;
   autoRetryEnabled?: boolean;
   model: ModelRef | null;
@@ -56,6 +78,7 @@ export interface RuntimeState {
   contextUsage?: ContextUsage | null;
   systemPrompt?: string;
   thinkingLevel?: ThinkingLevel;
+  thinkingLevelPinned?: boolean;
   tools?: readonly ToolInfo[];
   extensionStatuses?: readonly ExtensionStatusItem[];
   extensionWidgets?: readonly ExtensionWidgetItem[];

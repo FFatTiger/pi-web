@@ -13,11 +13,11 @@ import type {
   AgentRuntimePort,
   AssistantMessage,
   AssistantContentBlock,
+  CompactionProjection,
   ImageAttachment,
   ModelRef,
   ModelSelector,
   QueuedMessages,
-  RuntimeCapability,
   RuntimeCapabilitySet,
   RuntimeCloseReason,
   RuntimeCommand,
@@ -29,6 +29,7 @@ import type {
   RuntimeInterrupt,
   RuntimeSnapshot,
   RuntimeState,
+  BashProjection,
   ThinkingLevel,
   ToolInfo,
   TokenUsage,
@@ -38,6 +39,7 @@ import {
   createCapabilitySet,
   emptyQueuedMessages,
   makeRuntimeError,
+  requiredCapabilityForCommand,
   unsupportedCapabilityError,
 } from "@fffattiger/pi-web-runtime-core";
 import type { ReferenceSessionStore, StoredSession } from "./store.js";
@@ -55,37 +57,13 @@ export const THINKING_LEVELS: readonly ThinkingLevel[] = [
 
 const STEP_MS = 10;
 
-const COMMAND_CAPABILITY: Readonly<Record<string, RuntimeCapability | undefined>> = {
-  prompt: "runtime.prompt",
-  steer: "runtime.steer",
-  follow_up: "runtime.follow_up",
-  abort: "runtime.abort",
-  set_model: "runtime.model.set",
-  set_thinking_level: "runtime.thinking.set",
-  get_tools: "runtime.tools.read",
-  set_tools: "runtime.tools.write",
-  compact: "runtime.compact",
-  abort_compaction: "runtime.compact.abort",
-  fork: "runtime.fork",
-  navigate_tree: "runtime.navigate",
-  bash: "runtime.bash",
-  abort_bash: "runtime.bash.abort",
-  reload: "runtime.reload",
-  extension_ui_response: "runtime.extension_ui",
-  extension_ui_input: "runtime.extension_ui",
-  generate_session_title: "runtime.auto_name",
-  set_session_name: "runtime.session.rename",
-  clear_queue: "runtime.queue",
-  get_session_stats: "runtime.stats",
-};
-
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 interface PendingExtension {
   request: { id: string; method: "confirm" | "input"; title?: string; message?: string; placeholder?: string };
-  resolve: (command: RuntimeCommand) => void;
+  settle: (result: { kind: "response"; command: RuntimeCommand } | { kind: "aborted" }) => void;
 }
 
 export interface ReferenceRuntimeOptions {
@@ -97,6 +75,8 @@ export interface ReferenceRuntimeOptions {
   model: ModelRef;
   resolveModel: (selector: ModelSelector) => ModelRef | null;
   initialTools?: readonly string[];
+  initialThinkingLevel?: ThinkingLevel;
+  initialThinkingLevelPinned?: boolean;
 }
 
 export class ReferenceAgentRuntime implements AgentRuntimePort {
@@ -105,7 +85,7 @@ export class ReferenceAgentRuntime implements AgentRuntimePort {
   private store: ReferenceSessionStore;
   private cwd: string;
   private capabilities: RuntimeCapabilitySet;
-  private reloadCapabilities?: RuntimeCapabilitySet;
+  private reloadCapabilities: RuntimeCapabilitySet | undefined;
   private model: ModelRef;
   private resolveModel: (selector: ModelSelector) => ModelRef | null;
   private tools = new Map<string, boolean>(
@@ -113,6 +93,7 @@ export class ReferenceAgentRuntime implements AgentRuntimePort {
   );
 
   private thinkingLevel: ThinkingLevel = "off";
+  private thinkingLevelPinned = false;
   private autoCompaction = false;
   private autoRetry = false;
   private systemPrompt = "You are a coding agent.";
@@ -125,6 +106,8 @@ export class ReferenceAgentRuntime implements AgentRuntimePort {
   private abortCompact = false;
   private pendingExtension: PendingExtension | null = null;
   private partialMessage: AssistantMessage | null = null;
+  private bashProjection: BashProjection | null = null;
+  private compactionProjection: CompactionProjection | null = null;
   private lastAssistantText = "";
   private turnSeq = 0;
 
@@ -146,6 +129,14 @@ export class ReferenceAgentRuntime implements AgentRuntimePort {
     this.reloadCapabilities = options.reloadCapabilities;
     this.model = options.model;
     this.resolveModel = options.resolveModel;
+    if (options.initialTools !== undefined) {
+      for (const name of this.tools.keys()) {
+        this.tools.set(name, options.initialTools.includes(name));
+      }
+      this.systemPrompt = options.initialTools.length === 0 ? "" : "You are a coding agent.";
+    }
+    this.thinkingLevel = options.initialThinkingLevel ?? "off";
+    this.thinkingLevelPinned = options.initialThinkingLevelPinned ?? false;
     this.identity = {
       sessionId: options.session.sessionId,
       sessionFile: options.session.sessionFile,
@@ -174,7 +165,9 @@ export class ReferenceAgentRuntime implements AgentRuntimePort {
         this.status === "prompt"
           ? {
               active: true,
-              partialMessage: this.partialMessage ?? undefined,
+              ...(this.partialMessage === null
+                ? {}
+                : { partialMessage: this.partialMessage }),
               phase: "streaming",
               toolCallIds: [],
             }
@@ -198,7 +191,7 @@ export class ReferenceAgentRuntime implements AgentRuntimePort {
         error: makeRuntimeError("unavailable", "runtime is closed"),
       };
     }
-    const capability = COMMAND_CAPABILITY[command.type];
+    const capability = requiredCapabilityForCommand(command.type);
     if (capability && !this.capabilities.capabilities.includes(capability)) {
       return { ok: false, type: command.type, error: unsupportedCapabilityError(capability) };
     }
@@ -211,12 +204,16 @@ export class ReferenceAgentRuntime implements AgentRuntimePort {
         return this.executeSteerOrFollowUp(command);
       case "abort":
         this.abortPrompt = true;
+        this.cancelPendingExtension();
         return { ok: true, type: "abort" };
       case "abort_bash":
         this.abortBash = true;
         return { ok: true, type: "abort_bash" };
       case "abort_compaction":
         this.abortCompact = true;
+        if (this.compactionProjection) {
+          this.compactionProjection = { ...this.compactionProjection, status: "aborting" };
+        }
         return { ok: true, type: "abort_compaction" };
       case "clear_queue":
         this.queue = emptyQueuedMessages();
@@ -235,6 +232,7 @@ export class ReferenceAgentRuntime implements AgentRuntimePort {
           };
         }
         this.thinkingLevel = command.level;
+        this.thinkingLevelPinned = true;
         this.emitStateChanged();
         return { ok: true, type: "set_thinking_level" };
       }
@@ -348,12 +346,16 @@ export class ReferenceAgentRuntime implements AgentRuntimePort {
     switch (interrupt.type) {
       case "abort":
         this.abortPrompt = true;
+        this.cancelPendingExtension();
         break;
       case "abort_bash":
         this.abortBash = true;
         break;
       case "abort_compaction":
         this.abortCompact = true;
+        if (this.compactionProjection) {
+          this.compactionProjection = { ...this.compactionProjection, status: "aborting" };
+        }
         break;
       case "clear_queue":
         this.queue = emptyQueuedMessages();
@@ -381,9 +383,11 @@ export class ReferenceAgentRuntime implements AgentRuntimePort {
       };
     }
     if (command.message.includes("boom")) {
-      const error = this.mapExternalError(
-        new Error("upstream failed: secret-token-abc123\n    at adapter (secret-token-abc123)"),
-      );
+      const error = this.mapExternalError({
+        message: "upstream failed: secret-token-abc123\n    at adapter (secret-token-abc123)",
+        cause: { kind: "backend", detail: "sk-nested-secret" },
+        details: { token: "secret-token-nested456", safe: true },
+      });
       this.emit({
         type: "prompt_error",
         sessionId: this.identity.sessionId,
@@ -414,10 +418,14 @@ export class ReferenceAgentRuntime implements AgentRuntimePort {
     if (this.status === "prompt") {
       const steering = [...this.queue.steering];
       const followUp = [...this.queue.followUp];
+      const nextTurn = {
+        message: command.message,
+        ...(command.images === undefined ? {} : { images: command.images }),
+      };
       this.queue =
         command.type === "steer"
-          ? { steering: [...steering, command.message], followUp }
-          : { steering, followUp: [...followUp, command.message] };
+          ? { steering: [...steering, nextTurn], followUp }
+          : { steering, followUp: [...followUp, nextTurn] };
       this.emitQueueUpdate();
       return { ok: true, type: command.type };
     }
@@ -502,6 +510,14 @@ export class ReferenceAgentRuntime implements AgentRuntimePort {
     }
     this.status = "compacting";
     this.abortCompact = false;
+    this.compactionProjection = {
+      reason: "manual",
+      status: "running",
+      ...(command.customInstructions === undefined
+        ? {}
+        : { customInstructions: command.customInstructions }),
+      startedAt: Date.now(),
+    };
     this.emit({ type: "compaction_start", sessionId: this.identity.sessionId, reason: "manual" });
     await delay(STEP_MS);
     await delay(STEP_MS);
@@ -513,6 +529,7 @@ export class ReferenceAgentRuntime implements AgentRuntimePort {
         aborted: true,
       });
       this.status = "idle";
+      this.compactionProjection = null;
       this.emitStateChanged();
       return { ok: true, type: "compact" };
     }
@@ -525,6 +542,7 @@ export class ReferenceAgentRuntime implements AgentRuntimePort {
       result: { entriesRemoved, customInstructions: command.customInstructions ?? null },
     });
     this.status = "idle";
+    this.compactionProjection = null;
     this.emitStateChanged();
     return { ok: true, type: "compact" };
   }
@@ -542,10 +560,25 @@ export class ReferenceAgentRuntime implements AgentRuntimePort {
     this.status = "bash";
     this.abortBash = false;
     const sessionId = this.identity.sessionId;
+    this.bashProjection = {
+      command: command.command,
+      output: "",
+      excludeFromContext: command.excludeFromContext ?? false,
+      truncated: false,
+      cancelled: false,
+      completed: false,
+      updateCount: 1,
+    };
     this.emit({ type: "bash_update", sessionId, command: command.command, output: "" });
     await delay(STEP_MS);
+    this.bashProjection = { ...this.bashProjection, output: "line 1\n", updateCount: 2 };
     this.emit({ type: "bash_update", sessionId, command: command.command, output: "line 1\n" });
     await delay(STEP_MS);
+    this.bashProjection = {
+      ...this.bashProjection,
+      output: "line 1\nline 2\n",
+      updateCount: 3,
+    };
     this.emit({
       type: "bash_update",
       sessionId,
@@ -554,6 +587,12 @@ export class ReferenceAgentRuntime implements AgentRuntimePort {
     });
     await delay(STEP_MS);
     if (this.abortBash) {
+      this.bashProjection = {
+        ...this.bashProjection,
+        cancelled: true,
+        completed: true,
+        updateCount: 4,
+      };
       this.emit({
         type: "bash_update",
         sessionId,
@@ -569,6 +608,12 @@ export class ReferenceAgentRuntime implements AgentRuntimePort {
         error: makeRuntimeError("interrupted", "bash aborted", { retryable: true }),
       };
     }
+    this.bashProjection = {
+      ...this.bashProjection,
+      exitCode: 0,
+      completed: true,
+      updateCount: 4,
+    };
     this.emit({
       type: "bash_update",
       sessionId,
@@ -608,10 +653,11 @@ export class ReferenceAgentRuntime implements AgentRuntimePort {
       entries: forkedEntries,
       writtenFiles: [...session.writtenFiles],
     });
-    // D-018: return the result first, then end the old runtime.
-    queueMicrotask(() => {
+    // D-018: the execute promise must settle before runtime_closed is observable.
+    // A timer turn runs strictly after promise reactions queued by async callers.
+    setTimeout(() => {
       this.shutdown("forked");
-    });
+    }, 0);
     return {
       ok: true,
       type: "fork",
@@ -632,7 +678,7 @@ export class ReferenceAgentRuntime implements AgentRuntimePort {
       };
     }
     this.pendingExtension = null;
-    pending.resolve(command);
+    pending.settle({ kind: "response", command });
     this.emitStateChanged();
     return { ok: true, type: command.type };
   }
@@ -693,15 +739,24 @@ export class ReferenceAgentRuntime implements AgentRuntimePort {
     }
 
     if (this.autoCompaction && message.includes("auto-compact")) {
+      this.compactionProjection = {
+        reason: "auto",
+        status: "running",
+        startedAt: Date.now(),
+      };
       this.emit({ type: "auto_compaction_start", sessionId });
       await delay(STEP_MS);
-      if (this.wasAborted()) return "aborted";
+      if (this.wasAborted()) {
+        this.compactionProjection = null;
+        return "aborted";
+      }
       this.emit({
         type: "auto_compaction_end",
         sessionId,
         aborted: false,
         result: { reason: "auto", entriesRemoved: 0 },
       });
+      this.compactionProjection = null;
     }
 
     if (this.autoRetry && message.includes("retry")) {
@@ -718,24 +773,25 @@ export class ReferenceAgentRuntime implements AgentRuntimePort {
     }
 
     if (message.includes("confirm")) {
-      await this.awaitExtension("confirm", {
+      const extensionResult = await this.awaitExtension("confirm", {
         id: `ext-${this.turnSeq}-confirm`,
         method: "confirm",
         title: "Confirm",
         message: "Continue?",
       });
-      if (this.wasAborted()) return "aborted";
+      if (extensionResult.aborted || this.wasAborted()) return "aborted";
     }
 
     let inputData = "";
     if (message.includes("input-request")) {
-      inputData = await this.awaitExtension("input", {
+      const extensionResult = await this.awaitExtension("input", {
         id: `ext-${this.turnSeq}-input`,
         method: "input",
         title: "Enter value",
         placeholder: "value",
       });
-      if (this.wasAborted()) return "aborted";
+      if (extensionResult.aborted || this.wasAborted()) return "aborted";
+      inputData = extensionResult.data;
     }
 
     /* Assistant streaming */
@@ -869,8 +925,9 @@ export class ReferenceAgentRuntime implements AgentRuntimePort {
       stopReason: "end_turn",
       timestamp: Date.now(),
       usage,
-      writtenFiles:
-        this.turnWrittenFiles.length > 0 ? [...this.turnWrittenFiles] : undefined,
+      ...(this.turnWrittenFiles.length > 0
+        ? { writtenFiles: [...this.turnWrittenFiles] }
+        : {}),
     };
     this.turnWrittenFiles = [];
     this.partialMessage = null;
@@ -890,27 +947,35 @@ export class ReferenceAgentRuntime implements AgentRuntimePort {
   private async awaitExtension(
     method: "confirm" | "input",
     request: { id: string; method: "confirm" | "input"; title?: string; message?: string; placeholder?: string },
-  ): Promise<string> {
+  ): Promise<{ aborted: boolean; data: string }> {
     const sessionId = this.identity.sessionId;
-    this.pendingExtension = {
-      request,
-      resolve: () => undefined,
-    };
     this.emit({ type: "extension_ui_request", sessionId, request });
-    return new Promise<string>((resolve) => {
-      const current = this.pendingExtension;
-      if (!current) {
-        resolve("");
-        return;
-      }
-      current.resolve = (command) => {
-        if (command.type === "extension_ui_input") {
-          resolve(command.data);
-        } else {
-          resolve("");
-        }
+    return new Promise((resolve) => {
+      this.pendingExtension = {
+        request,
+        settle: (result) => {
+          if (result.kind === "aborted") {
+            resolve({ aborted: true, data: "" });
+            return;
+          }
+          resolve({
+            aborted: false,
+            data:
+              result.command.type === "extension_ui_input"
+                ? result.command.data
+                : "",
+          });
+        },
       };
     });
+  }
+
+  private cancelPendingExtension(): void {
+    const pending = this.pendingExtension;
+    if (!pending) return;
+    this.pendingExtension = null;
+    pending.settle({ kind: "aborted" });
+    this.emitStateChanged();
   }
 
   private usageFor(message: string): TokenUsage {
@@ -933,17 +998,44 @@ export class ReferenceAgentRuntime implements AgentRuntimePort {
   }
 
   private mapExternalError(error: unknown): RuntimeError {
-    const rawMessage = error instanceof Error ? error.message : String(error);
-    // Sanitize: strip anything that looks like a secret/token.
-    const sanitized =
-      rawMessage
-        .replace(/secret-token-[a-z0-9]+/gi, "[REDACTED]")
-        .replace(/sk-[A-Za-z0-9_-]+/gi, "[REDACTED]")
-        .split("\n")[0] ?? "";
-    return makeRuntimeError("external", sanitized, {
+    const record =
+      typeof error === "object" && error !== null
+        ? (error as Record<string, unknown>)
+        : {};
+    const rawMessage =
+      error instanceof Error
+        ? error.message
+        : typeof record.message === "string"
+          ? record.message
+          : String(error);
+    const sanitize = (value: unknown): unknown => {
+      if (typeof value === "string") {
+        return value
+          .replace(/secret-token-[a-z0-9]+/gi, "[REDACTED]")
+          .replace(/sk-[A-Za-z0-9_-]+/gi, "[REDACTED]")
+          .split("\n")[0] ?? "";
+      }
+      if (Array.isArray(value)) return value.map(sanitize);
+      if (typeof value === "object" && value !== null) {
+        return Object.fromEntries(
+          Object.entries(value).map(([key, nested]) => [key, sanitize(nested)]),
+        );
+      }
+      return value;
+    };
+    const sanitizedMessage = String(sanitize(rawMessage));
+    const sanitizedCause = sanitize(record.cause) as
+      | { kind?: string; detail?: string }
+      | undefined;
+    return makeRuntimeError("external", sanitizedMessage, {
       retryable: false,
-      cause: { kind: "backend", detail: "mapped by reference adapter" },
-      details: { sanitized: true },
+      cause: {
+        kind: "backend",
+        ...(typeof sanitizedCause?.detail === "string"
+          ? { detail: sanitizedCause.detail }
+          : { detail: "mapped by reference adapter" }),
+      },
+      details: sanitize(record.details ?? { sanitized: true }),
     });
   }
 
@@ -965,18 +1057,18 @@ export class ReferenceAgentRuntime implements AgentRuntimePort {
     void this.runNextQueued();
   }
 
-  private popQueued(): { kind: "steer" | "follow_up"; message: string } | null {
+  private popQueued(): { kind: "steer" | "follow_up"; message: string; images?: readonly ImageAttachment[] } | null {
     if (this.queue.steering.length > 0) {
-      const [message, ...rest] = this.queue.steering;
+      const [turn, ...rest] = this.queue.steering;
       this.queue = { ...this.queue, steering: rest };
       this.emitQueueUpdate();
-      return message ? { kind: "steer", message } : null;
+      return turn ? { kind: "steer", ...turn } : null;
     }
     if (this.queue.followUp.length > 0) {
-      const [message, ...rest] = this.queue.followUp;
+      const [turn, ...rest] = this.queue.followUp;
       this.queue = { ...this.queue, followUp: rest };
       this.emitQueueUpdate();
-      return message ? { kind: "follow_up", message } : null;
+      return turn ? { kind: "follow_up", ...turn } : null;
     }
     return null;
   }
@@ -986,7 +1078,7 @@ export class ReferenceAgentRuntime implements AgentRuntimePort {
     const next = this.popQueued();
     if (!next) return;
     this.turnSeq += 1;
-    const outcome = await this.runTurn(next.kind, next.message, undefined, false);
+    const outcome = await this.runTurn(next.kind, next.message, next.images, false);
     if (outcome === "aborted") {
       this.emitAgentEndSettled();
       this.status = "idle";
@@ -1000,8 +1092,8 @@ export class ReferenceAgentRuntime implements AgentRuntimePort {
     this.emit({
       type: "queue_update",
       sessionId: this.identity.sessionId,
-      steering: [...this.queue.steering],
-      followUp: [...this.queue.followUp],
+      steering: this.queue.steering.map((turn) => ({ ...turn })),
+      followUp: this.queue.followUp.map((turn) => ({ ...turn })),
     });
   }
 
@@ -1020,6 +1112,9 @@ export class ReferenceAgentRuntime implements AgentRuntimePort {
     this.closed = true;
     this.closedReason = reason;
     this.status = "idle";
+    this.cancelPendingExtension();
+    this.partialMessage = null;
+    this.compactionProjection = null;
     this.store.recordClose(this.identity.sessionId, reason);
     this.emit({ type: "runtime_closed", sessionId: this.identity.sessionId, reason });
   }
@@ -1036,11 +1131,11 @@ export class ReferenceAgentRuntime implements AgentRuntimePort {
     return {
       sessionId: this.identity.sessionId,
       sessionFile: this.identity.sessionFile,
-      leafId: session?.leafId,
+      ...(session?.leafId === undefined ? {} : { leafId: session.leafId }),
       isStreaming: this.status === "prompt",
       isPromptRunning: this.status === "prompt",
       isBashRunning: this.status === "bash",
-      isCompacting: this.status === "compacting",
+      isCompacting: this.compactionProjection !== null,
       autoCompactionEnabled: this.autoCompaction,
       autoRetryEnabled: this.autoRetry,
       model: this.model,
@@ -1048,8 +1143,8 @@ export class ReferenceAgentRuntime implements AgentRuntimePort {
       pendingMessageCount:
         this.queue.steering.length + this.queue.followUp.length,
       queuedMessages: {
-        steering: [...this.queue.steering],
-        followUp: [...this.queue.followUp],
+        steering: this.queue.steering.map((turn) => ({ ...turn })),
+        followUp: this.queue.followUp.map((turn) => ({ ...turn })),
       },
       contextUsage: {
         percent: Math.min(100, (session?.entries.length ?? 0) * 10),
@@ -1058,11 +1153,16 @@ export class ReferenceAgentRuntime implements AgentRuntimePort {
       },
       systemPrompt: this.systemPrompt,
       thinkingLevel: this.thinkingLevel,
+      thinkingLevelPinned: this.thinkingLevelPinned,
+      ...(this.bashProjection ? { bash: { ...this.bashProjection } } : {}),
+      ...(this.compactionProjection
+        ? { compaction: { ...this.compactionProjection } }
+        : {}),
       tools: this.listTools(),
       extensionStatuses: this.extensionStatuses,
       extensionWidgets: this.extensionWidgets,
       pendingExtensionUi: this.pendingExtension ? [this.pendingExtension.request] : [],
-      sessionName: session?.title,
+      ...(session?.title === undefined ? {} : { sessionName: session.title }),
       writtenFiles: session ? [...session.writtenFiles] : [],
     };
   }

@@ -11,7 +11,8 @@ export type AuthProviderKind = "oauth" | "apiKey" | "deviceCode";
 export interface AuthProviderInfo {
   id: string;
   name?: string;
-  kind: AuthProviderKind;
+  /** Supported authorization methods; one provider row may support several. */
+  methods: readonly AuthProviderKind[];
 }
 
 export interface AuthProviderStatus {

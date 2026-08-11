@@ -46,11 +46,10 @@ export interface AdapterContractHarness {
   createFactory(options?: HarnessFactoryOptions): Promise<AgentRuntimeFactory>;
 
   /**
-   * Optional: extra ports sharing the same backend as `factory`. The suite
-   * skips the catalog/locator/model/credential/resource/trust sections when
-   * this is not provided.
+   * Ports sharing the same backend as `factory`. ACL0/ACL1 adapters are
+   * required to provide the complete bundle; absence is a contract failure.
    */
-  createPorts?(factory: AgentRuntimeFactory): Promise<AdapterPortBundle>;
+  createPorts(factory: AgentRuntimeFactory): Promise<AdapterPortBundle>;
 
   /** Optional: build the side-chat main-snapshot DTO for a session. */
   getSideChatSnapshot?(sessionId: string): Promise<SideChatMainSnapshot | null>;

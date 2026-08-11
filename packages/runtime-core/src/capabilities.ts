@@ -1,3 +1,5 @@
+import type { RuntimeCommandType } from "./commands.js";
+
 /**
  * Canonical agent-runtime capabilities.
  *
@@ -11,7 +13,9 @@
  * used by the contract suite is:
  *
  * - prompt        → `runtime.prompt`
- * - steer/follow_up/clear_queue → `runtime.queue`
+ * - steer        → `runtime.steer`
+ * - follow_up    → `runtime.follow_up`
+ * - clear_queue / set_auto_retry → `runtime.queue`
  * - abort         → `runtime.abort`
  * - set_model     → `runtime.model.set`
  * - set_thinking_level → `runtime.thinking.set`
@@ -54,6 +58,46 @@ export const RUNTIME_CAPABILITIES = [
 ] as const;
 
 export type RuntimeCapability = (typeof RUNTIME_CAPABILITIES)[number];
+
+/**
+ * Canonical command → capability mapping used by every adapter and by the
+ * shared contract suite. A `null` requirement means the command is a
+ * baseline query/configuration operation that is always available.
+ */
+export const RUNTIME_COMMAND_CAPABILITIES = {
+  prompt: "runtime.prompt",
+  abort: "runtime.abort",
+  get_state: null,
+  set_model: "runtime.model.set",
+  fork: "runtime.fork",
+  navigate_tree: "runtime.navigate",
+  set_thinking_level: "runtime.thinking.set",
+  compact: "runtime.compact",
+  set_session_name: "runtime.session.rename",
+  get_session_stats: "runtime.stats",
+  get_last_assistant_text: null,
+  set_auto_compaction: "runtime.compact",
+  clear_queue: "runtime.queue",
+  steer: "runtime.steer",
+  follow_up: "runtime.follow_up",
+  get_tools: "runtime.tools.read",
+  get_commands: null,
+  set_tools: "runtime.tools.write",
+  reload: "runtime.reload",
+  abort_compaction: "runtime.compact.abort",
+  extension_ui_response: "runtime.extension_ui",
+  extension_ui_input: "runtime.extension_ui",
+  set_auto_retry: "runtime.queue",
+  bash: "runtime.bash",
+  abort_bash: "runtime.bash.abort",
+  generate_session_title: "runtime.auto_name",
+} as const satisfies Readonly<Record<RuntimeCommandType, RuntimeCapability | null>>;
+
+export function requiredCapabilityForCommand(
+  type: RuntimeCommandType,
+): RuntimeCapability | null {
+  return RUNTIME_COMMAND_CAPABILITIES[type];
+}
 
 /**
  * The capability snapshot a runtime reports.

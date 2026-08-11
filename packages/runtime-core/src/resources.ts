@@ -24,10 +24,23 @@ export interface SkillInfo {
   name: string;
   description?: string;
   enabled: boolean;
+  version?: string;
+  updateAvailable?: boolean;
 }
 
 export interface PluginInfo {
   name: string;
   version?: string;
   enabled: boolean;
+}
+
+export interface PluginWriteInput {
+  name: string;
+  content: string;
+  enabled?: boolean;
+}
+
+export interface SkillInstallInput {
+  source: string;
+  name?: string;
 }

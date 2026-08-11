@@ -18,12 +18,15 @@ import type {
 
 export interface StoredEntry {
   entryId: string;
+  parentEntryId?: string;
   message: AgentMessage;
 }
 
 export interface StoredSession {
   sessionId: string;
   sessionFile: string;
+  cwd: string;
+  projectRoot: string;
   title?: string;
   createdAt: number;
   updatedAt: number;
@@ -41,6 +44,8 @@ export interface StoredSession {
 
 export interface CreateSessionInput {
   sessionId?: string;
+  cwd?: string;
+  projectRoot?: string;
   title?: string;
   parentSessionId?: string;
   forkPointEntryId?: string;
@@ -79,13 +84,19 @@ export class ReferenceSessionStore {
     const session: StoredSession = {
       sessionId,
       sessionFile: `${this.baseDir}/${sessionId}.jsonl`,
-      title: input.title,
+      cwd: input.cwd ?? "/workspace",
+      projectRoot: input.projectRoot ?? input.cwd ?? "/workspace",
+      ...(input.title === undefined ? {} : { title: input.title }),
       createdAt: now,
       updatedAt: now,
-      parentSessionId: input.parentSessionId,
-      forkPointEntryId: input.forkPointEntryId,
-      leafId: input.leafId,
-      model: input.model,
+      ...(input.parentSessionId === undefined
+        ? {}
+        : { parentSessionId: input.parentSessionId }),
+      ...(input.forkPointEntryId === undefined
+        ? {}
+        : { forkPointEntryId: input.forkPointEntryId }),
+      ...(input.leafId === undefined ? {} : { leafId: input.leafId }),
+      ...(input.model === undefined ? {} : { model: input.model }),
       entries: input.entries ? [...input.entries] : [],
       writtenFiles: new Set(input.writtenFiles ?? []),
     };
@@ -101,7 +112,12 @@ export class ReferenceSessionStore {
   appendEntry(sessionId: string, message: AgentMessage): StoredEntry {
     const session = this.getSession(sessionId);
     if (!session) throw new Error(`unknown session ${sessionId}`);
-    const entry: StoredEntry = { entryId: this.newEntryId(), message };
+    const parentEntryId = session.entries.at(-1)?.entryId;
+    const entry: StoredEntry = {
+      entryId: this.newEntryId(),
+      ...(parentEntryId === undefined ? {} : { parentEntryId }),
+      message,
+    };
     session.entries.push(entry);
     session.updatedAt = Date.now();
     session.lastMessageAt = Date.now();
@@ -204,8 +220,14 @@ export class ReferenceSessionStore {
   readSessionContext(sessionId: string, leafId?: string): SessionContext {
     const session = this.getSession(sessionId);
     if (!session) throw new Error(`session not found: ${sessionId}`);
-    const messages = session.entries.map((entry) => entry.message);
-    return { sessionId, leafId: leafId ?? session.leafId, messages };
+    const entries = session.entries.map((entry) => ({ ...entry }));
+    return {
+      sessionId,
+      ...(leafId ?? session.leafId
+        ? { leafId: leafId ?? session.leafId }
+        : {}),
+      entries,
+    };
   }
 
   deleteSession(sessionId: string): void {
@@ -237,13 +259,21 @@ export class ReferenceSessionStore {
     return {
       sessionId: session.sessionId,
       sessionFile: session.sessionFile,
-      title: session.title,
+      cwd: session.cwd,
+      projectRoot: session.projectRoot,
+      ...(session.title === undefined ? {} : { title: session.title }),
       createdAt: session.createdAt,
       updatedAt: session.updatedAt,
-      lastMessageAt: session.lastMessageAt,
+      ...(session.lastMessageAt === undefined
+        ? {}
+        : { lastMessageAt: session.lastMessageAt }),
       messageCount: session.entries.length,
-      parentSessionId: session.parentSessionId,
-      forkPointEntryId: session.forkPointEntryId,
+      ...(session.parentSessionId === undefined
+        ? {}
+        : { parentSessionId: session.parentSessionId }),
+      ...(session.forkPointEntryId === undefined
+        ? {}
+        : { forkPointEntryId: session.forkPointEntryId }),
     };
   }
 }

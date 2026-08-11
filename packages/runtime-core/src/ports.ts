@@ -14,6 +14,7 @@ import type { RuntimeError } from "./errors.js";
 import type { RuntimeCloseReason, RuntimeIdentity } from "./identity.js";
 import type { RuntimeInterrupt } from "./interrupt.js";
 import type { ModelInfo, ModelRef, ModelSelector } from "./model.js";
+import type { ThinkingLevel } from "./messages.js";
 import type { RuntimeCommandResult } from "./result.js";
 import type {
   SessionContext,
@@ -23,7 +24,7 @@ import type {
   SessionLocation,
 } from "./session.js";
 import type { RuntimeSnapshot } from "./state.js";
-import type { PluginInfo, SkillInfo, SlashCommandInfo } from "./resources.js";
+import type { PluginInfo, PluginWriteInput, SkillInfo, SkillInstallInput, SlashCommandInfo } from "./resources.js";
 import type { ProjectTrustStatus, TrustGateResult, TrustLevel } from "./trust.js";
 
 /* ------------------------------------------------------------------ */
@@ -38,6 +39,10 @@ export interface RuntimeStartInput {
   model?: ModelSelector;
   /** Initial tool set; backend default applies when omitted. */
   toolNames?: readonly string[];
+  /** Initial thinking selection; backend default applies when omitted. */
+  thinkingLevel?: ThinkingLevel;
+  /** Pin the selection so model changes/reloads must preserve it. */
+  thinkingLevelPinned?: boolean;
   /** Initial session name. */
   name?: string;
 }
@@ -152,6 +157,11 @@ export interface ResourceCatalogPort {
   listSkills(): Promise<readonly SkillInfo[]>;
   listPlugins(): Promise<readonly PluginInfo[]>;
   listCommands(): Promise<readonly SlashCommandInfo[]>;
+  writePlugin(input: PluginWriteInput): Promise<PluginInfo>;
+  setPluginEnabled(name: string, enabled: boolean): Promise<PluginInfo>;
+  installSkill(input: SkillInstallInput): Promise<SkillInfo>;
+  updateSkill(name: string): Promise<SkillInfo>;
+  setSkillEnabled(name: string, enabled: boolean): Promise<SkillInfo>;
   /** Reload skills/plugins/tools (subject to project trust at the caller). */
   reload(): Promise<void>;
 }

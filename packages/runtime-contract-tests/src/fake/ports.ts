@@ -108,8 +108,7 @@ export class ReferenceSessionCatalog implements SessionCatalogPort {
   listSessions(filter?: SessionListFilter): Promise<readonly SessionHeader[]> {
     let headers = this.store.listSessions();
     if (filter?.cwd) {
-      const cwd = filter.cwd;
-      headers = headers.filter((h) => (h.sessionFile ?? "").includes(cwd));
+      headers = headers.filter((header) => header.cwd === filter.cwd);
     }
     if (filter?.limit !== undefined) {
       headers = headers.slice(0, filter.limit);
@@ -151,9 +150,9 @@ export class ReferenceSessionLocator implements SessionLocatorPort {
 /* ------------------------------------------------------------------ */
 
 const PROVIDERS: readonly AuthProviderInfo[] = [
-  { id: "anthropic", name: "Anthropic", kind: "apiKey" },
-  { id: "openai", name: "OpenAI", kind: "apiKey" },
-  { id: "github", name: "GitHub", kind: "oauth" },
+  { id: "anthropic", name: "Anthropic", methods: ["apiKey"] },
+  { id: "openai", name: "OpenAI", methods: ["apiKey", "oauth"] },
+  { id: "github", name: "GitHub", methods: ["oauth", "deviceCode"] },
 ];
 
 export class ReferenceCredentialStore implements CredentialStorePort {
@@ -168,7 +167,7 @@ export class ReferenceCredentialStore implements CredentialStorePort {
     return Promise.resolve({
       providerId,
       authorized: account !== undefined,
-      accountName: account,
+      ...(account === undefined ? {} : { accountName: account }),
     });
   }
 
@@ -240,6 +239,48 @@ export class ReferenceResourceCatalog implements ResourceCatalogPort {
     return Promise.resolve([...this.commands]);
   }
 
+  writePlugin(input: { name: string; content: string; enabled?: boolean }): Promise<PluginInfo> {
+    if (!input.name.trim() || !input.content.trim()) {
+      return Promise.reject(makeRuntimeError("invalid_input", "plugin name/content required"));
+    }
+    const plugin: PluginInfo = {
+      name: input.name,
+      version: "local",
+      enabled: input.enabled ?? true,
+    };
+    this.plugins = [...this.plugins.filter((item) => item.name !== input.name), plugin];
+    return Promise.resolve(plugin);
+  }
+
+  setPluginEnabled(name: string, enabled: boolean): Promise<PluginInfo> {
+    const plugin = this.plugins.find((item) => item.name === name);
+    if (!plugin) return Promise.reject(makeRuntimeError("not_found", `plugin not found: ${name}`));
+    plugin.enabled = enabled;
+    return Promise.resolve({ ...plugin });
+  }
+
+  installSkill(input: { source: string; name?: string }): Promise<SkillInfo> {
+    const name = input.name ?? input.source.split("/").at(-1) ?? "installed-skill";
+    const skill: SkillInfo = { name, enabled: true, version: "1.0.0", updateAvailable: false };
+    this.skills = [...this.skills.filter((item) => item.name !== name), skill];
+    return Promise.resolve(skill);
+  }
+
+  updateSkill(name: string): Promise<SkillInfo> {
+    const skill = this.skills.find((item) => item.name === name);
+    if (!skill) return Promise.reject(makeRuntimeError("not_found", `skill not found: ${name}`));
+    skill.version = "updated";
+    skill.updateAvailable = false;
+    return Promise.resolve({ ...skill });
+  }
+
+  setSkillEnabled(name: string, enabled: boolean): Promise<SkillInfo> {
+    const skill = this.skills.find((item) => item.name === name);
+    if (!skill) return Promise.reject(makeRuntimeError("not_found", `skill not found: ${name}`));
+    skill.enabled = enabled;
+    return Promise.resolve({ ...skill });
+  }
+
   reload(): Promise<void> {
     return Promise.resolve();
   }
@@ -271,7 +312,7 @@ export class ReferenceProjectTrust implements ProjectTrustPort {
     return Promise.resolve({
       allowed: level === "trusted",
       level,
-      reason: level === "trusted" ? undefined : "project is not trusted",
+      ...(level === "trusted" ? {} : { reason: "project is not trusted" }),
     });
   }
 }
