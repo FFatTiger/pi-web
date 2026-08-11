@@ -48,7 +48,7 @@ export { registerFileIndexRoutes } from "./routes/file-index.js";
 export { registerGitRoutes } from "./routes/git.js";
 export { registerWorktreeRoutes } from "./routes/worktrees.js";
 export { createAllowedRootService, pathContainment } from "./resources/allowed-roots.js";
-export type { AllowedRootPolicy, AllowedRootService, AuthorizedPath } from "./resources/allowed-roots.js";
+export type { AllowedRootPolicy, AllowedRootService, AuthorizedPath, RootExpansionPlan, RootExpansionResult } from "./resources/allowed-roots.js";
 export { createProcessRunner, runChecked } from "./resources/process-runner.js";
 export type { ProcessRequest, ProcessResult, ProcessRunner } from "./resources/process-runner.js";
 export { createFileWatchManager } from "./resources/file-watch.js";

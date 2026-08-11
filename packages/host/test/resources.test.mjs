@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test, { afterEach } from "node:test";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, renameSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, renameSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
@@ -9,6 +9,7 @@ import {
   createFileWatchManager,
   createHostApp,
   createProcessRunner,
+  HttpError,
   parseSingleRange,
 } from "../dist/index.js";
 
@@ -119,7 +120,37 @@ test("default cwd creation is injected, canonicalized, and fail-closed when unav
   let app = createHostApp({ logger: {}, gate, resources: { allowedRoots: roots } }).app;
   let response = await app.request("http://localhost/v1/cwd/default", { method: "POST", headers: headers() }); assert.equal(response.status, 503);
   app = createHostApp({ logger: {}, gate, resources: { allowedRoots: roots, defaultCwdFactory: { create: async () => ({ cwd, projectRoot: project }) } } }).app;
-  response = await app.request("http://localhost/v1/cwd/default", { method: "POST", headers: headers() }); assert.equal(response.status, 201); const body = await response.json(); assert.ok(roots.roots().includes(body.cwd)); assert.ok(roots.roots().includes(body.projectRoot));
+  response = await app.request("http://localhost/v1/cwd/default", { method: "POST", headers: headers() }); assert.equal(response.status, 201); const body = await response.json(); assert.equal(await roots.isAuthorized(body.cwd, "directory"), true); assert.equal(await roots.isAuthorized(body.projectRoot, "directory"), true);
+});
+
+test("default cwd atomic expansion leaves roots unchanged on missing, swap, limit, duplicate, preexisting and LAN failure", async () => {
+  const base = temp("pi-default-matrix-"); const preexisting = join(base, "preexisting"); mkdirSync(preexisting); const beforeRoots = async (roots) => [...roots.roots()];
+  const cases = [
+    { name: "missing cwd", build: () => ({ projectRoot: temp("pi-project-"), cwd: join(base, "missing") }) },
+    { name: "root limit", policy: { maxRoots: 1, allowLocalExpansion: true }, build: () => ({ projectRoot: temp("pi-project-"), cwd: temp("pi-cwd-") }) },
+    { name: "duplicate path", policy: { allowLocalExpansion: true }, expect: 201, build: () => { const path = temp("pi-same-"); return { projectRoot: path, cwd: path }; } },
+    { name: "preexisting project", policy: { allowLocalExpansion: true }, expect: 201, build: () => ({ projectRoot: preexisting, cwd: join(preexisting, "cwd") }), prepare: ({ cwd }) => mkdirSync(cwd) },
+  ];
+  for (const scenario of cases) {
+    const roots = await createAllowedRootService({ roots: [base], ...scenario.policy }); const created = scenario.build(); scenario.prepare?.(created); const before = await beforeRoots(roots);
+    const app = createHostApp({ logger: {}, gate, resources: { allowedRoots: roots, defaultCwdFactory: { create: async () => created } } }).app;
+    const response = await app.request("http://localhost/v1/cwd/default", { method: "POST", headers: headers() }); assert.equal(response.status, scenario.expect ?? (scenario.name === "root limit" ? 429 : 404), scenario.name);
+    if (!scenario.expect) assert.deepEqual(roots.roots(), before, scenario.name);
+  }
+  const outsideProject = temp("pi-lan-project-"); const outsideCwd = join(outsideProject, "cwd"); mkdirSync(outsideCwd); const lanRoots = await createAllowedRootService({ roots: [base], allowLocalExpansion: true }); const lanBefore = [...lanRoots.roots()];
+  const lan = createHostApp({ logger: {}, exposureMode: "lan", gate: { config: { read: () => ({ status: "enabled", password: "secret", source: "test" }) } }, resources: { allowedRoots: lanRoots, defaultCwdFactory: { create: async () => ({ projectRoot: outsideProject, cwd: outsideCwd }) } } }).app;
+  const login = await lan.request("http://127.0.0.1/v1/gate/login", { method: "POST", headers: { host: "127.0.0.1", "content-type": "application/json" }, body: JSON.stringify({ password: "secret" }) }); const cookie = login.headers.get("set-cookie").split(";", 1)[0];
+  const denied = await lan.request("http://127.0.0.1/v1/cwd/default", { method: "POST", headers: { host: "127.0.0.1", cookie } }); assert.equal(denied.status, 403); assert.deepEqual(lanRoots.roots(), lanBefore);
+
+  const swapProject = temp("pi-swap-project-"); const swapCwd = join(swapProject, "cwd"); mkdirSync(swapCwd); const swapRoots = await createAllowedRootService({ roots: [base], allowLocalExpansion: true }); const swapBefore = [...swapRoots.roots()]; const moved = `${swapCwd}-old`; temporary.push(moved);
+  const plan = await swapRoots.prepareExpansion([swapProject, swapCwd], "local"); renameSync(swapCwd, moved); mkdirSync(swapCwd);
+  await assert.rejects(() => plan.commit(), (e) => e.code === "ROOT_IDENTITY_CHANGED"); assert.deepEqual(swapRoots.roots(), swapBefore);
+});
+
+test("default cwd nested project/cwd consumes one root slot", async () => {
+  const configured = temp("pi-default-configured-"); const project = temp("pi-default-nested-"); const cwd = join(project, "cwd"); mkdirSync(cwd); const roots = await createAllowedRootService({ roots: [configured], maxRoots: 2, allowLocalExpansion: true });
+  const app = createHostApp({ logger: {}, gate, resources: { allowedRoots: roots, defaultCwdFactory: { create: async () => ({ projectRoot: project, cwd }) } } }).app;
+  const response = await app.request("http://localhost/v1/cwd/default", { method: "POST", headers: headers() }); assert.equal(response.status, 201); assert.equal(roots.roots().length, 2); assert.equal(await roots.isAuthorized(cwd, "directory"), true);
 });
 
 test("file index uses git ignore semantics and fallback walk skips symlinks", async () => {
@@ -141,6 +172,21 @@ test("git status/diff are repo-contained and handle untracked patches", async ()
   const status = await app.request(`http://localhost/v1/git/status?cwd=${encodeURIComponent(root)}`, { headers: headers() }); const body = await status.json(); assert.equal(body.isGitRepository, true); assert.deepEqual(body.files.map((f) => f.status).sort(), ["modified", "untracked"]);
   const diff = await app.request(`http://localhost/v1/git/diff?cwd=${encodeURIComponent(root)}&path=${encodeURIComponent(join(root, "new.txt"))}`, { headers: headers() }); const patch = await diff.json(); assert.equal(patch.supported, true); assert.match(patch.patch, /\+new/);
   const denied = await app.request(`http://localhost/v1/git/diff?cwd=${encodeURIComponent(root)}&path=${encodeURIComponent(join(root, "..", "escape"))}`, { headers: headers() }); assert.equal(denied.status, 403);
+});
+
+test("GET worktrees is absolutely read-only for local/LAN and external worktrees stay unauthorized", async () => {
+  const root = temp("pi-worktree-readonly-"); initRepo(root); const externalBase = temp("pi-worktree-external-"); const external = join(externalBase, "existing"); git(root, ["worktree", "add", "-b", "external-existing", "--", external]); const externalCanonical = await import("node:fs/promises").then(({ realpath }) => realpath(external));
+  for (const exposureMode of ["local", "lan"]) {
+    const roots = await createAllowedRootService({ roots: [root], maxRoots: 1 }); const before = [...roots.roots()];
+    const app = createHostApp({ logger: {}, gate: exposureMode === "lan" ? { config: { read: () => ({ status: "enabled", password: "secret", source: "test" }) } } : gate, exposureMode, resources: { allowedRoots: roots } }).app;
+    const requestHeaders = exposureMode === "lan" ? { host: "127.0.0.1" } : headers();
+    if (exposureMode === "lan") {
+      const login = await app.request("http://127.0.0.1/v1/gate/login", { method: "POST", headers: { ...requestHeaders, "content-type": "application/json" }, body: JSON.stringify({ password: "secret" }) }); requestHeaders.cookie = login.headers.get("set-cookie").split(";", 1)[0];
+    }
+    const response = await app.request(`http://${exposureMode === "lan" ? "127.0.0.1" : "localhost"}/v1/worktrees?cwd=${encodeURIComponent(root)}`, { headers: requestHeaders }); assert.equal(response.status, 200); const body = await response.json(); const item = body.worktrees.find((worktree) => worktree.path === externalCanonical); assert.equal(item.authorized, false);
+    assert.deepEqual(roots.roots(), before); assert.equal(await roots.isAuthorized(external, "directory"), false);
+    const file = join(external, "tracked.txt"); const denied = await app.request(`http://${exposureMode === "lan" ? "127.0.0.1" : "localhost"}/v1/files?op=read&path=${encodeURIComponent(file)}`, { headers: requestHeaders }); assert.equal(denied.status, 403); assert.deepEqual(roots.roots(), before);
+  }
 });
 
 test("worktree deletion fails closed without preflight and force never overrides busy", async () => {
@@ -169,6 +215,28 @@ test("worktree creation rejects symlink base and rolls back when root registrati
   rmSync(base); allowedRoots = await createAllowedRootService({ roots: [root], maxRoots: 1 }); app = createHostApp({ logger: {}, gate, resources: { allowedRoots } }).app;
   response = await app.request("http://localhost/v1/worktrees", { method: "POST", headers: headers({ "content-type": "application/json" }), body: JSON.stringify({ cwd: root, branch: "registration-fails" }) }); assert.equal(response.status, 429);
   assert.ok(!git(root, ["worktree", "list", "--porcelain"]).includes("registration-fails")); assert.throws(() => git(root, ["show-ref", "--verify", "refs/heads/registration-fails"])); assert.ok(!allowedRoots.roots().some((entry) => entry.includes("registration-fails")));
+});
+
+test("worktree create rolls back base/branch/worktree on add process failure", async () => {
+  const root = temp("pi-worktree-process-fail-"); initRepo(root); const roots = await createAllowedRootService({ roots: [root] }); const realRunner = createProcessRunner();
+  const runner = { async run(request) { if (request.args.includes("add")) { const actual = await realRunner.run(request); assert.equal(actual.exitCode, 0); return { stdout: actual.stdout, stderr: "simulated add failure", exitCode: 7, truncated: false }; } return realRunner.run(request); } };
+  const app = createHostApp({ logger: {}, gate, resources: { allowedRoots: roots, processRunner: runner } }).app;
+  const response = await app.request("http://localhost/v1/worktrees", { method: "POST", headers: headers({ "content-type": "application/json" }), body: JSON.stringify({ cwd: root, branch: "partial-failure" }) }); assert.equal(response.status, 400);
+  assert.throws(() => git(root, ["show-ref", "--verify", "refs/heads/partial-failure"])); assert.equal(statSync(`${resolve(root)}-worktrees`, { throwIfNoEntry: false }), undefined); assert.deepEqual(roots.roots(), [await import("node:fs/promises").then(({ realpath }) => realpath(root))]);
+});
+
+test("worktree create transaction rolls back timeout/output failures and concurrent target conflict", async () => {
+  for (const failure of ["PROCESS_TIMEOUT", "PROCESS_OUTPUT_LIMIT"]) {
+    const root = temp(`pi-worktree-${failure}-`); initRepo(root); const roots = await createAllowedRootService({ roots: [root] }); const realRunner = createProcessRunner();
+    const runner = { async run(request) { if (request.args.includes("add")) throw new HttpError(failure === "PROCESS_TIMEOUT" ? 504 : 413, failure, failure); return realRunner.run(request); } };
+    const app = createHostApp({ logger: {}, gate, resources: { allowedRoots: roots, processRunner: runner } }).app;
+    const response = await app.request("http://localhost/v1/worktrees", { method: "POST", headers: headers({ "content-type": "application/json" }), body: JSON.stringify({ cwd: root, branch: failure.toLowerCase() }) }); assert.equal(response.status, failure === "PROCESS_TIMEOUT" ? 504 : 413);
+    assert.throws(() => git(root, ["show-ref", "--verify", `refs/heads/${failure.toLowerCase()}`])); assert.equal(statSync(`${resolve(root)}-worktrees`, { throwIfNoEntry: false }), undefined);
+  }
+  const root = temp("pi-worktree-conflict-"); initRepo(root); const base = `${resolve(root)}-worktrees`; const target = join(base, "race-branch"); const roots = await createAllowedRootService({ roots: [root] }); const realRunner = createProcessRunner();
+  const runner = { async run(request) { if (request.args.includes("worktree") && request.args.includes("add")) { mkdirSync(target, { recursive: true }); writeFileSync(join(target, "concurrent-owner.txt"), "keep"); } return realRunner.run(request); } };
+  const app = createHostApp({ logger: {}, gate, resources: { allowedRoots: roots, processRunner: runner } }).app;
+  const response = await app.request("http://localhost/v1/worktrees", { method: "POST", headers: headers({ "content-type": "application/json" }), body: JSON.stringify({ cwd: root, branch: "race-branch" }) }); assert.equal(response.status, 400); assert.equal(readFileSync(join(target, "concurrent-owner.txt"), "utf8"), "keep"); assert.throws(() => git(root, ["show-ref", "--verify", "refs/heads/race-branch"]));
 });
 
 test("worktree rollback preserves pre-existing branch and base", async () => {
@@ -207,6 +275,15 @@ test("file watch manager reserves atomically and releases on creation failure, a
   const missing = manager.open(join(root, "missing")); await assert.rejects(() => missing.body.getReader().read()); await new Promise((resolve) => setImmediate(resolve)); assert.equal(manager.reservedCount(), 0);
   const controller = new AbortController(); const aborted = manager.open(file, controller.signal); controller.abort(); const abortedReader = aborted.body.getReader(); assert.equal((await abortedReader.read()).done, true); assert.equal(manager.reservedCount(), 0); assert.equal(manager.activeCount(), 0);
   const closing = manager.open(file); await closing.body.getReader().read(); manager.closeAll(); assert.equal(manager.activeCount(), 0); assert.equal(manager.reservedCount(), 0);
+});
+
+test("watch closeAll terminates active and reserved SSE exactly once under races", async () => {
+  const root = temp("pi-watch-shutdown-"); const file = join(root, "a.txt"); writeFileSync(file, "a"); const manager = createFileWatchManager(2);
+  const activeResponse = manager.open(file); const activeReader = activeResponse.body.getReader(); await activeReader.read();
+  const reservedResponse = manager.open(file); const reservedReader = reservedResponse.body.getReader(); assert.equal(manager.reservedCount(), 1);
+  manager.closeAll(); manager.closeAll(); writeFileSync(file, "event-after-close");
+  assert.equal((await activeReader.read()).done, true); assert.equal((await reservedReader.read()).done, true); await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(manager.activeCount(), 0); assert.equal(manager.reservedCount(), 0);
 });
 
 test("resource APIs remain protected by gate and unknown APIs stay JSON 404", async () => {

@@ -215,8 +215,8 @@ export function registerFileRoutes(app: Hono<HostEnv>, deps: FileRouteDeps): voi
     if (typeof body.cwd !== "string") throw new HttpError(400, "CWD_REQUIRED", "cwd is required");
     const existing = await deps.roots.authorizeExisting(body.cwd, "directory").catch(async (error: unknown) => {
       if (error instanceof HttpError && error.status === 403) {
-        const added = await deps.roots.addRoot(body.cwd as string, c.get("hostMode"));
-        return deps.roots.authorizeExisting(added, "directory");
+        const expansion = await deps.roots.expandRoots([body.cwd as string], c.get("hostMode"));
+        return deps.roots.authorizeExisting(expansion.paths[0]!, "directory");
       }
       throw error;
     });
@@ -238,8 +238,7 @@ export function registerFileRoutes(app: Hono<HostEnv>, deps: FileRouteDeps): voi
   app.post("/v1/cwd/default", async (c) => {
     if (!deps.defaultCwdFactory) throw new HttpError(503, "DEFAULT_CWD_UNAVAILABLE", "Default cwd creation is not configured");
     const created = await deps.defaultCwdFactory.create();
-    const projectRoot = await deps.roots.addVerifiedRoot(created.projectRoot);
-    const cwd = await deps.roots.addVerifiedRoot(created.cwd);
-    return c.json({ cwd, projectRoot }, 201);
+    const expansion = await deps.roots.expandRoots([created.projectRoot, created.cwd], c.get("hostMode"));
+    return c.json({ cwd: expansion.paths[1]!, projectRoot: expansion.paths[0]! }, 201);
   });
 }
