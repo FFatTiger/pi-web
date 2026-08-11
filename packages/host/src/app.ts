@@ -1,0 +1,111 @@
+import { Hono } from "hono";
+import { createNodeWebSocket } from "@hono/node-ws";
+import type { ServerType } from "@hono/node-server";
+import type { HostEnv } from "./env.js";
+import { unifiedErrorHandler } from "./errors.js";
+import { requestIdMiddleware } from "./middleware/request-id.js";
+import { loggingMiddleware } from "./middleware/logging.js";
+import { securityMiddleware } from "./middleware/security.js";
+import { gateMiddleware } from "./gate/middleware.js";
+import { registerGateRoutes } from "./gate/routes.js";
+import { registerHealthRoutes } from "./routes/health.js";
+import { createEnvGateConfigSource } from "./gate/config.js";
+import { createInMemoryRevocationStore } from "./gate/revocation.js";
+import { staticAssetsMiddleware } from "./static/static-assets.js";
+import { spaOrJsonNotFound } from "./static/spa.js";
+import { createRuntimeWsRoute } from "./ws/guard.js";
+import { consoleLogger } from "./logger.js";
+import type { GateDeps, HostDeps, HostLogger } from "./types.js";
+
+export interface HostApp {
+  app: Hono<HostEnv>;
+  /** Wire WebSocket upgrades into the Node server created by createNodeServer. */
+  injectWebSocket: (server: ServerType) => void;
+  /** Explicitly terminate upgraded clients during host shutdown. */
+  closeWebSockets: () => Promise<void>;
+  /** Trusted exposure mode used by security/gate decisions. */
+  exposureMode: "local" | "lan";
+}
+
+/**
+ * Middleware order (H0A spec):
+ * 1. request ID / logging
+ * 2. Host/Origin/DNS-rebinding protection
+ * 3. gate (public PWA allowlist + auth)
+ * 4. /v1/* routes
+ * 5. static assets
+ * 6. SPA fallback (notFound)
+ * 7. error mapping (onError)
+ */
+export function createHostApp(deps: HostDeps = {}): HostApp {
+  const app = new Hono<HostEnv>();
+  const ws = createNodeWebSocket({ app });
+  ws.wss.options.maxPayload = deps.wsMaxPayloadBytes ?? 1024 * 1024;
+  const logger: HostLogger = deps.logger ?? consoleLogger;
+  const exposureMode = deps.exposureMode ?? "local";
+
+  const revocations =
+    deps.gate?.revocations ??
+    createInMemoryRevocationStore(
+      deps.gate?.now ? { now: deps.gate.now } : {},
+    );
+  const gateDeps: GateDeps = {
+    requireForLan: true,
+    ...deps.gate,
+    config: deps.gate?.config ?? createEnvGateConfigSource(),
+    revocations,
+  };
+
+  // 1. request id / logging
+  app.use("*", requestIdMiddleware());
+  app.use("*", loggingMiddleware(logger));
+
+  // 2. Host/Origin/DNS-rebinding protection
+  const securityOptions = {
+    exposureMode,
+    ...(deps.allowedHosts ? { allowedHosts: deps.allowedHosts } : {}),
+    ...(deps.trustedProxy
+      ? { trustedProxyAddresses: deps.trustedProxy.addresses }
+      : {}),
+  };
+  app.use("*", securityMiddleware(securityOptions));
+
+  // 3. gate
+  app.use("*", gateMiddleware(gateDeps));
+
+  // 4. /v1 routes
+  registerGateRoutes(app, gateDeps, logger);
+  registerHealthRoutes(app, deps);
+  const wsGuardOptions = {
+    logger,
+    ...(deps.runtimeWs ? { runtimeWs: deps.runtimeWs } : {}),
+    ...(deps.helloTimeoutMs !== undefined
+      ? { helloTimeoutMs: deps.helloTimeoutMs }
+      : {}),
+    ...(deps.wsHelloMaxBytes !== undefined
+      ? { helloMaxBytes: deps.wsHelloMaxBytes }
+      : {}),
+  };
+  app.get("/v1/runtime", createRuntimeWsRoute(ws.upgradeWebSocket, wsGuardOptions));
+
+  // 5. static assets (Vite client dist)
+  const staticOptions = deps.clientDist ? { clientDist: deps.clientDist } : {};
+  app.use("*", staticAssetsMiddleware(staticOptions));
+
+  // 6. SPA fallback / JSON 404
+  app.notFound(spaOrJsonNotFound(staticOptions));
+
+  // 7. unified error mapping
+  app.onError(unifiedErrorHandler(logger));
+
+  return {
+    app,
+    injectWebSocket: ws.injectWebSocket,
+    exposureMode,
+    closeWebSockets: () =>
+      new Promise<void>((resolve) => {
+        for (const client of ws.wss.clients) client.terminate();
+        ws.wss.close(() => resolve());
+      }),
+  };
+}
