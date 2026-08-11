@@ -19,6 +19,11 @@
 
 # production
 /build
+/packages/*/dist
+
+# package-local artifacts; npm workspaces use the root install and lockfile
+/packages/*/node_modules
+/packages/*/package-lock.json
 
 # misc
 .DS_Store

@@ -14,6 +14,9 @@
   "engines": {
     "node": ">=22.19.0"
   },
+  "workspaces": [
+    "packages/*"
+  ],
   "bin": {
     "pi-web": "bin/pi-web.js"
   },
@@ -24,6 +27,8 @@
     "!.next/dev",
     "!.next/**/*.js.map",
     "public",
+    "packages/*/dist",
+    "packages/*/package.json",
     "next.config.ts",
     "package.json"
   ],
@@ -34,6 +39,10 @@
     "start": "next start -H 127.0.0.1 -p 30141",
     "start:lan": "next start -H 0.0.0.0 -p 30141",
     "lint": "eslint .",
+    "typecheck": "tsc --noEmit --incremental false",
+    "workspaces:build": "npm run build --workspaces --if-present",
+    "workspaces:typecheck": "npm run typecheck --workspaces --if-present",
+    "workspaces:test": "npm run test --workspaces --if-present",
     "release": "npm version patch --no-git-tag-version && npm run build && npm publish --access public",
     "test": "node --test '**/*.test.mjs'"
   },
