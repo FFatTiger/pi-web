@@ -64,19 +64,42 @@ export const StreamingMessageLifecycleSchema = z
   .array(z.union([MessageStartEventDataSchema, MessageUpdateEventDataSchema, MessageEndEventDataSchema]))
   .min(2)
   .superRefine((events, ctx) => {
-    const first = events[0];
-    if (first?.type !== "message_start") {
-      ctx.addIssue({ code: "custom", path: [0], message: "stream lifecycle must start with message_start" });
+    const start = events[0];
+    if (start?.type !== "message_start") {
+      ctx.addIssue({ code: "custom", path: [0], message: "stream lifecycle must start with exactly one message_start" });
       return;
     }
+
+    let ended = false;
     for (let index = 1; index < events.length; index += 1) {
       const event = events[index];
-      if (event?.streamId !== first.streamId || event.messageId !== first.messageId) {
+      if (event === undefined) continue;
+      if (event.sessionId !== start.sessionId) {
+        ctx.addIssue({ code: "custom", path: [index, "sessionId"], message: "stream sessionId mismatch" });
+      }
+      if (event.streamId !== start.streamId || event.messageId !== start.messageId) {
         ctx.addIssue({ code: "custom", path: [index], message: "stream/message id mismatch" });
       }
+      if (ended) {
+        ctx.addIssue({ code: "custom", path: [index], message: "no stream event is allowed after message_end" });
+        continue;
+      }
+      if (event.type === "message_start") {
+        ctx.addIssue({ code: "custom", path: [index], message: "stream lifecycle permits exactly one message_start" });
+      } else if (event.type === "message_update") {
+        if (event.delta.role !== start.message.role) {
+          ctx.addIssue({ code: "custom", path: [index, "delta", "role"], message: "stream update role must match message_start role" });
+        }
+      } else {
+        ended = true;
+        if (event.message.role !== start.message.role) {
+          ctx.addIssue({ code: "custom", path: [index, "message", "role"], message: "message_end role must match message_start role" });
+        }
+      }
     }
-    if (events.at(-1)?.type !== "message_end") {
-      ctx.addIssue({ code: "custom", path: [events.length - 1], message: "stream lifecycle must end with message_end" });
+
+    if (!ended) {
+      ctx.addIssue({ code: "custom", path: [events.length - 1], message: "stream lifecycle requires exactly one message_end" });
     }
   });
 

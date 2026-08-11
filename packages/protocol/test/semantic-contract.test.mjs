@@ -106,32 +106,20 @@ describe("ACL0 semantic fixtures remain protocol-local", () => {
   });
 
   it("preserves queued images, active bash/compaction and partial streaming", () => {
-    const value = {
+    const queuedMessages = {
+      steering: [{ message: "redirect", images: [{ type: "image", data: "AA==", mimeType: "image/png" }] }],
+      followUp: [{ message: "then continue" }],
+    };
+    const commonState = {
+      ...state,
+      queuedMessages,
+      thinkingLevel: "high",
+      thinkingLevelPinned: true,
+      writtenFiles: ["/p/a.ts"],
+    };
+    const streaming = RuntimeSnapshotSchema.parse({
       ...snapshot,
-      state: {
-        ...state,
-        isStreaming: true,
-        isPromptRunning: true,
-        isBashRunning: true,
-        isCompacting: true,
-        queuedMessages: {
-          steering: [{ message: "redirect", images: [{ type: "image", data: "AA==", mimeType: "image/png" }] }],
-          followUp: [{ message: "then continue" }],
-        },
-        bash: {
-          command: "npm test",
-          output: "running",
-          excludeFromContext: false,
-          truncated: false,
-          cancelled: false,
-          completed: false,
-          updateCount: 2,
-        },
-        compaction: { reason: "manual", status: "aborting", customInstructions: "keep decisions", startedAt: 42 },
-        thinkingLevel: "high",
-        thinkingLevelPinned: true,
-        writtenFiles: ["/p/a.ts"],
-      },
+      state: { ...commonState, isStreaming: true, isPromptRunning: true },
       streaming: {
         active: true,
         streamId: "stream-1",
@@ -139,11 +127,28 @@ describe("ACL0 semantic fixtures remain protocol-local", () => {
         phase: "streaming",
         partialMessage: { role: "assistant", content: [{ type: "text", text: "par" }], writtenFiles: [] },
       },
-    };
-    const parsed = RuntimeSnapshotSchema.parse(value);
-    assert.equal(parsed.state.queuedMessages?.steering[0]?.images?.[0]?.mimeType, "image/png");
-    assert.equal(parsed.state.bash?.updateCount, 2);
-    assert.equal(parsed.state.compaction?.status, "aborting");
+    });
+    const bash = RuntimeSnapshotSchema.parse({
+      ...snapshot,
+      state: {
+        ...commonState,
+        isBashRunning: true,
+        bash: { command: "npm test", output: "running", excludeFromContext: false, truncated: false, cancelled: false, completed: false, updateCount: 2 },
+      },
+      streaming: { active: true, phase: "bash" },
+    });
+    const compacting = RuntimeSnapshotSchema.parse({
+      ...snapshot,
+      state: {
+        ...commonState,
+        isCompacting: true,
+        compaction: { reason: "manual", status: "aborting", customInstructions: "keep decisions", startedAt: 42 },
+      },
+      streaming: { active: true, phase: "compacting" },
+    });
+    assert.equal(streaming.state.queuedMessages?.steering[0]?.images?.[0]?.mimeType, "image/png");
+    assert.equal(bash.state.bash?.updateCount, 2);
+    assert.equal(compacting.state.compaction?.status, "aborting");
   });
 
   it("uses auth methods[] and stable session entry metadata", () => {

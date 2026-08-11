@@ -12,7 +12,7 @@ import {
   ProtocolHandshakeRejectSchema,
   ProtocolHandshakeRequestSchema,
   ProtocolHandshakeResponseSchema,
-  ResumeStatusSchema,
+  SnapshotDeliveryReasonSchema,
   RuntimeAttachParamsSchema,
   RuntimeCreateParamsSchema,
 } from "./handshake.js";
@@ -83,7 +83,7 @@ export const WsSnapshotMessageSchema = z.strictObject({
     lastEventId: LastEventIdSchema,
     workerStatus: WorkerStatusSchema,
     snapshot: RuntimeSnapshotSchema,
-    resumeStatus: ResumeStatusSchema.optional(),
+    resumeStatus: SnapshotDeliveryReasonSchema,
   }).superRefine((value, ctx) => {
     if (value.sessionId !== value.snapshot.sessionId) ctx.addIssue({ code: "custom", path: ["snapshot", "sessionId"], message: "snapshot sessionId mismatch" });
     if (value.cwd !== value.snapshot.cwd) ctx.addIssue({ code: "custom", path: ["snapshot", "cwd"], message: "snapshot cwd mismatch" });

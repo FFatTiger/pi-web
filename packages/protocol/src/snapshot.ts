@@ -117,22 +117,49 @@ export const RuntimeSnapshotSchema = z
       ctx.addIssue({ code: "custom", path: ["state", "sessionId"], message: "state.sessionId must match snapshot.sessionId" });
     }
     const stream = snapshot.streaming;
+    const bashRunning = snapshot.state.isBashRunning;
+    const compacting = snapshot.state.isCompacting;
+    const operationRunning = bashRunning || compacting;
     if (snapshot.state.isStreaming) {
-      if (!stream?.active || stream.streamId === undefined || stream.messageId === undefined || stream.partialMessage === undefined || !hasRecoverablePartial(stream.partialMessage) || stream.phase === undefined || stream.phase === "idle") {
-        ctx.addIssue({ code: "custom", path: ["streaming"], message: "active runtime streaming requires ids, phase and recoverable partial message" });
+      if (!stream?.active || stream.streamId === undefined || stream.messageId === undefined || stream.partialMessage === undefined || !hasRecoverablePartial(stream.partialMessage) || stream.phase === undefined || ["idle", "bash", "compacting"].includes(stream.phase)) {
+        ctx.addIssue({ code: "custom", path: ["streaming"], message: "active message streaming requires ids, message phase and recoverable partial message" });
+      }
+    } else if (operationRunning) {
+      if (!stream?.active || stream.streamId !== undefined || stream.messageId !== undefined || stream.partialMessage !== undefined) {
+        ctx.addIssue({ code: "custom", path: ["streaming"], message: "active operation phase requires no stale message stream ids or partial message" });
       }
     } else if (stream !== undefined && (stream.active || stream.streamId !== undefined || stream.messageId !== undefined || stream.partialMessage !== undefined || (stream.phase !== undefined && stream.phase !== "idle"))) {
       ctx.addIssue({ code: "custom", path: ["streaming"], message: "inactive streaming cannot retain ids, partial message or active phase" });
     }
-    if (snapshot.state.isBashRunning) {
+    if (bashRunning && compacting) {
+      ctx.addIssue({ code: "custom", path: ["state"], message: "bash and compaction are mutually exclusive runtime operations" });
+    }
+    if (bashRunning) {
       if (snapshot.state.bash === undefined || snapshot.state.bash.completed) {
         ctx.addIssue({ code: "custom", path: ["state", "bash"], message: "running bash requires an incomplete bash projection" });
       }
     } else if (snapshot.state.bash !== undefined && !snapshot.state.bash.completed) {
       ctx.addIssue({ code: "custom", path: ["state", "bash"], message: "settled bash projection must be completed" });
     }
-    if (snapshot.state.isCompacting !== (snapshot.state.compaction !== undefined)) {
+    if (compacting !== (snapshot.state.compaction !== undefined)) {
       ctx.addIssue({ code: "custom", path: ["state", "compaction"], message: "isCompacting must match compaction projection presence" });
+    }
+
+    const phase = stream?.phase;
+    if (bashRunning && phase !== "bash") {
+      ctx.addIssue({ code: "custom", path: ["streaming", "phase"], message: "running bash requires streaming.phase=\"bash\"" });
+    }
+    if (!bashRunning && phase === "bash") {
+      ctx.addIssue({ code: "custom", path: ["streaming", "phase"], message: "streaming.phase=\"bash\" requires a running bash projection" });
+    }
+    if (compacting && phase !== "compacting") {
+      ctx.addIssue({ code: "custom", path: ["streaming", "phase"], message: "running compaction requires streaming.phase=\"compacting\"" });
+    }
+    if (!compacting && phase === "compacting") {
+      ctx.addIssue({ code: "custom", path: ["streaming", "phase"], message: "streaming.phase=\"compacting\" requires a compaction projection" });
+    }
+    if (phase === "streaming" && (bashRunning || compacting)) {
+      ctx.addIssue({ code: "custom", path: ["streaming", "phase"], message: "message streaming cannot overlap bash or compaction" });
     }
   });
 export type RuntimeSnapshot = z.infer<typeof RuntimeSnapshotSchema>;

@@ -43,6 +43,9 @@ export type ProtocolHandshakeReject = z.infer<typeof ProtocolHandshakeRejectSche
 
 export const ResumeStatusSchema = z.enum(["resumed", "snapshot", "gap", "epoch_changed"]);
 export type ResumeStatus = z.infer<typeof ResumeStatusSchema>;
+/** Full snapshot delivery cannot represent a cursor-only resumed acknowledgement. */
+export const SnapshotDeliveryReasonSchema = z.enum(["snapshot", "gap", "epoch_changed"]);
+export type SnapshotDeliveryReason = z.infer<typeof SnapshotDeliveryReasonSchema>;
 
 /** Browser/sessiond create is distinct from attach and always identifies cwd. */
 export const RuntimeCreateParamsSchema = z.strictObject({
@@ -77,6 +80,6 @@ export const RuntimeAttachResultSchema = z.strictObject({
   lastEventId: LastEventIdSchema,
   cwd: NonEmptyStringSchema,
   projectRoot: NonEmptyStringSchema,
-  resumeStatus: ResumeStatusSchema,
+  resumeStatus: SnapshotDeliveryReasonSchema,
 });
 export type RuntimeAttachResult = z.infer<typeof RuntimeAttachResultSchema>;

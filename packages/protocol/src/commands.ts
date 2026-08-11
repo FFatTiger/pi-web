@@ -1,5 +1,9 @@
 import { z } from "zod";
 import {
+  ExtensionUiInputCommandSchema,
+  ExtensionUiResponseCommandSchema,
+} from "./extension.js";
+import {
   ImageAttachmentSchema,
   NonBlankTextSchema,
   NonEmptyStringSchema,
@@ -132,18 +136,7 @@ export const AbortCompactionCommandSchema = z.strictObject({
   type: z.literal("abort_compaction"),
 });
 
-const extensionCommandBase = { ...commandBase, type: z.literal("extension_ui_response") };
-export const ExtensionUiResponseCommandSchema = z.union([
-  z.strictObject({ ...extensionCommandBase, id: NonEmptyStringSchema, method: z.literal("select"), responseKind: z.literal("selected"), selected: z.string() }),
-  z.strictObject({ ...extensionCommandBase, id: NonEmptyStringSchema, method: z.literal("confirm"), responseKind: z.literal("confirmed"), confirmed: z.boolean() }),
-  z.strictObject({ ...extensionCommandBase, id: NonEmptyStringSchema, method: z.enum(["input", "editor", "custom"]), responseKind: z.literal("value"), value: z.string() }),
-  z.strictObject({ ...extensionCommandBase, id: NonEmptyStringSchema, method: z.enum(["select", "confirm", "input", "editor", "custom"]), responseKind: z.literal("cancelled"), cancelled: z.literal(true) }),
-]);
-
-export const ExtensionUiInputCommandSchema = z.discriminatedUnion("method", [
-  z.strictObject({ ...commandBase, type: z.literal("extension_ui_input"), id: NonEmptyStringSchema, method: z.literal("input"), data: z.string() }),
-  z.strictObject({ ...commandBase, type: z.literal("extension_ui_input"), id: NonEmptyStringSchema, method: z.literal("editor"), data: z.string() }),
-]);
+export { ExtensionUiResponseCommandSchema, ExtensionUiInputCommandSchema } from "./extension.js";
 
 export const SetAutoRetryCommandSchema = z.strictObject({
   ...commandBase,

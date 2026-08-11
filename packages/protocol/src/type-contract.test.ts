@@ -34,6 +34,8 @@ export type ProtocolTypeAssertions =
   | Assert<Equal<WsCreate["payload"]["createRequestId"], string>>
   | Assert<Equal<Extract<WsAttach["payload"], { epoch: string }>["lastEventId"], number>>
   | Assert<Equal<WsInterrupt["payload"]["commandId"], string>>
-  | Assert<Equal<WsInterruptResult["payload"]["interruptType"], RuntimeInterruptResult["type"]>>;
+  | Assert<Equal<WsInterruptResult["payload"]["interruptType"], RuntimeInterruptResult["type"]>>
+  | Assert<Equal<import("./extension.js").ExtensionUiResponseExchange["command"]["type"], "extension_ui_response">>
+  | Assert<Equal<import("./extension.js").ExtensionUiInputExchange["command"]["method"], "input" | "editor">>;
 
 export const protocolTypeAssertions: ProtocolTypeAssertions = true;

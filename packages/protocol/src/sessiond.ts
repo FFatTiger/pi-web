@@ -16,7 +16,7 @@ import {
 import { CorrelatedRuntimeCommandResultSchema, RuntimeInterruptResultSchema, RuntimeInterruptSchema } from "./results.js";
 import { RuntimeEventSchema } from "./events.js";
 import {
-  ResumeStatusSchema,
+  SnapshotDeliveryReasonSchema,
   RuntimeAttachParamsSchema,
   RuntimeCreateParamsSchema,
 } from "./handshake.js";
@@ -190,7 +190,7 @@ export const SessiondRuntimeAttachResultSchema = z.strictObject({
   lastEventId: LastEventIdSchema,
   cwd: NonEmptyStringSchema,
   projectRoot: NonEmptyStringSchema,
-  resumeStatus: ResumeStatusSchema,
+  resumeStatus: SnapshotDeliveryReasonSchema,
   snapshot: RuntimeSnapshotSchema,
 }).superRefine((value, ctx) => {
   if (value.sessionId !== value.snapshot.sessionId) ctx.addIssue({ code: "custom", path: ["snapshot", "sessionId"], message: "snapshot sessionId mismatch" });
@@ -554,7 +554,7 @@ export const SessiondPushSnapshotSchema = z.strictObject({
   projectRoot: NonEmptyStringSchema,
   workerStatus: WorkerStatusSchema,
   snapshot: RuntimeSnapshotSchema,
-  resumeStatus: ResumeStatusSchema.optional(),
+  resumeStatus: SnapshotDeliveryReasonSchema,
 }).superRefine((value, ctx) => {
   if (value.sessionId !== value.snapshot.sessionId) ctx.addIssue({ code: "custom", path: ["snapshot", "sessionId"], message: "snapshot sessionId mismatch" });
   if (value.cwd !== value.snapshot.cwd) ctx.addIssue({ code: "custom", path: ["snapshot", "cwd"], message: "snapshot cwd mismatch" });

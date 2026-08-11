@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  ExtensionUiInputExchangeSchema,
   ExtensionUiRequestSchema,
+  ExtensionUiResponseExchangeSchema,
   ImageAttachmentSchema,
   ImageContentSourceSchema,
   MAX_IMAGE_BASE64_LENGTH,
@@ -9,11 +11,13 @@ import {
   RuntimeCommandSchema,
   RuntimeEventSchema,
   RuntimeSnapshotSchema,
+  SessiondRuntimeAttachResultSchema,
   SessiondPushSnapshotSchema,
   StreamingMessageLifecycleSchema,
   WsClientMessageSchema,
   WsHostMessageSchema,
   WsInterruptExchangeSchema,
+  WsSnapshotMessageSchema,
 } from "../dist/index.js";
 
 const error = { code: "unavailable", message: "closed", retryable: false };
@@ -56,6 +60,30 @@ describe("A: cwd authority and create/attach separation", () => {
       assert.equal(WsHostMessageSchema.safeParse({ ...frame, payload: { ...frame.payload, snapshot: { ...fullSnapshot, projectRoot: "/other" } } }).success, false);
     });
   }
+
+  it("requires an explicit snapshot delivery reason and rejects resumed", () => {
+    const payload = { sessionId: "s-1", cwd: "/project", projectRoot: "/project", epoch: "e-2", lastEventId: 0, workerStatus: "ready", snapshot: fullSnapshot };
+    const attachResult = (value) => ({
+      sessionId: value.sessionId,
+      cwd: value.cwd,
+      projectRoot: value.projectRoot,
+      epoch: value.epoch,
+      lastEventId: value.lastEventId,
+      snapshot: value.snapshot,
+      ...(value.resumeStatus === undefined ? {} : { resumeStatus: value.resumeStatus }),
+    });
+    assert.equal(WsSnapshotMessageSchema.safeParse({ type: "snapshot", payload }).success, false);
+    assert.equal(SessiondPushSnapshotSchema.safeParse({ type: "snapshot", ...payload }).success, false);
+    assert.equal(SessiondRuntimeAttachResultSchema.safeParse(attachResult(payload)).success, false);
+    for (const resumeStatus of ["snapshot", "gap", "epoch_changed"]) {
+      assert.equal(WsSnapshotMessageSchema.safeParse({ type: "snapshot", payload: { ...payload, resumeStatus } }).success, true, resumeStatus);
+      assert.equal(SessiondPushSnapshotSchema.safeParse({ type: "snapshot", ...payload, resumeStatus }).success, true, resumeStatus);
+      assert.equal(SessiondRuntimeAttachResultSchema.safeParse(attachResult({ ...payload, resumeStatus })).success, true, resumeStatus);
+    }
+    assert.equal(WsSnapshotMessageSchema.safeParse({ type: "snapshot", payload: { ...payload, resumeStatus: "resumed" } }).success, false);
+    assert.equal(SessiondPushSnapshotSchema.safeParse({ type: "snapshot", ...payload, resumeStatus: "resumed" }).success, false);
+    assert.equal(SessiondRuntimeAttachResultSchema.safeParse(attachResult({ ...payload, resumeStatus: "resumed" })).success, false);
+  });
 });
 
 describe("B: streaming correlation and snapshot invariants", () => {
@@ -75,6 +103,21 @@ describe("B: streaming correlation and snapshot invariants", () => {
     ]).success, false);
   });
 
+  it("enforces exact lifecycle sequence, correlation and role", () => {
+    const start = { type: "message_start", sessionId: "s-1", streamId: "stream-a", messageId: "msg-a", message: { role: "assistant", content: [{ type: "text", text: "A" }] } };
+    const update = { type: "message_update", sessionId: "s-1", streamId: "stream-a", messageId: "msg-a", delta: { role: "assistant", delta: { type: "text", text: "B" } } };
+    const end = { type: "message_end", sessionId: "s-1", streamId: "stream-a", messageId: "msg-a", message: { role: "assistant", content: [], model: "m", provider: "p" } };
+    assert.equal(StreamingMessageLifecycleSchema.safeParse([start, update, end]).success, true);
+    assert.equal(StreamingMessageLifecycleSchema.safeParse([{ ...start, streamId: "stream-b", messageId: "msg-b" }, { ...end, streamId: "stream-b", messageId: "msg-b" }]).success, true);
+    assert.equal(StreamingMessageLifecycleSchema.safeParse([start, { ...update, sessionId: "s-2" }, end]).success, false);
+    assert.equal(StreamingMessageLifecycleSchema.safeParse([start, { ...update, delta: { role: "bashExecution", delta: { type: "output", output: "bad" } } }, end]).success, false);
+    assert.equal(StreamingMessageLifecycleSchema.safeParse([start, start, end]).success, false);
+    assert.equal(StreamingMessageLifecycleSchema.safeParse([start, end, end]).success, false);
+    assert.equal(StreamingMessageLifecycleSchema.safeParse([start, end, update]).success, false);
+    assert.equal(StreamingMessageLifecycleSchema.safeParse([start, update]).success, false);
+    assert.equal(StreamingMessageLifecycleSchema.safeParse([start, { ...end, message: { role: "bashExecution", command: "x", output: "", exitCode: 0 } }]).success, false);
+  });
+
   it("rejects contradictory snapshot projections", () => {
     const active = {
       ...fullSnapshot,
@@ -90,6 +133,22 @@ describe("B: streaming correlation and snapshot invariants", () => {
     assert.equal(RuntimeSnapshotSchema.safeParse({ ...fullSnapshot, state: { ...idleState, bash: { command: "x", output: "", excludeFromContext: false, truncated: false, cancelled: false, completed: false, updateCount: 0 } } }).success, false);
     assert.equal(RuntimeSnapshotSchema.safeParse({ ...fullSnapshot, state: { ...idleState, bash: { command: "x", output: "done", excludeFromContext: false, truncated: false, cancelled: false, completed: true, exitCode: 0, updateCount: 1 } } }).success, true);
     assert.equal(RuntimeSnapshotSchema.safeParse({ ...fullSnapshot, state: { ...idleState, isCompacting: true } }).success, false);
+  });
+  it("enforces phase↔bash/compaction bidirectionally and accepts terminal bash", () => {
+    const bash = { command: "x", output: "running", excludeFromContext: false, truncated: false, cancelled: false, completed: false, updateCount: 1 };
+    const completedBash = { ...bash, output: "done", completed: true, exitCode: 0, updateCount: 2 };
+    const compaction = { reason: "manual", status: "running", startedAt: 1 };
+    const runningBash = { ...fullSnapshot, state: { ...idleState, isBashRunning: true, bash }, streaming: { active: true, phase: "bash" } };
+    const runningCompaction = { ...fullSnapshot, state: { ...idleState, isCompacting: true, compaction }, streaming: { active: true, phase: "compacting" } };
+    assert.equal(RuntimeSnapshotSchema.safeParse(runningBash).success, true);
+    assert.equal(RuntimeSnapshotSchema.safeParse(runningCompaction).success, true);
+    assert.equal(RuntimeSnapshotSchema.safeParse({ ...runningBash, streaming: { active: true, phase: "streaming" } }).success, false);
+    assert.equal(RuntimeSnapshotSchema.safeParse({ ...fullSnapshot, streaming: { active: true, phase: "bash" } }).success, false);
+    assert.equal(RuntimeSnapshotSchema.safeParse({ ...runningCompaction, streaming: { active: true, phase: "streaming" } }).success, false);
+    assert.equal(RuntimeSnapshotSchema.safeParse({ ...fullSnapshot, streaming: { active: true, phase: "compacting" } }).success, false);
+    assert.equal(RuntimeSnapshotSchema.safeParse({ ...runningBash, state: { ...runningBash.state, isCompacting: true, compaction } }).success, false);
+    assert.equal(RuntimeSnapshotSchema.safeParse({ ...fullSnapshot, state: { ...idleState, bash: completedBash }, streaming: { active: false, phase: "idle" } }).success, true);
+    assert.equal(RuntimeSnapshotSchema.safeParse({ ...fullSnapshot, state: { ...idleState, bash: { ...completedBash, cancelled: true } } }).success, true);
   });
 });
 
@@ -124,6 +183,32 @@ describe("C: extension method/response binding", () => {
       assert.equal(command({ method, responseKind: "cancelled", cancelled: true }), false, method);
       assert.equal(RuntimeCommandSchema.safeParse({ type: "extension_ui_input", commandId: "c", id: "ui", method, data: "x" }).success, false, method);
     }
+  });
+  it("correlates commands against the authoritative pending request", () => {
+    const confirmRequest = { id: "ui-confirm", method: "confirm", title: "Sure", message: "Continue?" };
+    const confirmCommand = { type: "extension_ui_response", commandId: "c-1", id: "ui-confirm", method: "confirm", responseKind: "confirmed", confirmed: true };
+    assert.equal(ExtensionUiResponseExchangeSchema.safeParse({ request: confirmRequest, command: confirmCommand }).success, true);
+    assert.equal(ExtensionUiResponseExchangeSchema.safeParse({ request: confirmRequest, command: { type: "extension_ui_response", commandId: "c-1", id: "ui-confirm", method: "select", responseKind: "selected", selected: "fake" } }).success, false);
+    assert.equal(ExtensionUiResponseExchangeSchema.safeParse({ request: confirmRequest, command: { ...confirmCommand, id: "other" } }).success, false);
+
+    const inputRequest = { id: "ui-input", method: "input", title: "Input" };
+    const inputCommand = { type: "extension_ui_input", commandId: "c-2", id: "ui-input", method: "input", data: "x" };
+    assert.equal(ExtensionUiInputExchangeSchema.safeParse({ request: inputRequest, command: inputCommand }).success, true);
+    assert.equal(ExtensionUiInputExchangeSchema.safeParse({ request: { id: "ui-editor", method: "editor", title: "Edit" }, command: inputCommand }).success, false);
+    for (const request of [
+      { id: "ui-custom", method: "custom", lines: ["x"] },
+      { id: "ui-notify", method: "notify", message: "x", notifyType: "info" },
+      { id: "ui-status", method: "setStatus", statusKey: "k" },
+      { id: "ui-widget", method: "setWidget", widgetKey: "w" },
+      { id: "ui-title", method: "setTitle", title: "t" },
+      { id: "ui-editor-text", method: "set_editor_text", text: "x" },
+    ]) {
+      assert.equal(ExtensionUiInputExchangeSchema.safeParse({ request, command: { ...inputCommand, id: request.id } }).success, false, request.method);
+      if (request.method !== "custom") {
+        assert.equal(ExtensionUiResponseExchangeSchema.safeParse({ request, command: { type: "extension_ui_response", commandId: "c", id: request.id, method: "input", responseKind: "cancelled", cancelled: true } }).success, false, request.method);
+      }
+    }
+    assert.equal(ExtensionUiResponseExchangeSchema.safeParse({ request: { id: "ui-custom", method: "custom", lines: ["x"] }, command: { type: "extension_ui_response", commandId: "c", id: "ui-custom", method: "custom", responseKind: "value", value: "done" } }).success, true);
   });
 });
 
