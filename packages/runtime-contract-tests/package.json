@@ -1,0 +1,43 @@
+{
+  "name": "@fffattiger/pi-web-runtime-contract-tests",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Reusable adapter contract suite + reference fake for the pi-web agent runtime ports",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./suite": {
+      "types": "./dist/suite.d.ts",
+      "import": "./dist/suite.js"
+    },
+    "./reference": {
+      "types": "./dist/reference.d.ts",
+      "import": "./dist/reference.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build:test": "tsc -p tsconfig.test.json",
+    "test": "npm run build:test && node --test \"dist-test/**/*.test.js\"",
+    "clean": "rm -rf dist dist-test"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "dependencies": {
+    "@fffattiger/pi-web-runtime-core": "file:../runtime-core"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "typescript": "^5"
+  }
+}
