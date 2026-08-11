@@ -85,6 +85,7 @@ test("forwarded proto is ignored unless the transport peer is trusted", async ()
       headers: {
         host: "localhost",
         "content-type": "application/json",
+        "x-forwarded-for": "203.0.113.7",
         "x-forwarded-proto": "https",
       },
       body: JSON.stringify({ password: "secret" }),
@@ -115,12 +116,81 @@ test("forwarded proto is ignored unless the transport peer is trusted", async ()
         host: "localhost",
         "content-type": "application/json",
         "x-forwarded-for": "not-an-ip",
+        "x-forwarded-proto": "https",
       },
       body: JSON.stringify({ password: "wrong" }),
     },
     { incoming: { socket: { remoteAddress: "10.0.0.1" } } },
   );
   assert.deepEqual(limiterAttempts, ["10.0.0.1"]);
+});
+
+test("trusted proxy chain pins limiter key against attacker-prepended XFF", async () => {
+  const keys = [];
+  const limiter = {
+    retryAfterSeconds(key) { keys.push(key); return 0; },
+    recordFailure() { return 0; },
+    clear() {},
+  };
+  const host = createHostApp({
+    logger: {},
+    trustedProxy: { addresses: ["10.0.0.1", "10.0.0.2"] },
+    gate: {
+      config: { read: () => ({ status: "enabled", password: "secret", source: "test" }) },
+      rateLimiter: limiter,
+    },
+  });
+  for (const forged of ["1.1.1.1", "2.2.2.2"]) {
+    await host.app.request(
+      "http://localhost/v1/gate/login",
+      {
+        method: "POST",
+        headers: {
+          host: "localhost",
+          "content-type": "application/json",
+          "x-forwarded-for": `${forged}, 203.0.113.9, 10.0.0.2`,
+          "x-forwarded-proto": "http, https, http",
+        },
+        body: JSON.stringify({ password: "wrong" }),
+      },
+      { incoming: { socket: { remoteAddress: "10.0.0.1" } } },
+    );
+  }
+  assert.deepEqual(keys, ["203.0.113.9", "203.0.113.9"]);
+});
+
+test("ambiguous proto/XFF chains fail closed to transport identity and scheme", async () => {
+  const keys = [];
+  const limiter = {
+    retryAfterSeconds(key) { keys.push(key); return 0; },
+    recordFailure() { return 0; },
+    clear() {},
+  };
+  const host = createHostApp({
+    logger: {},
+    trustedProxy: { addresses: ["10.0.0.1"], maxHops: 3, maxHeaderBytes: 64 },
+    gate: {
+      config: { read: () => ({ status: "enabled", password: "secret", source: "test" }) },
+      rateLimiter: limiter,
+    },
+  });
+  for (const headers of [
+    { "x-forwarded-for": "1.1.1.1,2.2.2.2", "x-forwarded-proto": "https" },
+    { "x-forwarded-for": "1.1.1.1,,2.2.2.2", "x-forwarded-proto": "https,http,http" },
+    { "x-forwarded-for": "1.1.1.1,2.2.2.2,3.3.3.3,4.4.4.4", "x-forwarded-proto": "https,http,http,http" },
+  ]) {
+    const res = await host.app.request(
+      "http://localhost/v1/gate/login",
+      {
+        method: "POST",
+        headers: { host: "localhost", "content-type": "application/json", ...headers },
+        body: JSON.stringify({ password: "wrong" }),
+      },
+      { incoming: { socket: { remoteAddress: "10.0.0.1" } } },
+    );
+    assert.doesNotMatch(res.headers.get("set-cookie") ?? "", /Secure/i);
+  }
+  assert.deepEqual(keys, ["10.0.0.1", "10.0.0.1", "10.0.0.1"]);
 });
 
 test("cross-site Origin on API is rejected with 403", async () => {

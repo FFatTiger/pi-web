@@ -9,7 +9,7 @@ import { securityMiddleware } from "./middleware/security.js";
 import { gateMiddleware } from "./gate/middleware.js";
 import { registerGateRoutes } from "./gate/routes.js";
 import { registerHealthRoutes } from "./routes/health.js";
-import { createEnvGateConfigSource } from "./gate/config.js";
+import { createEnvGateConfigSource, createNormalizedGateConfigSource } from "./gate/config.js";
 import { createInMemoryRevocationStore } from "./gate/revocation.js";
 import { staticAssetsMiddleware } from "./static/static-assets.js";
 import { spaOrJsonNotFound } from "./static/spa.js";
@@ -49,10 +49,13 @@ export function createHostApp(deps: HostDeps = {}): HostApp {
     createInMemoryRevocationStore(
       deps.gate?.now ? { now: deps.gate.now } : {},
     );
+  const gateSource = createNormalizedGateConfigSource(
+    deps.gate?.config ?? createEnvGateConfigSource(),
+  );
   const gateDeps: GateDeps = {
     requireForLan: true,
     ...deps.gate,
-    config: deps.gate?.config ?? createEnvGateConfigSource(),
+    config: gateSource,
     revocations,
   };
 
@@ -65,7 +68,15 @@ export function createHostApp(deps: HostDeps = {}): HostApp {
     exposureMode,
     ...(deps.allowedHosts ? { allowedHosts: deps.allowedHosts } : {}),
     ...(deps.trustedProxy
-      ? { trustedProxyAddresses: deps.trustedProxy.addresses }
+      ? {
+          trustedProxyAddresses: deps.trustedProxy.addresses,
+          ...(deps.trustedProxy.maxHops !== undefined
+            ? { trustedProxyMaxHops: deps.trustedProxy.maxHops }
+            : {}),
+          ...(deps.trustedProxy.maxHeaderBytes !== undefined
+            ? { trustedProxyMaxHeaderBytes: deps.trustedProxy.maxHeaderBytes }
+            : {}),
+        }
       : {}),
   };
   app.use("*", securityMiddleware(securityOptions));

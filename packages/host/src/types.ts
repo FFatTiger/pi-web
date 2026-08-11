@@ -13,6 +13,10 @@ export type HostMode = "local" | "lan";
 export interface TrustedProxyOptions {
   /** Socket peer addresses allowed to supply forwarding headers. Empty by default. */
   addresses: readonly string[];
+  /** Maximum X-Forwarded-For hop count (default 16). */
+  maxHops?: number;
+  /** Maximum bytes accepted for each forwarding header (default 2 KiB). */
+  maxHeaderBytes?: number;
 }
 
 /** Capability tokens negotiated with the client (mirrors client shell tokens). */
@@ -42,15 +46,28 @@ export interface HostLogger {
 
 export type GateStatusKind = "enabled" | "disabled" | "unconfigured" | "error";
 
-export interface GateConfig {
-  status: GateStatusKind;
-  /** Present only when status === "enabled". */
-  password?: string;
+interface GateConfigBase {
   /** Human-readable origin of the config (env / file path). */
   source: string;
-  /** Present when status === "error". */
-  logMessage?: string;
 }
+
+export type GateConfig =
+  | (GateConfigBase & {
+      status: "enabled";
+      /** Exact non-empty password. Whitespace is significant and preserved. */
+      password: string;
+      logMessage?: never;
+    })
+  | (GateConfigBase & {
+      status: "disabled" | "unconfigured";
+      password?: never;
+      logMessage?: never;
+    })
+  | (GateConfigBase & {
+      status: "error";
+      password?: never;
+      logMessage?: string;
+    });
 
 export interface GateConfigSource {
   read(): GateConfig;

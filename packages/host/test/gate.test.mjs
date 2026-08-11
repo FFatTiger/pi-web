@@ -31,6 +31,97 @@ test("gate status reports required/authenticated/mode", async () => {
   });
 });
 
+test("malformed injected gate configs fail closed across status, API and login", async () => {
+  const malformed = [
+    { status: "enabled", source: "missing" },
+    { status: "enabled", password: "", source: "empty" },
+    { status: "enabled", password: 123, source: "wrong-type" },
+    { status: "bogus", password: "secret", source: "bad-status" },
+    { status: "disabled", password: "secret", source: "disabled-password" },
+    { status: "unconfigured", password: "secret", source: "unconfigured-password" },
+    { status: "error", password: "secret", source: "error-password" },
+  ];
+  for (const injected of malformed) {
+    const { app } = createHostApp({
+      logger: {},
+      gate: { config: { read: () => injected } },
+    });
+    const status = await app.request("http://localhost/v1/gate/status", {
+      headers: { host: "localhost" },
+    });
+    assert.equal(status.status, 200, injected.source);
+    assert.deepEqual(await status.json(), {
+      required: false,
+      authenticated: false,
+      mode: "local",
+      status: "error",
+    });
+
+    const api = await app.request("http://localhost/v1/capabilities", {
+      headers: { host: "localhost" },
+    });
+    assert.equal(api.status, 503, injected.source);
+    assert.equal((await api.json()).code, "AUTH_CONFIG_ERROR");
+
+    const login = await app.request("http://localhost/v1/gate/login", {
+      method: "POST",
+      headers: { host: "localhost", "content-type": "application/json" },
+      body: JSON.stringify({ password: "" }),
+    });
+    assert.equal(login.status, 503, injected.source);
+    assert.equal(login.headers.get("set-cookie"), null, injected.source);
+    assert.equal((await login.json()).code, "AUTH_CONFIG_ERROR");
+  }
+});
+
+test("malformed gate config also fails closed on LAN status", async () => {
+  const { app } = createHostApp({
+    logger: {},
+    exposureMode: "lan",
+    gate: { config: { read: () => ({ status: "enabled", password: "", source: "lan-empty" }) } },
+  });
+  const status = await app.request("http://localhost/v1/gate/status", {
+    headers: { host: "localhost" },
+  });
+  assert.deepEqual(await status.json(), {
+    required: true,
+    authenticated: false,
+    mode: "lan",
+    status: "error",
+  });
+  const login = await app.request("http://localhost/v1/gate/login", {
+    method: "POST",
+    headers: { host: "localhost", "content-type": "application/json" },
+    body: JSON.stringify({ password: "" }),
+  });
+  assert.equal(login.status, 503);
+  assert.equal(login.headers.get("set-cookie"), null);
+});
+
+test("significant whitespace passwords are not trimmed or reinterpreted", async () => {
+  const limiter = { retryAfterSeconds: () => 0, recordFailure: () => 0, clear() {} };
+  const { app } = createHostApp({
+    logger: {},
+    gate: {
+      config: { read: () => ({ status: "enabled", password: " secret ", source: "spaces" }) },
+      rateLimiter: limiter,
+    },
+  });
+  const wrong = await app.request("http://localhost/v1/gate/login", {
+    method: "POST",
+    headers: { host: "localhost", "content-type": "application/json" },
+    body: JSON.stringify({ password: "secret" }),
+  });
+  assert.equal(wrong.status, 401);
+  const exact = await app.request("http://localhost/v1/gate/login", {
+    method: "POST",
+    headers: { host: "localhost", "content-type": "application/json" },
+    body: JSON.stringify({ password: " secret " }),
+  });
+  assert.equal(exact.status, 200);
+  assert.match(exact.headers.get("set-cookie") ?? "", /pi_web_session=/);
+});
+
 test("public PWA assets are exact-match allowlisted", async () => {
   const { app } = enabledApp();
   const allowed = [

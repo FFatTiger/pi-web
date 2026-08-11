@@ -22,7 +22,7 @@ export function gateMiddleware(deps: GateDeps): MiddlewareHandler<HostEnv> {
     const config = deps.config.read();
     const claims =
       config.status === "enabled"
-        ? readSessionToken(getCookie(c, cookieName), config.password ?? "", now())
+        ? readSessionToken(getCookie(c, cookieName), config.password, now())
         : null;
     const sessionValid =
       claims !== null && !revocations.isRevoked(claims.tokenId, now());

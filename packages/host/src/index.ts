@@ -16,7 +16,7 @@ export { HttpError, apiErrorBody, isV1Path, unifiedErrorHandler } from "./errors
 export type { ApiErrorBody } from "./errors.js";
 export { consoleLogger, silentLogger } from "./logger.js";
 
-export { readGateConfig, createEnvGateConfigSource, defaultGateConfigPath } from "./gate/config.js";
+export { readGateConfig, createEnvGateConfigSource, createNormalizedGateConfigSource, normalizeGateConfig, defaultGateConfigPath } from "./gate/config.js";
 export type { ReadGateConfigOptions } from "./gate/config.js";
 export { decideGateRequest } from "./gate/decision.js";
 export type { GateDecision, GateDecisionInput } from "./gate/decision.js";
@@ -36,8 +36,8 @@ export {
   DEFAULT_SESSION_TTL_MS,
 } from "./gate/token.js";
 
-export { securityMiddleware, isHostTrusted, isOriginAllowed, resolveHostMode } from "./middleware/security.js";
-export type { SecurityOptions, HostCheckResult } from "./middleware/security.js";
+export { securityMiddleware, isHostTrusted, isOriginAllowed, resolveHostMode, resolveForwardedRequest } from "./middleware/security.js";
+export type { SecurityOptions, HostCheckResult, ForwardedRequestInfo } from "./middleware/security.js";
 export { requestIdMiddleware } from "./middleware/request-id.js";
 export { loggingMiddleware } from "./middleware/logging.js";
 

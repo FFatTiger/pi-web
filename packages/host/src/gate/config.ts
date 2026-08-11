@@ -3,6 +3,55 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { GateConfig, GateConfigSource } from "../types.js";
 
+export function normalizeGateConfig(input: unknown): GateConfig {
+  const candidate = input && typeof input === "object" && !Array.isArray(input)
+    ? input as Record<string, unknown>
+    : null;
+  const source = typeof candidate?.source === "string" && candidate.source.length > 0
+    ? candidate.source
+    : "injected";
+  const invalid = (reason: string): GateConfig => ({
+    status: "error",
+    source,
+    logMessage: `Invalid gate configuration from ${source}: ${reason}`,
+  });
+  if (!candidate) return invalid("expected an object");
+
+  switch (candidate.status) {
+    case "enabled":
+      if (typeof candidate.password !== "string" || candidate.password.length === 0) {
+        return invalid("enabled status requires a non-empty string password");
+      }
+      if (candidate.logMessage !== undefined) {
+        return invalid("enabled status must not include logMessage");
+      }
+      return { status: "enabled", source, password: candidate.password };
+    case "disabled":
+    case "unconfigured":
+      if (candidate.password !== undefined || candidate.logMessage !== undefined) {
+        return invalid(`${candidate.status} status must not include password or logMessage`);
+      }
+      return { status: candidate.status, source };
+    case "error":
+      if (candidate.password !== undefined) {
+        return invalid("error status must not include password");
+      }
+      if (candidate.logMessage !== undefined && typeof candidate.logMessage !== "string") {
+        return invalid("error logMessage must be a string");
+      }
+      return candidate.logMessage === undefined
+        ? { status: "error", source }
+        : { status: "error", source, logMessage: candidate.logMessage };
+    default:
+      return invalid("unknown status");
+  }
+}
+
+/** Wrap any injected source so every consumer sees the same strict config. */
+export function createNormalizedGateConfigSource(source: GateConfigSource): GateConfigSource {
+  return { read: () => normalizeGateConfig(source.read()) };
+}
+
 export interface ReadGateConfigOptions {
   env?: NodeJS.ProcessEnv;
   /** Override the pi-web.json path (default: $PI_CODING_AGENT_DIR or ~/.pi). */
@@ -104,7 +153,7 @@ export function readGateConfig(options: ReadGateConfigOptions = {}): GateConfig 
     env.PI_WEB_PASSWORD !== undefined ? env.PI_WEB_PASSWORD : fileAuth.password;
 
   if (disabled) return { status: "disabled", source: configPath };
-  if (typeof password === "string" && password.trim()) {
+  if (typeof password === "string" && password.length > 0) {
     return { status: "enabled", password, source: configPath };
   }
   return { status: "unconfigured", source: configPath };
@@ -113,5 +162,5 @@ export function readGateConfig(options: ReadGateConfigOptions = {}): GateConfig 
 export function createEnvGateConfigSource(
   options: ReadGateConfigOptions = {},
 ): GateConfigSource {
-  return { read: () => readGateConfig(options) };
+  return { read: () => normalizeGateConfig(readGateConfig(options)) };
 }

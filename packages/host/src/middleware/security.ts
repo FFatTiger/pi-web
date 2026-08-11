@@ -15,12 +15,101 @@ export interface SecurityOptions {
   exposureMode?: HostMode;
   /** Socket peers allowed to supply Forwarded/X-Forwarded-* headers. */
   trustedProxyAddresses?: readonly string[];
+  /** Maximum accepted forwarding hops. */
+  trustedProxyMaxHops?: number;
+  /** Maximum bytes per forwarding header. */
+  trustedProxyMaxHeaderBytes?: number;
 }
 
 export interface HostCheckResult {
   trusted: boolean;
   hostname: string | null;
   mode: HostMode;
+}
+
+export interface ForwardedRequestInfo {
+  clientAddress: string;
+  protocol: "http:" | "https:" | null;
+  valid: boolean;
+}
+
+const DEFAULT_PROXY_MAX_HOPS = 16;
+const DEFAULT_PROXY_MAX_HEADER_BYTES = 2 * 1024;
+
+function normalizeIpAddress(value: string): string | null {
+  const trimmed = value.trim().toLowerCase();
+  if (!trimmed) return null;
+  const unmapped = trimmed.startsWith("::ffff:") ? trimmed.slice(7) : trimmed;
+  if (!isIP(unmapped)) return null;
+  if (isIP(unmapped) === 4) return unmapped.split(".").map(Number).join(".");
+  try {
+    return new URL(`http://[${unmapped}]`).hostname.slice(1, -1).toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+function parseHeaderTokens(
+  value: string | null,
+  maxHops: number,
+  maxHeaderBytes: number,
+): string[] | null {
+  if (value === null || Buffer.byteLength(value, "utf8") > maxHeaderBytes) return null;
+  const tokens = value.split(",").map((token) => token.trim());
+  if (tokens.length === 0 || tokens.length > maxHops || tokens.some((token) => token.length === 0)) {
+    return null;
+  }
+  return tokens;
+}
+
+/**
+ * Resolve XFF/XFP from the trusted transport peer, peeling trusted proxy hops
+ * from right to left. Invalid or ambiguous chains fail closed to transport.
+ */
+export function resolveForwardedRequest(
+  peerAddress: string,
+  xForwardedFor: string | null,
+  xForwardedProto: string | null,
+  trustedProxyAddresses: readonly string[],
+  maxHops = DEFAULT_PROXY_MAX_HOPS,
+  maxHeaderBytes = DEFAULT_PROXY_MAX_HEADER_BYTES,
+): ForwardedRequestInfo {
+  const peer = normalizeIpAddress(peerAddress);
+  const trusted = new Set(
+    trustedProxyAddresses.map(normalizeIpAddress).filter((ip): ip is string => ip !== null),
+  );
+  const transport: ForwardedRequestInfo = {
+    clientAddress: peer ?? "unknown",
+    protocol: null,
+    valid: false,
+  };
+  if (!peer || !trusted.has(peer)) return transport;
+
+  const addresses = parseHeaderTokens(xForwardedFor, maxHops, maxHeaderBytes);
+  const protos = parseHeaderTokens(xForwardedProto, maxHops, maxHeaderBytes);
+  if (!addresses || !protos || addresses.length !== protos.length) return transport;
+
+  const normalizedAddresses = addresses.map(normalizeIpAddress);
+  if (normalizedAddresses.some((ip) => ip === null)) return transport;
+  const normalizedProtos = protos.map((value) => value.toLowerCase());
+  if (normalizedProtos.some((value) => value !== "http" && value !== "https")) return transport;
+
+  // Every hop to the right of the chosen client must be explicitly trusted.
+  // If the immediate address supplied by the transport proxy is untrusted,
+  // any values to its left are attacker-controlled and the chain is ambiguous.
+  const immediate = normalizedAddresses[normalizedAddresses.length - 1];
+  if (!immediate || (!trusted.has(immediate) && normalizedAddresses.length > 1)) {
+    if (normalizedAddresses.length !== 1) return transport;
+  }
+  let index = normalizedAddresses.length - 1;
+  while (index >= 0 && trusted.has(normalizedAddresses[index]!)) index -= 1;
+  if (index < 0) return transport;
+  const protocol = normalizedProtos[index] === "https" ? "https:" : "http:";
+  return {
+    clientAddress: normalizedAddresses[index]!,
+    protocol,
+    valid: true,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -147,15 +236,8 @@ function defaultPortForProtocol(protocol: string): string {
   return protocol === "https:" ? "443" : "80";
 }
 
-function requestProtocol(request: Request, trustForwarded: boolean): string {
-  if (trustForwarded) {
-    const forwarded = request.headers
-      .get("x-forwarded-proto")
-      ?.split(",")[0]
-      ?.trim()
-      .toLowerCase();
-    if (forwarded === "https" || forwarded === "http") return `${forwarded}:`;
-  }
+function requestProtocol(request: Request, forwardedProtocol: "http:" | "https:" | null): string {
+  if (forwardedProtocol) return forwardedProtocol;
   try {
     return new URL(request.url).protocol;
   } catch {
@@ -187,27 +269,36 @@ function isOriginMatchingRequestHost(origin: string, hostHeader: string): boolea
 }
 
 /** Reject browser cross-site API requests while preserving non-browser clients. */
-export function isOriginAllowed(request: Request, trustForwarded = false): boolean {
+export function isOriginAllowed(
+  request: Request,
+  forwardedProtocol: "http:" | "https:" | null = null,
+): boolean {
   const origin = request.headers.get("origin");
   const fetchSite = request.headers.get("sec-fetch-site");
   if (fetchSite === "cross-site") return false;
   if (!origin) return true;
 
-  const requestOrigin = getRequestOrigin(request, trustForwarded);
+  const requestOrigin = getRequestOrigin(request, forwardedProtocol);
   if (requestOrigin !== null && canonicalOrigin(origin) === requestOrigin) return true;
 
   const host = request.headers.get("host");
   return host !== null && isOriginMatchingRequestHost(origin, host);
 }
 
-function getRequestOrigin(request: Request, trustForwarded: boolean): string | null {
+function getRequestOrigin(
+  request: Request,
+  forwardedProtocol: "http:" | "https:" | null,
+): string | null {
   const host = request.headers.get("host");
-  return host ? canonicalOrigin(`${requestProtocol(request, trustForwarded)}//${host}`) : null;
+  return host ? canonicalOrigin(`${requestProtocol(request, forwardedProtocol)}//${host}`) : null;
 }
 
-/** Effective request scheme. Forwarding headers require an explicitly trusted peer. */
-export function effectiveRequestProtocol(request: Request, trustForwarded = false): string {
-  return requestProtocol(request, trustForwarded);
+/** Effective request scheme using a previously validated forwarding chain. */
+export function effectiveRequestProtocol(
+  request: Request,
+  forwardedProtocol: "http:" | "https:" | null = null,
+): string {
+  return requestProtocol(request, forwardedProtocol);
 }
 
 // ---------------------------------------------------------------------------
@@ -218,7 +309,10 @@ export function securityMiddleware(options: SecurityOptions = {}): MiddlewareHan
   const configuredHosts =
     options.allowedHosts !== undefined ? [...options.allowedHosts] : undefined;
   const exposureMode = options.exposureMode ?? "local";
-  const trustedProxyAddresses = new Set(options.trustedProxyAddresses ?? []);
+  const trustedProxyAddresses = options.trustedProxyAddresses ?? [];
+  const trustedProxyMaxHops = options.trustedProxyMaxHops ?? DEFAULT_PROXY_MAX_HOPS;
+  const trustedProxyMaxHeaderBytes =
+    options.trustedProxyMaxHeaderBytes ?? DEFAULT_PROXY_MAX_HEADER_BYTES;
   return createMiddleware(async (c, next) => {
     const hostHeader = c.req.header("host");
     const trusted = isHostTrusted(hostHeader, configuredHosts);
@@ -230,14 +324,23 @@ export function securityMiddleware(options: SecurityOptions = {}): MiddlewareHan
       return c.text("Untrusted request", 403);
     }
     const peerAddress = c.env?.incoming?.socket?.remoteAddress ?? "unknown";
-    const trustedProxy = trustedProxyAddresses.has(peerAddress);
+    const forwarded = resolveForwardedRequest(
+      peerAddress,
+      c.req.header("x-forwarded-for") ?? null,
+      c.req.header("x-forwarded-proto") ?? null,
+      trustedProxyAddresses,
+      trustedProxyMaxHops,
+      trustedProxyMaxHeaderBytes,
+    );
     c.set("hostname", hostname);
     c.set("peerAddress", peerAddress);
-    c.set("trustedProxy", trustedProxy);
+    c.set("trustedProxy", forwarded.valid);
+    c.set("clientAddress", forwarded.clientAddress);
+    c.set("forwardedProtocol", forwarded.protocol);
     // Server exposure is authoritative. Host can only upgrade local → LAN,
     // never downgrade a LAN-bound server by claiming localhost.
     c.set("hostMode", exposureMode === "lan" ? "lan" : resolveHostMode(hostname));
-    if (isV1Path(c.req.path) && !isOriginAllowed(c.req.raw, trustedProxy)) {
+    if (isV1Path(c.req.path) && !isOriginAllowed(c.req.raw, forwarded.protocol)) {
       return c.json(apiErrorBody("UNTRUSTED_ORIGIN", "Untrusted API request"), 403);
     }
     await next();

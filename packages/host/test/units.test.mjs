@@ -14,9 +14,74 @@ import {
   isGatePublicPath,
   createInMemoryRateLimiter,
   decideGateRequest,
+  normalizeGateConfig,
+  resolveForwardedRequest,
 } from "../dist/index.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+test("normalizeGateConfig fails closed and preserves significant password whitespace", () => {
+  assert.deepEqual(normalizeGateConfig({ status: "enabled", password: " secret ", source: "x" }), {
+    status: "enabled",
+    password: " secret ",
+    source: "x",
+  });
+  for (const malformed of [
+    { status: "enabled", source: "x" },
+    { status: "enabled", password: "", source: "x" },
+    { status: "enabled", password: 123, source: "x" },
+    { status: "bogus", password: "secret", source: "x" },
+    { status: "disabled", password: "secret", source: "x" },
+    { status: "unconfigured", password: "secret", source: "x" },
+    { status: "error", password: "secret", source: "x" },
+    null,
+  ]) {
+    const normalized = normalizeGateConfig(malformed);
+    assert.equal(normalized.status, "error", JSON.stringify(malformed));
+    assert.equal("password" in normalized, false);
+  }
+});
+
+test("forwarded request peels trusted proxies right-to-left and aligns proto", () => {
+  assert.deepEqual(
+    resolveForwardedRequest(
+      "10.0.0.1",
+      "203.0.113.9, 10.0.0.2",
+      "https, http",
+      ["10.0.0.1", "10.0.0.2"],
+    ),
+    { clientAddress: "203.0.113.9", protocol: "https:", valid: true },
+  );
+  assert.deepEqual(
+    resolveForwardedRequest(
+      "::ffff:10.0.0.1",
+      "2001:db8::7, ::ffff:10.0.0.2",
+      "https, http",
+      ["10.0.0.1", "10.0.0.2"],
+    ),
+    { clientAddress: "2001:db8::7", protocol: "https:", valid: true },
+  );
+});
+
+test("invalid or ambiguous forwarding chains fail closed to transport", () => {
+  const fallback = { clientAddress: "10.0.0.1", protocol: null, valid: false };
+  for (const [xff, xfp, maxHops, maxBytes] of [
+    ["", "https", 16, 2048],
+    ["203.0.113.1,,10.0.0.2", "https,http,http", 16, 2048],
+    ["not-ip", "https", 16, 2048],
+    ["203.0.113.1,10.0.0.2", "https", 16, 2048],
+    ["203.0.113.1", "https,http", 16, 2048],
+    ["203.0.113.1,10.0.0.2", "https,ftp", 16, 2048],
+    ["203.0.113.1,198.51.100.2", "https,http", 16, 2048],
+    ["1.1.1.1,2.2.2.2,3.3.3.3", "http,http,http", 2, 2048],
+    ["203.0.113.1", "https", 16, 4],
+  ]) {
+    assert.deepEqual(
+      resolveForwardedRequest("10.0.0.1", xff, xfp, ["10.0.0.1", "10.0.0.2"], maxHops, maxBytes),
+      fallback,
+    );
+  }
+});
 
 test("isHostTrusted accepts loopback and rejects rebinding hosts", () => {
   assert.ok(isHostTrusted("localhost"));

@@ -1,4 +1,3 @@
-import { isIP } from "node:net";
 import { randomBytes as nodeRandomBytes } from "node:crypto";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { bodyLimit } from "hono/body-limit";
@@ -25,12 +24,7 @@ export interface GateStatusResponse {
 }
 
 function clientIp(c: Context<HostEnv>): string {
-  const direct = c.get("peerAddress") || "unknown";
-  if (!c.get("trustedProxy")) return direct;
-  const forwarded = c.req.header("x-forwarded-for")?.split(",")[0]?.trim();
-  if (forwarded && isIP(forwarded)) return forwarded;
-  const realIp = c.req.header("x-real-ip")?.trim();
-  return realIp && isIP(realIp) ? realIp : direct;
+  return c.get("clientAddress") || c.get("peerAddress") || "unknown";
 }
 
 interface LoginFailureBody {
@@ -53,7 +47,7 @@ function cookieBaseOptions(c: Context<HostEnv>) {
   return {
     httpOnly: true,
     sameSite: "Lax" as const,
-    secure: effectiveRequestProtocol(c.req.raw, c.get("trustedProxy")) === "https:",
+    secure: effectiveRequestProtocol(c.req.raw, c.get("forwardedProtocol")) === "https:",
     path: "/",
   };
 }
@@ -86,7 +80,7 @@ export function registerGateRoutes(app: Hono<HostEnv>, deps: GateDeps, logger: H
     const mode = c.get("hostMode");
     const required = config.status === "enabled" || (mode === "lan" && requireForLan);
     const authenticated =
-      config.status === "enabled" ? validClaims(c, config.password ?? "") !== null : false;
+      config.status === "enabled" ? validClaims(c, config.password) !== null : false;
     const body: GateStatusResponse = {
       required,
       authenticated,
@@ -160,7 +154,17 @@ export function registerGateRoutes(app: Hono<HostEnv>, deps: GateDeps, logger: H
       );
     }
 
-    // status === "enabled"
+    if (config.status !== "enabled") {
+      // Defensive exhaustiveness guard for future GateConfig variants.
+      return c.json(
+        loginFailure("Authentication configuration error", {
+          code: "AUTH_CONFIG_ERROR",
+          status: "error",
+        }),
+        503,
+      );
+    }
+    const enabledConfig = config;
     const retryAfter = limiter.retryAfterSeconds(key);
     if (retryAfter > 0) {
       c.header("Retry-After", String(retryAfter));
@@ -173,13 +177,13 @@ export function registerGateRoutes(app: Hono<HostEnv>, deps: GateDeps, logger: H
       );
     }
 
-    if (typeof password !== "string" || !passwordsMatch(password, config.password ?? "")) {
+    if (typeof password !== "string" || !passwordsMatch(password, enabledConfig.password)) {
       limiter.recordFailure(key);
       return c.json(loginFailure("Incorrect password"), 401);
     }
 
     limiter.clear(key);
-    const token = createSessionToken(config.password ?? "", {
+    const token = createSessionToken(enabledConfig.password, {
       now: now(),
       ttlMs: sessionTtlMs,
       randomBytes,
@@ -196,7 +200,7 @@ export function registerGateRoutes(app: Hono<HostEnv>, deps: GateDeps, logger: H
     c.header("Cache-Control", "no-store");
     const config = deps.config.read();
     if (config.status === "enabled") {
-      const claims = readSessionToken(getCookie(c, cookieName), config.password ?? "", now());
+      const claims = readSessionToken(getCookie(c, cookieName), config.password, now());
       if (claims) revocations.revoke(claims.tokenId, claims.expiresAt);
     }
     deleteCookie(c, cookieName, cookieBaseOptions(c));
