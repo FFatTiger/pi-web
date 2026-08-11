@@ -1,5 +1,6 @@
-import type { Context } from "hono";
+import type { Context, MiddlewareHandler } from "hono";
 import type { NodeWebSocket } from "@hono/node-ws";
+import type { HostEnv } from "../env.js";
 import type { HostLogger, RuntimeWsSeam, WsSession } from "../types.js";
 
 export interface WsGuardOptions {
@@ -26,6 +27,8 @@ function frameBytes(data: unknown): number {
   return Buffer.byteLength(String(data), "utf8");
 }
 
+export type RuntimeWsRoute = MiddlewareHandler<HostEnv, string, { outputFormat: "ws" }>;
+
 /**
  * Protocol-independent runtime upgrade guard. Security/gate middleware has
  * already run. A bounded hello is required before handing the socket to H0B.
@@ -33,13 +36,13 @@ function frameBytes(data: unknown): number {
 export function createRuntimeWsRoute(
   upgradeWebSocket: NodeWebSocket["upgradeWebSocket"],
   options: WsGuardOptions = {},
-) {
+): RuntimeWsRoute {
   const helloTimeoutMs = options.helloTimeoutMs ?? DEFAULT_HELLO_TIMEOUT_MS;
   const helloMaxBytes = options.helloMaxBytes ?? DEFAULT_HELLO_MAX_BYTES;
   const runtimeWs = options.runtimeWs;
   const logger = options.logger ?? {};
 
-  return upgradeWebSocket((c: Context) => {
+  return upgradeWebSocket((c: Context<HostEnv>) => {
     let helloTimer: ReturnType<typeof setTimeout> | null = null;
     const requestId = c.get("requestId") as string | undefined;
 
