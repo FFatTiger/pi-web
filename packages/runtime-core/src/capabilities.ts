@@ -1,4 +1,5 @@
 import type { RuntimeCommandType } from "./commands.js";
+import type { RuntimeInterruptType } from "./interrupt.js";
 
 /**
  * Canonical agent-runtime capabilities.
@@ -97,6 +98,20 @@ export function requiredCapabilityForCommand(
   type: RuntimeCommandType,
 ): RuntimeCapability | null {
   return RUNTIME_COMMAND_CAPABILITIES[type];
+}
+
+/** Canonical interrupt → capability mapping for the independent control path. */
+export const RUNTIME_INTERRUPT_CAPABILITIES = {
+  abort: "runtime.abort",
+  abort_bash: "runtime.bash.abort",
+  abort_compaction: "runtime.compact.abort",
+  clear_queue: "runtime.queue",
+} as const satisfies Readonly<Record<RuntimeInterruptType, RuntimeCapability>>;
+
+export function requiredCapabilityForInterrupt(
+  type: RuntimeInterruptType,
+): RuntimeCapability {
+  return RUNTIME_INTERRUPT_CAPABILITIES[type];
 }
 
 /**

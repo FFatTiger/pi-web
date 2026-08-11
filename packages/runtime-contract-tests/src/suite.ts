@@ -15,6 +15,7 @@ import type {
   RuntimeCommandResult,
   RuntimeCommandType,
   RuntimeError,
+  RuntimeInterruptResult,
   RuntimeEvent,
   RuntimeSnapshot,
 } from "@fffattiger/pi-web-runtime-core";
@@ -23,6 +24,8 @@ import {
   RUNTIME_CAPABILITIES,
   RUNTIME_COMMAND_CAPABILITIES,
   RUNTIME_COMMAND_TYPES,
+  RUNTIME_INTERRUPT_CAPABILITIES,
+  RUNTIME_INTERRUPT_TYPES,
 } from "@fffattiger/pi-web-runtime-core";
 import type { AdapterContractHarness, HarnessFactoryOptions } from "./harness.js";
 
@@ -107,6 +110,16 @@ function assertErrorCode(
   assert.equal(result.ok, false, "expected a failing command result");
   if (!result.ok) {
     assert.equal(result.error.code, code, `expected error code ${code}`);
+  }
+}
+
+function assertInterruptErrorCode(
+  result: RuntimeInterruptResult,
+  code: RuntimeError["code"],
+): asserts result is Extract<RuntimeInterruptResult, { ok: false }> {
+  assert.equal(result.ok, false, "expected a failing interrupt result");
+  if (!result.ok) {
+    assert.equal(result.error.code, code, `expected interrupt error code ${code}`);
   }
 }
 
@@ -425,6 +438,183 @@ export function createRuntimeAdapterSuite(harness: AdapterContractHarness): void
 
     /* ---------------------------------------------------------------- */
     describe("interrupt", () => {
+      it("independent interrupts share canonical capability semantics with execute", async () => {
+        assert.deepEqual(RUNTIME_INTERRUPT_TYPES, [
+          "abort",
+          "abort_compaction",
+          "abort_bash",
+          "clear_queue",
+        ]);
+        for (const type of RUNTIME_INTERRUPT_TYPES) {
+          const capability = RUNTIME_INTERRUPT_CAPABILITIES[type];
+          assert.equal(
+            RUNTIME_COMMAND_CAPABILITIES[type],
+            capability,
+            `${type} command and interrupt capability must not drift`,
+          );
+          const factory = await harness.createFactory({
+            capabilities: RUNTIME_CAPABILITIES.filter((item) => item !== capability),
+          });
+          const port = await factory.create({ cwd: "/workspace" });
+          const before = await port.getSnapshot();
+          const interruptResult = await port.interrupt({ type });
+          assertInterruptErrorCode(interruptResult, "unsupported_capability");
+          assert.ok(interruptResult.error.message.includes(capability));
+          const executeResult = await port.execute(fixtureFor(type));
+          assertErrorCode(executeResult, "unsupported_capability");
+          assert.equal(executeResult.error.code, interruptResult.error.code);
+          assert.equal(executeResult.error.message, interruptResult.error.message);
+          const after = await port.getSnapshot();
+          assert.deepEqual(after.state.queuedMessages, before.state.queuedMessages);
+          assert.equal(after.state.isPromptRunning, before.state.isPromptRunning);
+          assert.equal(after.state.isBashRunning, before.state.isBashRunning);
+          assert.equal(after.state.isCompacting, before.state.isCompacting);
+          await port.close("user");
+        }
+      });
+
+      it("unsupported abort cannot interrupt a running prompt", async () => {
+        const factory = await harness.createFactory({
+          capabilities: RUNTIME_CAPABILITIES.filter((item) => item !== "runtime.abort"),
+        });
+        const port = await factory.create({ cwd: "/workspace" });
+        const pending = port.execute({ type: "prompt", message: "long prompt" });
+        await waitForSnapshot(port, (snapshot) => snapshot.state.isPromptRunning);
+        assertInterruptErrorCode(await port.interrupt({ type: "abort" }), "unsupported_capability");
+        assert.equal((await port.getSnapshot()).state.isPromptRunning, true);
+        assert.equal((await pending).ok, true);
+        await port.close("user");
+      });
+
+      it("unsupported abort_bash cannot interrupt running bash", async () => {
+        const factory = await harness.createFactory({
+          capabilities: RUNTIME_CAPABILITIES.filter((item) => item !== "runtime.bash.abort"),
+        });
+        const port = await factory.create({ cwd: "/workspace" });
+        const pending = port.execute({ type: "bash", command: "sleep" });
+        await waitForSnapshot(port, (snapshot) => snapshot.state.isBashRunning);
+        assertInterruptErrorCode(
+          await port.interrupt({ type: "abort_bash" }),
+          "unsupported_capability",
+        );
+        assert.equal((await port.getSnapshot()).state.isBashRunning, true);
+        assert.equal((await pending).ok, true);
+        await port.close("user");
+      });
+
+      it("unsupported abort_compaction cannot interrupt compaction", async () => {
+        const factory = await harness.createFactory({
+          capabilities: RUNTIME_CAPABILITIES.filter(
+            (item) => item !== "runtime.compact.abort",
+          ),
+        });
+        const port = await factory.create({ cwd: "/workspace" });
+        const pending = port.execute({ type: "compact" });
+        await waitForSnapshot(port, (snapshot) => snapshot.state.isCompacting);
+        assertInterruptErrorCode(
+          await port.interrupt({ type: "abort_compaction" }),
+          "unsupported_capability",
+        );
+        assert.equal((await port.getSnapshot()).state.compaction?.status, "running");
+        assert.equal((await pending).ok, true);
+        await port.close("user");
+      });
+
+      it("unsupported clear_queue cannot mutate queued turns", async () => {
+        const factory = await harness.createFactory({
+          capabilities: RUNTIME_CAPABILITIES.filter((item) => item !== "runtime.queue"),
+        });
+        const port = await factory.create({ cwd: "/workspace" });
+        const pending = port.execute({ type: "prompt", message: "long prompt" });
+        await waitForSnapshot(port, (snapshot) => snapshot.state.isPromptRunning);
+        await port.execute({ type: "steer", message: "keep me" });
+        const before = await port.getSnapshot();
+        assert.equal(before.state.queuedMessages?.steering.length, 1);
+        assertInterruptErrorCode(
+          await port.interrupt({ type: "clear_queue" }),
+          "unsupported_capability",
+        );
+        const executeResult = await port.execute({ type: "clear_queue" });
+        assertErrorCode(executeResult, "unsupported_capability");
+        assert.deepEqual(
+          (await port.getSnapshot()).state.queuedMessages,
+          before.state.queuedMessages,
+        );
+        assert.equal((await pending).ok, true);
+        await port.close("user");
+      });
+
+      it("execute and interrupt supported paths have consistent state effects", async () => {
+        for (const type of RUNTIME_INTERRUPT_TYPES) {
+          const runPath = async (path: "execute" | "interrupt") => {
+            const { port } = await newRuntime(harness);
+            let pending: Promise<RuntimeCommandResult>;
+            if (type === "abort") {
+              pending = port.execute({ type: "prompt", message: "long prompt" });
+              await waitForSnapshot(port, (snapshot) => snapshot.state.isPromptRunning);
+            } else if (type === "abort_bash") {
+              pending = port.execute({ type: "bash", command: "sleep" });
+              await waitForSnapshot(port, (snapshot) => snapshot.state.isBashRunning);
+            } else if (type === "abort_compaction") {
+              pending = port.execute({ type: "compact" });
+              await waitForSnapshot(port, (snapshot) => snapshot.state.isCompacting);
+            } else {
+              pending = port.execute({ type: "prompt", message: "long prompt" });
+              await waitForSnapshot(port, (snapshot) => snapshot.state.isPromptRunning);
+              await port.execute({ type: "steer", message: "clear me" });
+              assert.equal(
+                (await port.getSnapshot()).state.queuedMessages?.steering.length,
+                1,
+              );
+            }
+
+            const controlResult =
+              path === "execute"
+                ? await port.execute(fixtureFor(type))
+                : await port.interrupt({ type });
+            assert.equal(controlResult.ok, true, `${path}:${type} must be supported`);
+            const afterControl = await port.getSnapshot();
+
+            if (type === "clear_queue") {
+              assert.deepEqual(afterControl.state.queuedMessages, {
+                steering: [],
+                followUp: [],
+              });
+              assert.equal((await pending).ok, true);
+            } else {
+              const operation = await pending;
+              if (type === "abort_compaction") {
+                assert.equal(operation.ok, true);
+              } else {
+                assertErrorCode(operation, "interrupted");
+              }
+            }
+            const final = await port.getSnapshot();
+            await port.close("user");
+            return final;
+          };
+
+          const commandState = await runPath("execute");
+          const interruptState = await runPath("interrupt");
+          assert.equal(
+            interruptState.state.isPromptRunning,
+            commandState.state.isPromptRunning,
+          );
+          assert.equal(
+            interruptState.state.isBashRunning,
+            commandState.state.isBashRunning,
+          );
+          assert.equal(
+            interruptState.state.isCompacting,
+            commandState.state.isCompacting,
+          );
+          assert.deepEqual(
+            interruptState.state.queuedMessages,
+            commandState.state.queuedMessages,
+          );
+        }
+      });
+
       it("abort preempts a running prompt without being blocked", async () => {
         const { port } = await newRuntime(harness);
         const collector = new EventCollector(port);
@@ -436,7 +626,8 @@ export function createRuntimeAdapterSuite(harness: AdapterContractHarness): void
         await delay(30);
         assert.equal(settled, false, "prompt must still be running");
         const started = Date.now();
-        await port.interrupt({ type: "abort" });
+        const interrupt = await port.interrupt({ type: "abort" });
+        assert.equal(interrupt.ok, true);
         assert.ok(Date.now() - started < 1000, "interrupt must not be blocked by the prompt");
         const result = await pending;
         assertErrorCode(result, "interrupted");
@@ -454,9 +645,9 @@ export function createRuntimeAdapterSuite(harness: AdapterContractHarness): void
         const collector = new EventCollector(port);
         const pending = port.execute({ type: "prompt", message: "long prompt" });
         await delay(30);
-        await port.interrupt({ type: "abort" });
-        await port.interrupt({ type: "abort" });
-        await port.interrupt({ type: "abort" });
+        assert.equal((await port.interrupt({ type: "abort" })).ok, true);
+        assert.equal((await port.interrupt({ type: "abort" })).ok, true);
+        assert.equal((await port.interrupt({ type: "abort" })).ok, true);
         const result = await pending;
         assertErrorCode(result, "interrupted");
         assert.equal(collector.ofType("agent_end").length, 1, "exactly one agent_end");
@@ -466,10 +657,10 @@ export function createRuntimeAdapterSuite(harness: AdapterContractHarness): void
 
       it("interrupt while idle is a no-op", async () => {
         const { port } = await newRuntime(harness);
-        await port.interrupt({ type: "abort" });
-        await port.interrupt({ type: "abort_bash" });
-        await port.interrupt({ type: "abort_compaction" });
-        await port.interrupt({ type: "clear_queue" });
+        assert.equal((await port.interrupt({ type: "abort" })).ok, true);
+        assert.equal((await port.interrupt({ type: "abort_bash" })).ok, true);
+        assert.equal((await port.interrupt({ type: "abort_compaction" })).ok, true);
+        assert.equal((await port.interrupt({ type: "clear_queue" })).ok, true);
         const result = await port.execute({ type: "get_state" });
         assert.equal(result.ok, true);
         await port.close("user");

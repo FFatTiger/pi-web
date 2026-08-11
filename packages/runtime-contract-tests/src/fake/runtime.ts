@@ -27,6 +27,7 @@ import type {
   RuntimeError,
   RuntimeIdentity,
   RuntimeInterrupt,
+  RuntimeInterruptResult,
   RuntimeSnapshot,
   RuntimeState,
   BashProjection,
@@ -40,6 +41,7 @@ import {
   emptyQueuedMessages,
   makeRuntimeError,
   requiredCapabilityForCommand,
+  requiredCapabilityForInterrupt,
   unsupportedCapabilityError,
 } from "@fffattiger/pi-web-runtime-core";
 import type { ReferenceSessionStore, StoredSession } from "./store.js";
@@ -341,8 +343,22 @@ export class ReferenceAgentRuntime implements AgentRuntimePort {
     }
   }
 
-  async interrupt(interrupt: RuntimeInterrupt): Promise<void> {
-    if (this.closed) return;
+  async interrupt(interrupt: RuntimeInterrupt): Promise<RuntimeInterruptResult> {
+    const capability = requiredCapabilityForInterrupt(interrupt.type);
+    if (!this.capabilities.capabilities.includes(capability)) {
+      return {
+        ok: false,
+        type: interrupt.type,
+        error: unsupportedCapabilityError(capability),
+      };
+    }
+    if (this.closed) {
+      return {
+        ok: false,
+        type: interrupt.type,
+        error: makeRuntimeError("unavailable", "runtime is closed"),
+      };
+    }
     switch (interrupt.type) {
       case "abort":
         this.abortPrompt = true;
@@ -362,6 +378,7 @@ export class ReferenceAgentRuntime implements AgentRuntimePort {
         this.emitQueueUpdate();
         break;
     }
+    return { ok: true, type: interrupt.type };
   }
 
   async close(reason: RuntimeCloseReason): Promise<void> {

@@ -12,7 +12,7 @@ import type { RuntimeCommand, RuntimeCommandType } from "./commands.js";
 import type { RuntimeEvent } from "./events.js";
 import type { RuntimeError } from "./errors.js";
 import type { RuntimeCloseReason, RuntimeIdentity } from "./identity.js";
-import type { RuntimeInterrupt } from "./interrupt.js";
+import type { RuntimeInterrupt, RuntimeInterruptResult } from "./interrupt.js";
 import type { ModelInfo, ModelRef, ModelSelector } from "./model.js";
 import type { ThinkingLevel } from "./messages.js";
 import type { RuntimeCommandResult } from "./result.js";
@@ -81,9 +81,10 @@ export interface AgentRuntimePort {
 
   /**
    * Independent control channel: abort-family operations are never blocked
-   * behind long-running prompt/bash/compact work and are idempotent.
+   * behind long-running prompt/bash/compact work and are idempotent. Capability
+   * failures are returned as structured canonical results before state changes.
    */
-  interrupt(interrupt: RuntimeInterrupt): Promise<void>;
+  interrupt(interrupt: RuntimeInterrupt): Promise<RuntimeInterruptResult>;
 
   /**
    * End the runtime with a canonical reason. Idempotent: calling close twice
