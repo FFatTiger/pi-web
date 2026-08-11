@@ -27,8 +27,10 @@
     "!.next/dev",
     "!.next/**/*.js.map",
     "public",
-    "packages/*/dist",
+    "packages/*/dist/**",
     "packages/*/package.json",
+    "!packages/runtime-contract-tests/dist/**",
+    "!packages/runtime-contract-tests/package.json",
     "next.config.ts",
     "package.json"
   ],

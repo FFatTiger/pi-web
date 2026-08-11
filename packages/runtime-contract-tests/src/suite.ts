@@ -1312,7 +1312,9 @@ export function createRuntimeAdapterSuite(harness: AdapterContractHarness): void
           await port.execute({ type: "prompt", message: "hi" });
           const ports = await harness.createPorts!(factory);
           const detail = await ports.sessionCatalog.readSession(port.identity.sessionId);
-          const entryId = detail.entries?.[0]?.entryId!;
+          const firstEntry = detail.entries?.[0];
+          assert.ok(firstEntry, "prompt must create a catalog entry before fork");
+          const entryId = firstEntry.entryId;
           const result = await port.execute({ type: "fork", entryId });
           assert.equal(result.ok, true);
           if (result.ok && result.type === "fork") {
@@ -1331,7 +1333,9 @@ export function createRuntimeAdapterSuite(harness: AdapterContractHarness): void
           await port.execute({ type: "prompt", message: "hi" });
           const ports = await harness.createPorts!(factory);
           const detail = await ports.sessionCatalog.readSession(port.identity.sessionId);
-          const entryId = detail.entries?.[0]?.entryId!;
+          const firstEntry = detail.entries?.[0];
+          assert.ok(firstEntry, "prompt must create a catalog entry before fork");
+          const entryId = firstEntry.entryId;
           const result = await port.execute({ type: "fork", entryId });
           assert.equal(result.ok, true);
           if (result.ok && result.type === "fork") {
