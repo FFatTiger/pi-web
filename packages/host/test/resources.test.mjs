@@ -4,6 +4,8 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, renameSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { AsyncMutex, KeyedMutex } from "../dist/resources/mutex.js";
+import { registerTrustedCreatedRoot } from "../dist/resources/allowed-roots.js";
 import {
   createAllowedRootService,
   createFileWatchManager,
@@ -24,6 +26,7 @@ async function fixture(options = {}) {
   const host = createHostApp({ logger: {}, gate, exposureMode: options.exposureMode ?? "local", resources: { allowedRoots, ...options.resources } });
   return { root, allowedRoots, host, app: host.app };
 }
+function deferred() { let resolve; let reject; const promise = new Promise((res, rej) => { resolve = res; reject = rej; }); return { promise, resolve, reject }; }
 function headers(extra = {}) { return { host: "localhost", ...extra }; }
 function git(cwd, args) { return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, LC_ALL: "C" } }).trim(); }
 function initRepo(root) {
@@ -63,6 +66,24 @@ test("AllowedRootService fails closed for delete/recreate, symlink swap, and ren
     writeFileSync(join(root, "new.txt"), "unsafe");
     await assert.rejects(() => roots.authorizeExisting(join(root, "new.txt"), "file"), (e) => e.code === "ROOT_REPLACED" || e.code === "PATH_FORBIDDEN");
   }
+});
+
+test("AllowedRoot mutation mutex serializes capacity, duplicate, parent-child and trusted ownership races", async () => {
+  const configured = temp("pi-roots-concurrent-"); const a = temp("pi-root-a-"); const b = temp("pi-root-b-"); const service = await createAllowedRootService({ roots: [configured], maxRoots: 2, allowLocalExpansion: true });
+  const planA = await service.prepareExpansion([a], "local"); const planB = await service.prepareExpansion([b], "local");
+  const results = await Promise.allSettled([planA.commit(), planB.commit()]); assert.equal(results.filter((r) => r.status === "fulfilled").length, 1); assert.equal(service.roots().length, 2);
+
+  const duplicate = temp("pi-root-duplicate-"); const duplicateService = await createAllowedRootService({ roots: [configured], maxRoots: 2, allowLocalExpansion: true }); const duplicates = await Promise.all([duplicateService.expandRoots([duplicate], "local"), duplicateService.expandRoots([duplicate], "local")]); assert.equal(duplicates.flatMap((r) => r.added).length, 1); assert.equal(duplicateService.roots().length, 2);
+
+  const parent = temp("pi-root-parent-"); const child = join(parent, "child"); mkdirSync(child); const nestedService = await createAllowedRootService({ roots: [configured], maxRoots: 2, allowLocalExpansion: true }); await Promise.all([nestedService.expandRoots([parent], "local"), nestedService.expandRoots([child], "local")]); assert.equal(nestedService.roots().length, 2); assert.equal(await nestedService.isAuthorized(child, "directory"), true);
+
+  const trusted = temp("pi-root-trusted-"); const trustedService = await createAllowedRootService({ roots: [configured], maxRoots: 2, allowLocalExpansion: true }); const [receipt] = await Promise.all([registerTrustedCreatedRoot(trustedService, trusted), trustedService.expandRoots([trusted], "local")]); await receipt.rollback(); assert.equal(await trustedService.isAuthorized(trusted, "directory"), true, "durable expansion takes ownership from rollback receipt");
+});
+
+test("AllowedRoot mutation stress never exceeds capacity and identity swap loses commit", async () => {
+  const configured = temp("pi-roots-stress-"); const candidates = Array.from({ length: 20 }, (_, index) => temp(`pi-stress-${index}-`)); const service = await createAllowedRootService({ roots: [configured], maxRoots: 6, allowLocalExpansion: true });
+  await Promise.allSettled(Array.from({ length: 100 }, (_, index) => service.expandRoots([candidates[index % candidates.length]], "local"))); assert.ok(service.roots().length <= 6); for (const root of service.roots()) assert.equal(await service.isAuthorized(root, "directory"), true);
+  const swap = temp("pi-root-commit-swap-"); const plan = await service.prepareExpansion([swap], "local"); const moved = `${swap}-old`; temporary.push(moved); renameSync(swap, moved); mkdirSync(swap); await assert.rejects(() => plan.commit(), (e) => [409, 429].includes(e.status)); assert.ok(service.roots().length <= 6);
 });
 
 test("file routes list/read/meta and ranges are bounded and correct", async () => {
@@ -189,6 +210,60 @@ test("GET worktrees is absolutely read-only for local/LAN and external worktrees
   }
 });
 
+test("keyed mutex serializes same key, permits different keys, cleans up and releases errors", async () => {
+  const keyed = new KeyedMutex(); const entered = []; const gateA = deferred(); const firstEntered = deferred();
+  const first = keyed.runExclusive("repo-a", async () => { entered.push("a1"); firstEntered.resolve(); await gateA.promise; entered.push("a1-done"); });
+  await firstEntered.promise;
+  const second = keyed.runExclusive("repo-a", async () => { entered.push("a2"); });
+  const other = keyed.runExclusive("repo-b", async () => { entered.push("b1"); });
+  await other; assert.deepEqual(entered, ["a1", "b1"]); gateA.resolve(); await Promise.all([first, second]); assert.deepEqual(entered, ["a1", "b1", "a1-done", "a2"]); assert.equal(keyed.keyCount(), 0);
+  await assert.rejects(() => keyed.runExclusive("repo-error", async () => { throw new Error("boom"); }), /boom/); assert.equal(keyed.keyCount(), 0);
+  const mutex = new AsyncMutex(); const controller = new AbortController(); const hold = deferred(); const held = mutex.runExclusive(() => hold.promise); const waiting = mutex.runExclusive(() => undefined, controller.signal); controller.abort(); await assert.rejects(() => waiting, (e) => e.code === "MUTATION_ABORTED"); hold.resolve(); await held;
+});
+
+test("route-level repo locks serialize same repo and permit different repos concurrently", async () => {
+  const rootA = temp("pi-repo-lock-a-"); const rootB = temp("pi-repo-lock-b-"); initRepo(rootA); initRepo(rootB); const roots = await createAllowedRootService({ roots: [rootA, rootB] }); const realRunner = createProcessRunner();
+  const firstEntered = deferred(); const secondRepoEntered = deferred(); const releaseFirst = deferred(); let addCountA = 0;
+  const rootACanonical = await import("node:fs/promises").then(({ realpath }) => realpath(rootA));
+  const runner = { async run(request) {
+    if (request.args.includes("worktree") && request.args.includes("add")) {
+      const repo = request.args[1];
+      if (repo === rootACanonical) {
+        addCountA += 1;
+        if (addCountA === 1) { firstEntered.resolve(); await releaseFirst.promise; }
+      } else secondRepoEntered.resolve();
+    }
+    return realRunner.run(request);
+  } };
+  const app = createHostApp({ logger: {}, gate, resources: { allowedRoots: roots, processRunner: runner } }).app;
+  const create = (cwd, branch) => app.request("http://localhost/v1/worktrees", { method: "POST", headers: headers({ "content-type": "application/json" }), body: JSON.stringify({ cwd, branch }) });
+  const first = create(rootA, "lock-a1"); await firstEntered.promise;
+  const sameRepo = create(rootA, "lock-a2"); const otherRepo = create(rootB, "lock-b1"); await secondRepoEntered.promise;
+  assert.equal(addCountA, 1, "same-repo second add cannot enter while first holds lock"); releaseFirst.resolve();
+  const responses = await Promise.all([first, sameRepo, otherRepo]); assert.deepEqual(responses.map((response) => response.status), [201, 201, 201]);
+});
+
+test("real Promise.all worktree create concurrency preserves ownership and no stale roots", async () => {
+  const root = temp("pi-worktree-real-concurrent-"); initRepo(root); const roots = await createAllowedRootService({ roots: [root] }); const app = createHostApp({ logger: {}, gate, resources: { allowedRoots: roots, busyPreflight: { check: async () => ({ busy: false }) } } }).app;
+  const create = (branch) => app.request("http://localhost/v1/worktrees", { method: "POST", headers: headers({ "content-type": "application/json" }), body: JSON.stringify({ cwd: root, branch }) });
+  const same = await Promise.all([create("same-branch"), create("same-branch")]); assert.equal(same.filter((response) => response.status === 201).length, 1); const samePath = (await same.find((response) => response.status === 201).json()).path; assert.equal(statSync(samePath).isDirectory(), true); assert.equal(await roots.isAuthorized(samePath, "directory"), true); assert.equal(roots.roots().filter((entry) => entry.includes("same-branch")).length, 1);
+  const different = await Promise.all([create("parallel-a"), create("parallel-b")]); assert.deepEqual(different.map((response) => response.status).sort(), [201, 201]);
+  const listed = git(root, ["worktree", "list", "--porcelain"]); assert.match(listed, /same-branch/); assert.match(listed, /parallel-a/); assert.match(listed, /parallel-b/);
+});
+
+test("create/delete race is serialized and failed create cannot undo successful create", async () => {
+  const root = temp("pi-worktree-create-delete-"); initRepo(root); const roots = await createAllowedRootService({ roots: [root] }); const app = createHostApp({ logger: {}, gate, resources: { allowedRoots: roots, busyPreflight: { check: async () => ({ busy: false }) } } }).app;
+  const create = async (branch) => app.request("http://localhost/v1/worktrees", { method: "POST", headers: headers({ "content-type": "application/json" }), body: JSON.stringify({ cwd: root, branch }) });
+  const created = await create("race-delete"); const target = (await created.json()).path;
+  const [duplicate, deletion] = await Promise.all([
+    create("race-delete"),
+    app.request("http://localhost/v1/worktrees", { method: "DELETE", headers: headers({ "content-type": "application/json" }), body: JSON.stringify({ cwd: root, path: target, force: true }) }),
+  ]);
+  assert.ok([201, 409].includes(duplicate.status)); assert.equal(deletion.status, 200); if (duplicate.status === 201) { const replacement = (await duplicate.json()).path; assert.equal(await roots.isAuthorized(replacement, "directory"), true); assert.match(git(root, ["worktree", "list", "--porcelain"]), /race-delete/); } else { assert.equal(await roots.isAuthorized(target, "directory"), false); assert.ok(!git(root, ["worktree", "list", "--porcelain"]).includes(target)); }
+
+  const successful = await create("successful-owner"); assert.equal(successful.status, 201); const successfulPath = (await successful.json()).path; const failed = await create("successful-owner"); assert.equal(failed.status, 409); assert.equal(statSync(successfulPath).isDirectory(), true); assert.equal(await roots.isAuthorized(successfulPath, "directory"), true);
+});
+
 test("worktree deletion fails closed without preflight and force never overrides busy", async () => {
   const root = temp("pi-worktree-repo-"); initRepo(root); const allowedRoots = await createAllowedRootService({ roots: [root] });
   const noPreflight = createHostApp({ logger: {}, gate, resources: { allowedRoots } }).app;
@@ -217,12 +292,12 @@ test("worktree creation rejects symlink base and rolls back when root registrati
   assert.ok(!git(root, ["worktree", "list", "--porcelain"]).includes("registration-fails")); assert.throws(() => git(root, ["show-ref", "--verify", "refs/heads/registration-fails"])); assert.ok(!allowedRoots.roots().some((entry) => entry.includes("registration-fails")));
 });
 
-test("worktree create rolls back base/branch/worktree on add process failure", async () => {
+test("ambiguous nonzero add failure does not claim or delete observed resources", async () => {
   const root = temp("pi-worktree-process-fail-"); initRepo(root); const roots = await createAllowedRootService({ roots: [root] }); const realRunner = createProcessRunner();
-  const runner = { async run(request) { if (request.args.includes("add")) { const actual = await realRunner.run(request); assert.equal(actual.exitCode, 0); return { stdout: actual.stdout, stderr: "simulated add failure", exitCode: 7, truncated: false }; } return realRunner.run(request); } };
+  const runner = { async run(request) { if (request.args.includes("add")) { const actual = await realRunner.run(request); assert.equal(actual.exitCode, 0); return { stdout: actual.stdout, stderr: "simulated ambiguous failure", exitCode: 7, truncated: false }; } return realRunner.run(request); } };
   const app = createHostApp({ logger: {}, gate, resources: { allowedRoots: roots, processRunner: runner } }).app;
   const response = await app.request("http://localhost/v1/worktrees", { method: "POST", headers: headers({ "content-type": "application/json" }), body: JSON.stringify({ cwd: root, branch: "partial-failure" }) }); assert.equal(response.status, 400);
-  assert.throws(() => git(root, ["show-ref", "--verify", "refs/heads/partial-failure"])); assert.equal(statSync(`${resolve(root)}-worktrees`, { throwIfNoEntry: false }), undefined); assert.deepEqual(roots.roots(), [await import("node:fs/promises").then(({ realpath }) => realpath(root))]);
+  assert.doesNotThrow(() => git(root, ["show-ref", "--verify", "refs/heads/partial-failure"])); assert.match(git(root, ["worktree", "list", "--porcelain"]), /partial-failure/); assert.equal(roots.roots().length, 1, "ambiguous resource is not authorized or transaction-owned");
 });
 
 test("worktree create transaction rolls back timeout/output failures and concurrent target conflict", async () => {
@@ -236,7 +311,7 @@ test("worktree create transaction rolls back timeout/output failures and concurr
   const root = temp("pi-worktree-conflict-"); initRepo(root); const base = `${resolve(root)}-worktrees`; const target = join(base, "race-branch"); const roots = await createAllowedRootService({ roots: [root] }); const realRunner = createProcessRunner();
   const runner = { async run(request) { if (request.args.includes("worktree") && request.args.includes("add")) { mkdirSync(target, { recursive: true }); writeFileSync(join(target, "concurrent-owner.txt"), "keep"); } return realRunner.run(request); } };
   const app = createHostApp({ logger: {}, gate, resources: { allowedRoots: roots, processRunner: runner } }).app;
-  const response = await app.request("http://localhost/v1/worktrees", { method: "POST", headers: headers({ "content-type": "application/json" }), body: JSON.stringify({ cwd: root, branch: "race-branch" }) }); assert.equal(response.status, 400); assert.equal(readFileSync(join(target, "concurrent-owner.txt"), "utf8"), "keep"); assert.throws(() => git(root, ["show-ref", "--verify", "refs/heads/race-branch"]));
+  const response = await app.request("http://localhost/v1/worktrees", { method: "POST", headers: headers({ "content-type": "application/json" }), body: JSON.stringify({ cwd: root, branch: "race-branch" }) }); assert.equal(response.status, 400); assert.equal(readFileSync(join(target, "concurrent-owner.txt"), "utf8"), "keep"); assert.doesNotThrow(() => git(root, ["show-ref", "--verify", "refs/heads/race-branch"])); assert.equal(await roots.isAuthorized(target, "directory"), false);
 });
 
 test("worktree rollback preserves pre-existing branch and base", async () => {
