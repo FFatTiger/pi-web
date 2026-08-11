@@ -29,7 +29,9 @@ export function AppProviders({ children, host }: AppProvidersProps) {
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <HttpClientProvider>
-          <CapabilityProvider host={host}>{children}</CapabilityProvider>
+          <CapabilityProvider {...(host === undefined ? {} : { host })}>
+            {children}
+          </CapabilityProvider>
         </HttpClientProvider>
       </QueryClientProvider>
     </ErrorBoundary>

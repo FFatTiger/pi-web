@@ -79,7 +79,11 @@ export function AppShell({ search }: AppShellProps) {
             </p>
           </div>
 
-          <TranscriptList sessionId={search.session} />
+          <TranscriptList
+            {...(search.session === undefined
+              ? {}
+              : { sessionId: search.session })}
+          />
 
           <Composer disabled={!canAgent} readonly={isReadonly} />
         </main>

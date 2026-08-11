@@ -78,13 +78,14 @@ export function createHttpClient(options: HttpClientOptions = {}) {
       body = JSON.stringify(req.body);
     }
 
-    const response = await fetchImpl(path, {
+    const requestInit: RequestInit = {
       method: req.method ?? "GET",
       headers,
-      body,
       credentials,
-      signal: req.signal,
-    });
+      ...(body === undefined ? {} : { body }),
+      ...(req.signal === undefined ? {} : { signal: req.signal }),
+    };
+    const response = await fetchImpl(path, requestInit);
 
     const text = await response.text();
     const parsed = parseBody(text);

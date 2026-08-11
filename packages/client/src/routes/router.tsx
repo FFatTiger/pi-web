@@ -37,7 +37,7 @@ const loginRoute = createRoute({
   validateSearch: validateWorkspaceSearch,
   component: function LoginRoutePage() {
     const search = loginRoute.useSearch();
-    return <LoginPage next={search.next} />;
+    return search.next === undefined ? <LoginPage /> : <LoginPage next={search.next} />;
   },
 });
 

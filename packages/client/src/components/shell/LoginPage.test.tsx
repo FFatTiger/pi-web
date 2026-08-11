@@ -63,7 +63,10 @@ function renderLogin(next?: string) {
     );
   }
 
-  return render(<LoginPage next={next} />, { wrapper: Wrapper });
+  return render(
+    next === undefined ? <LoginPage /> : <LoginPage next={next} />,
+    { wrapper: Wrapper },
+  );
 }
 
 describe("navigateAfterLogin", () => {

@@ -63,15 +63,20 @@ export function buildTranscriptRows(
   }
 
   for (const message of messages) {
+    const meta: NonNullable<TranscriptRow["meta"]> = {
+      ...(message.createdAt === undefined
+        ? {}
+        : { createdAt: message.createdAt }),
+      ...(message.toolName === undefined ? {} : { toolName: message.toolName }),
+    };
     rows.push({
       id: message.id,
       kind: message.role,
       text: message.text,
-      estimateHeight: message.estimateHeight,
-      meta: {
-        createdAt: message.createdAt,
-        toolName: message.toolName,
-      },
+      ...(message.estimateHeight === undefined
+        ? {}
+        : { estimateHeight: message.estimateHeight }),
+      ...(Object.keys(meta).length === 0 ? {} : { meta }),
     });
   }
 

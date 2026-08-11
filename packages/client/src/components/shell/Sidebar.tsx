@@ -38,7 +38,7 @@ export function Sidebar({ open, search }: SidebarProps) {
                   to="/"
                   search={{
                     session: session.id,
-                    cwd: search.cwd,
+                    ...(search.cwd === undefined ? {} : { cwd: search.cwd }),
                   }}
                   className={`session-row${active ? " session-row--active" : ""}`}
                   aria-current={active ? "page" : undefined}
