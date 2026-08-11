@@ -43,6 +43,18 @@ export { loggingMiddleware } from "./middleware/logging.js";
 
 export { resolveCapabilities, registerHealthRoutes } from "./routes/health.js";
 export type { SessiondState, ResolvedCapabilities } from "./routes/health.js";
+export { registerFileRoutes, parseSingleRange } from "./routes/files.js";
+export { registerFileIndexRoutes } from "./routes/file-index.js";
+export { registerGitRoutes } from "./routes/git.js";
+export { registerWorktreeRoutes } from "./routes/worktrees.js";
+export { createAllowedRootService, pathContainment } from "./resources/allowed-roots.js";
+export type { AllowedRootPolicy, AllowedRootService, AuthorizedPath } from "./resources/allowed-roots.js";
+export { createProcessRunner, runChecked } from "./resources/process-runner.js";
+export type { ProcessRequest, ProcessResult, ProcessRunner } from "./resources/process-runner.js";
+export { createFileWatchManager } from "./resources/file-watch.js";
+export type { FileWatchManager } from "./resources/file-watch.js";
+export { readBoundedBody, readJsonObject } from "./resources/request-body.js";
+export type { DefaultCwdFactory, ResourceDeps, ResourceLimits, WorktreeBusyPreflight } from "./resources/types.js";
 
 export { staticAssetsMiddleware, resolveClientFile } from "./static/static-assets.js";
 export type { StaticAssetsOptions } from "./static/static-assets.js";

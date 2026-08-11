@@ -119,6 +119,8 @@ export interface GateDeps {
 // Host deps
 // ---------------------------------------------------------------------------
 
+import type { ResourceDeps } from "./resources/types.js";
+
 /** sessiond availability probe for capability downgrade (protocol-independent). */
 export interface SessiondProbe {
   isAvailable(): boolean | Promise<boolean>;
@@ -155,6 +157,8 @@ export interface HostDeps {
    */
   allowedHosts?: readonly string[];
   logger?: HostLogger;
+  /** H1B local files/git/cwd/worktree services. Omitted means routes are unavailable. */
+  resources?: ResourceDeps;
   /** H0B seam: injected runtime protocol WS handler. */
   runtimeWs?: RuntimeWsSeam;
   /** Hello-frame timeout in ms for the WS upgrade seam (default 10_000). */
