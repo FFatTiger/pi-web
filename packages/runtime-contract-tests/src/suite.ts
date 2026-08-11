@@ -473,6 +473,47 @@ export function createRuntimeAdapterSuite(harness: AdapterContractHarness): void
         }
       });
 
+      it("closed-state lifecycle errors outrank capabilities for every interrupt path", async () => {
+        for (const type of RUNTIME_INTERRUPT_TYPES) {
+          const capability = RUNTIME_INTERRUPT_CAPABILITIES[type];
+          for (const capabilityPresent of [true, false]) {
+            const factory = await harness.createFactory({
+              capabilities: capabilityPresent
+                ? RUNTIME_CAPABILITIES
+                : RUNTIME_CAPABILITIES.filter((item) => item !== capability),
+            });
+            const port = await factory.create({ cwd: "/workspace" });
+            const collector = new EventCollector(port);
+            const beforeClose = await port.getSnapshot();
+            const stableState = structuredClone(beforeClose.state);
+            await port.close("user");
+            const eventCountAfterClose = collector.events.length;
+            assert.equal(collector.ofType("runtime_closed").length, 1);
+
+            const executeResult = await port.execute(fixtureFor(type));
+            assertErrorCode(executeResult, "unavailable");
+            const interruptResult = await port.interrupt({ type });
+            assertInterruptErrorCode(interruptResult, "unavailable");
+            assert.equal(executeResult.error.message, interruptResult.error.message);
+
+            await assert.rejects(
+              () => port.getSnapshot(),
+              (error: unknown) => isRuntimeError(error) && error.code === "unavailable",
+            );
+            const stateResult = await port.execute({ type: "get_state" });
+            assertErrorCode(stateResult, "unavailable");
+            assert.deepEqual(beforeClose.state, stableState, "captured state must not mutate");
+            assert.equal(
+              collector.events.length,
+              eventCountAfterClose,
+              `${type} must not emit after close (capabilityPresent=${capabilityPresent})`,
+            );
+            assert.equal(collector.ofType("runtime_closed").length, 1);
+            collector.dispose();
+          }
+        }
+      });
+
       it("unsupported abort cannot interrupt a running prompt", async () => {
         const factory = await harness.createFactory({
           capabilities: RUNTIME_CAPABILITIES.filter((item) => item !== "runtime.abort"),

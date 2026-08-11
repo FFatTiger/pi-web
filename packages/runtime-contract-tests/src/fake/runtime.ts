@@ -344,19 +344,19 @@ export class ReferenceAgentRuntime implements AgentRuntimePort {
   }
 
   async interrupt(interrupt: RuntimeInterrupt): Promise<RuntimeInterruptResult> {
+    if (this.closed) {
+      return {
+        ok: false,
+        type: interrupt.type,
+        error: makeRuntimeError("unavailable", "runtime is closed"),
+      };
+    }
     const capability = requiredCapabilityForInterrupt(interrupt.type);
     if (!this.capabilities.capabilities.includes(capability)) {
       return {
         ok: false,
         type: interrupt.type,
         error: unsupportedCapabilityError(capability),
-      };
-    }
-    if (this.closed) {
-      return {
-        ok: false,
-        type: interrupt.type,
-        error: makeRuntimeError("unavailable", "runtime is closed"),
       };
     }
     switch (interrupt.type) {
