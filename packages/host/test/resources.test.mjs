@@ -86,6 +86,31 @@ test("AllowedRoot mutation stress never exceeds capacity and identity swap loses
   const swap = temp("pi-root-commit-swap-"); const plan = await service.prepareExpansion([swap], "local"); const moved = `${swap}-old`; temporary.push(moved); renameSync(swap, moved); mkdirSync(swap); await assert.rejects(() => plan.commit(), (e) => [409, 429].includes(e.status)); assert.ok(service.roots().length <= 6);
 });
 
+test("AllowedRoot child-first and parent-first promotion produce identical minimal coverage", async () => {
+  const configured = temp("pi-promotion-configured-"); const parent = temp("pi-promotion-parent-"); const child = join(parent, "child"); mkdirSync(child);
+  const childFirst = await createAllowedRootService({ roots: [configured], maxRoots: 2, allowLocalExpansion: true }); await childFirst.expandRoots([child], "local"); await childFirst.expandRoots([parent], "local");
+  const parentFirst = await createAllowedRootService({ roots: [configured], maxRoots: 2, allowLocalExpansion: true }); await parentFirst.expandRoots([parent], "local"); await parentFirst.expandRoots([child], "local");
+  const expectedParent = await import("node:fs/promises").then(({ realpath }) => realpath(parent)); assert.deepEqual(childFirst.roots(), parentFirst.roots()); assert.deepEqual(childFirst.roots(), [await import("node:fs/promises").then(({ realpath }) => realpath(configured)), expectedParent].sort());
+});
+
+test("AllowedRoot promotion migrates deterministic durable/trusted ownership", async () => {
+  const configured = temp("pi-owner-configured-"); const parent = temp("pi-owner-parent-"); const childA = join(parent, "a"); const childB = join(parent, "b"); mkdirSync(childA); mkdirSync(childB); const parentCanonical = await import("node:fs/promises").then(({ realpath }) => realpath(parent));
+  const trustedChildren = await createAllowedRootService({ roots: [configured], maxRoots: 3, allowLocalExpansion: true }); const receipts = await Promise.all([registerTrustedCreatedRoot(trustedChildren, childA), registerTrustedCreatedRoot(trustedChildren, childB)]); await trustedChildren.expandRoots([parent], "local"); await Promise.all(receipts.map((receipt) => receipt.rollback())); assert.equal(await trustedChildren.isAuthorized(parent, "directory"), true); assert.equal(trustedChildren.roots().includes(parentCanonical), true); assert.equal(trustedChildren.roots().length, 2);
+
+  const durableChild = await createAllowedRootService({ roots: [configured], maxRoots: 3, allowLocalExpansion: true }); await durableChild.expandRoots([childA], "local"); const parentReceipt = await registerTrustedCreatedRoot(durableChild, parent); assert.equal(durableChild.roots().includes(parentCanonical), true, "trusted parent may temporarily cover durable child"); await parentReceipt.rollback(); assert.equal(await durableChild.isAuthorized(childA, "directory"), true); assert.equal(await durableChild.isAuthorized(parent, "directory"), false); assert.equal(durableChild.roots().some((root) => root.endsWith("/a")), true);
+});
+
+test("AllowedRoot promotion uses replacement capacity and passes last-slot child-first probe", async () => {
+  const configured = temp("pi-last-slot-configured-"); const parent = temp("pi-last-slot-parent-"); const child = join(parent, "child"); mkdirSync(child); const service = await createAllowedRootService({ roots: [configured], maxRoots: 2, allowLocalExpansion: true }); await service.expandRoots([child], "local"); const result = await service.expandRoots([parent], "local"); assert.equal(result.paths.length, 1); assert.equal(service.roots().length, 2); assert.equal(await service.isAuthorized(parent, "directory"), true);
+});
+
+test("AllowedRoot randomized promotion stress converges to minimal coverage", async () => {
+  const configured = temp("pi-random-configured-"); const parent = temp("pi-random-parent-"); const children = Array.from({ length: 5 }, (_, index) => { const path = join(parent, `c${index}`); mkdirSync(path); return path; }); const parentCanonical = await import("node:fs/promises").then(({ realpath }) => realpath(parent));
+  for (let round = 0; round < 100; round += 1) {
+    const service = await createAllowedRootService({ roots: [configured], maxRoots: 6, allowLocalExpansion: true }); const ordered = round % 2 === 0 ? [...children, parent] : [parent, ...children]; const tasks = ordered.map((path, index) => index % 3 === 0 ? service.expandRoots([path], "local") : service.prepareExpansion([path], "local").then((plan) => plan.commit())); await Promise.allSettled(tasks); assert.ok(service.roots().length <= 2); assert.equal(service.roots().includes(parentCanonical), true); for (const child of children) assert.equal(await service.isAuthorized(child, "directory"), true);
+  }
+});
+
 test("file routes list/read/meta and ranges are bounded and correct", async () => {
   const { root, app } = await fixture(); writeFileSync(join(root, "hello.txt"), "hello world"); mkdirSync(join(root, "dir"));
   const list = await app.request(`http://localhost/v1/files?path=${encodeURIComponent(root)}`, { headers: headers() });

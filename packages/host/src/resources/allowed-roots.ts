@@ -23,12 +23,14 @@ export interface AllowedRootService {
   expandRoots(targets: readonly string[], mode: HostMode): Promise<RootExpansionResult>;
 }
 interface RootIdentity { dev: number; ino: number }
-interface RootRecord {
-  identity: RootIdentity;
-  durable: boolean;
-  trustedOwners: Set<string>;
-}
+interface TrustedClaim { path: string; identity: RootIdentity }
+interface RootRecord { identity: RootIdentity }
 interface RootState {
+  /** Durable policy ownership, normalized so no path has a durable ancestor. */
+  durableClaims: Map<string, RootIdentity>;
+  /** Stable owner token → requested trusted-created root. Hidden claims are retained. */
+  trustedClaims: Map<string, TrustedClaim>;
+  /** Minimal effective authorization projection derived from all claims. */
   records: Map<string, RootRecord>;
   maxRoots: number;
   policy: AllowedRootPolicy;
@@ -74,43 +76,63 @@ function stateFor(service: AllowedRootService): RootState {
   if (!state) throw new Error("Unknown AllowedRootService instance");
   return state;
 }
-function matchingRoot(state: RootState, canonical: string): string | null {
+function sortedClaimPaths(durable: Map<string, RootIdentity>, trusted: Map<string, TrustedClaim>): string[] {
+  return [...new Set([...durable.keys(), ...[...trusted.values()].map((claim) => claim.path)])]
+    .sort((a, b) => a.length - b.length || a.localeCompare(b));
+}
+function deriveRecords(durable: Map<string, RootIdentity>, trusted: Map<string, TrustedClaim>): Map<string, RootRecord> {
+  const records = new Map<string, RootRecord>();
+  for (const path of sortedClaimPaths(durable, trusted)) {
+    if ([...records.keys()].some((ancestor) => isWithin(ancestor, path))) continue;
+    const identity = durable.get(path) ?? [...trusted.values()].find((claim) => claim.path === path)?.identity;
+    if (identity) records.set(path, { identity });
+  }
+  return records;
+}
+function matchingRoot(records: Map<string, RootRecord>, canonical: string): string | null {
   let winner: string | null = null;
-  for (const root of state.records.keys()) if (isWithin(root, canonical) && (!winner || root.length > winner.length)) winner = root;
+  for (const root of records.keys()) if (isWithin(root, canonical) && (!winner || root.length > winner.length)) winner = root;
   return winner;
 }
-async function verifyRecord(path: string, record: RootRecord): Promise<void> {
-  if (!(await identityStillMatches(path, record.identity))) throw new HttpError(403, "ROOT_REPLACED", "Allowed root was replaced after authorization");
+async function verifyAllClaims(durable: Map<string, RootIdentity>, trusted: Map<string, TrustedClaim>): Promise<void> {
+  for (const [path, identity] of durable) if (!(await identityStillMatches(path, identity))) throw new HttpError(403, "ROOT_REPLACED", "Allowed root was replaced after authorization");
+  for (const claim of trusted.values()) if (!(await identityStillMatches(claim.path, claim.identity))) throw new HttpError(409, "ROOT_IDENTITY_CHANGED", "Trusted-created root changed identity");
 }
+function cloneDurable(source: Map<string, RootIdentity>): Map<string, RootIdentity> { return new Map(source); }
+function cloneTrusted(source: Map<string, TrustedClaim>): Map<string, TrustedClaim> { return new Map(source); }
 
-/** Internal-only: Worktree routes call this while holding repo lock (repo→roots). */
+/** Internal-only. Worktree routes call this while holding repo lock (repo→roots). */
 export async function registerTrustedCreatedRoot(service: AllowedRootService, target: string): Promise<TrustedCreatedRootReceipt> {
   const candidate = await canonicalDirectoryWithIdentity(target);
   const state = stateFor(service);
   const owner = randomUUID();
   return state.mutation.runExclusive(async () => {
+    await verifyAllClaims(state.durableClaims, state.trustedClaims);
     if (!(await identityStillMatches(candidate.canonical, candidate.identity))) throw new HttpError(409, "ROOT_IDENTITY_CHANGED", "Created root changed identity before registration");
-    const existing = state.records.get(candidate.canonical);
-    if (existing) {
-      await verifyRecord(candidate.canonical, existing);
-      existing.trustedOwners.add(owner);
-    } else {
-      if (state.records.size >= state.maxRoots) throw new HttpError(429, "ROOT_LIMIT", "Allowed-root limit reached");
-      state.records.set(candidate.canonical, { identity: candidate.identity, durable: false, trustedOwners: new Set([owner]) });
+    // A durable ancestor already grants permanent access: no temporary owner is needed.
+    const durableAncestor = [...state.durableClaims.keys()].some((path) => isWithin(path, candidate.canonical));
+    if (!durableAncestor) {
+      const proposedTrusted = cloneTrusted(state.trustedClaims);
+      proposedTrusted.set(owner, { path: candidate.canonical, identity: candidate.identity });
+      const proposedRecords = deriveRecords(state.durableClaims, proposedTrusted);
+      if (proposedRecords.size > state.maxRoots) throw new HttpError(429, "ROOT_LIMIT", "Allowed-root limit reached");
+      state.trustedClaims = proposedTrusted;
+      state.records = proposedRecords;
     }
     let rolledBack = false;
     return {
       canonicalPath: candidate.canonical,
-      added: !existing,
+      added: !durableAncestor,
       async rollback() {
         if (rolledBack) return;
         rolledBack = true;
         await state.mutation.runExclusive(async () => {
-          const current = state.records.get(candidate.canonical);
-          if (!current || !current.trustedOwners.has(owner)) return;
-          current.trustedOwners.delete(owner);
-          // Another expansion transaction can make this root durable; never remove it.
-          if (!current.durable && current.trustedOwners.size === 0 && await identityStillMatches(candidate.canonical, current.identity)) state.records.delete(candidate.canonical);
+          // Durable promotion invalidates/removes this token; stale receipts are no-op.
+          if (!state.trustedClaims.has(owner)) return;
+          const proposedTrusted = cloneTrusted(state.trustedClaims);
+          proposedTrusted.delete(owner);
+          state.trustedClaims = proposedTrusted;
+          state.records = deriveRecords(state.durableClaims, proposedTrusted);
         });
       },
     };
@@ -121,33 +143,37 @@ export async function unregisterTrustedCreatedRoot(service: AllowedRootService, 
   const state = stateFor(service);
   const canonical = resolve(target);
   await state.mutation.runExclusive(async () => {
-    const current = state.records.get(canonical);
-    if (!current || current.trustedOwners.size === 0) return;
     try { await lstat(canonical); return; } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") return; }
-    current.trustedOwners.clear();
-    if (!current.durable) state.records.delete(canonical);
+    const proposedTrusted = cloneTrusted(state.trustedClaims);
+    for (const [owner, claim] of proposedTrusted) if (claim.path === canonical) proposedTrusted.delete(owner);
+    state.trustedClaims = proposedTrusted;
+    state.records = deriveRecords(state.durableClaims, proposedTrusted);
   });
 }
 
 export async function createAllowedRootService(policy: AllowedRootPolicy): Promise<AllowedRootService> {
   const maxRoots = policy.maxRoots ?? 128;
   if (!Number.isInteger(maxRoots) || maxRoots < 1) throw new Error("maxRoots must be a positive integer");
-  const state: RootState = { records: new Map(), maxRoots, policy, mutation: new AsyncMutex() };
+  const durableClaims = new Map<string, RootIdentity>();
   for (const root of policy.roots) {
-    if (state.records.size >= maxRoots) throw new Error("Too many configured allowed roots");
     const candidate = await canonicalDirectoryWithIdentity(root);
-    state.records.set(candidate.canonical, { identity: candidate.identity, durable: true, trustedOwners: new Set() });
+    // Configured roots are normalized parent-first too.
+    if ([...durableClaims.keys()].some((ancestor) => isWithin(ancestor, candidate.canonical))) continue;
+    for (const path of [...durableClaims.keys()]) if (isWithin(candidate.canonical, path)) durableClaims.delete(path);
+    durableClaims.set(candidate.canonical, candidate.identity);
   }
+  const initialRecords = deriveRecords(durableClaims, new Map());
+  if (initialRecords.size > maxRoots) throw new Error("Too many configured allowed roots");
+  const state: RootState = { durableClaims, trustedClaims: new Map(), records: initialRecords, maxRoots, policy, mutation: new AsyncMutex() };
 
   async function authorizeExisting(target: string, kind: "any" | "file" | "directory" = "any"): Promise<AuthorizedPath> {
     const requestedPath = validateAbsolutePath(target);
     let canonicalPath: string;
     try { canonicalPath = await realpath(requestedPath); } catch { throw new HttpError(404, "PATH_NOT_FOUND", "Path not found"); }
-    const root = matchingRoot(state, canonicalPath);
+    const root = matchingRoot(state.records, canonicalPath);
     if (!root) throw new HttpError(403, "PATH_FORBIDDEN", "Path is outside the allowed roots");
     const record = state.records.get(root);
-    if (!record) throw new HttpError(403, "PATH_FORBIDDEN", "Path is outside the allowed roots");
-    await verifyRecord(root, record);
+    if (!record || !(await identityStillMatches(root, record.identity))) throw new HttpError(403, "ROOT_REPLACED", "Allowed root was replaced after authorization");
     const info = await lstat(canonicalPath);
     if (kind === "file" && !info.isFile()) throw new HttpError(400, "NOT_FILE", "Path is not a file");
     if (kind === "directory" && !info.isDirectory()) throw new HttpError(400, "NOT_DIRECTORY", "Path is not a directory");
@@ -175,7 +201,7 @@ export async function createAllowedRootService(policy: AllowedRootPolicy): Promi
   }
 
   async function prepareExpansion(targets: readonly string[], mode: HostMode): Promise<RootExpansionPlan> {
-    // Canonicalization intentionally occurs outside the mutation lock.
+    // Canonicalization occurs outside the mutation mutex by design.
     const candidates = await Promise.all(targets.map(canonicalDirectoryWithIdentity));
     let committed = false;
     return {
@@ -183,37 +209,32 @@ export async function createAllowedRootService(policy: AllowedRootPolicy): Promi
       async commit() {
         return state.mutation.runExclusive(async () => {
           if (committed) throw new HttpError(409, "EXPANSION_ALREADY_COMMITTED", "Root expansion was already committed");
-          // Recompute coverage/capacity from the latest state while locked.
-          const durableNew = new Map<string, RootIdentity>();
-          for (const candidate of candidates) {
-            const containing = matchingRoot(state, candidate.canonical);
-            if (containing) {
-              const record = state.records.get(containing)!;
-              await verifyRecord(containing, record);
-            }
+          await verifyAllClaims(state.durableClaims, state.trustedClaims);
+          for (const candidate of candidates) if (!(await identityStillMatches(candidate.canonical, candidate.identity))) throw new HttpError(409, "ROOT_IDENTITY_CHANGED", "Directory changed identity during root expansion");
+          const proposedDurable = cloneDurable(state.durableClaims);
+          const proposedTrusted = cloneTrusted(state.trustedClaims);
+          let changed = false;
+          for (const candidate of [...candidates].sort((a, b) => a.canonical.length - b.canonical.length || a.canonical.localeCompare(b.canonical))) {
+            if ([...proposedDurable.keys()].some((ancestor) => isWithin(ancestor, candidate.canonical))) continue;
+            changed = true;
+            // Durable parent promotion removes redundant durable descendants.
+            for (const path of [...proposedDurable.keys()]) if (isWithin(candidate.canonical, path)) proposedDurable.delete(path);
+            proposedDurable.set(candidate.canonical, candidate.identity);
+            // Durable parent permanently absorbs descendant trusted claims;
+            // their old receipts become bounded no-op handles.
+            for (const [owner, claim] of proposedTrusted) if (isWithin(candidate.canonical, claim.path)) proposedTrusted.delete(owner);
           }
-          for (const candidate of candidates) {
-            if (matchingRoot(state, candidate.canonical)) continue;
-            const coveredByCandidate = candidates.some((other) => other !== candidate && isWithin(other.canonical, candidate.canonical));
-            if (!coveredByCandidate) durableNew.set(candidate.canonical, candidate.identity);
-          }
-          if (durableNew.size > 0) {
+          if (changed) {
             const permitted = mode === "local" ? policy.allowLocalExpansion === true : policy.allowLanExpansion === true;
             if (!permitted) throw new HttpError(403, "ROOT_EXPANSION_DISABLED", "Directory expansion is disabled by host policy");
-            if (state.records.size + durableNew.size > maxRoots) throw new HttpError(429, "ROOT_LIMIT", "Allowed-root limit reached");
           }
-          for (const candidate of candidates) if (!(await identityStillMatches(candidate.canonical, candidate.identity))) throw new HttpError(409, "ROOT_IDENTITY_CHANGED", "Directory changed identity during root expansion");
-          const added: string[] = [];
-          for (const [canonical, identity] of durableNew) {
-            const existing = state.records.get(canonical);
-            if (existing) existing.durable = true;
-            else { state.records.set(canonical, { identity, durable: true, trustedOwners: new Set() }); added.push(canonical); }
-          }
-          // A candidate may exactly match a trusted-created root: successful policy expansion takes ownership durably.
-          for (const candidate of candidates) {
-            const exact = state.records.get(candidate.canonical);
-            if (exact) exact.durable = true;
-          }
+          const proposedRecords = deriveRecords(proposedDurable, proposedTrusted);
+          if (proposedRecords.size > maxRoots) throw new HttpError(429, "ROOT_LIMIT", "Allowed-root limit reached");
+          const before = new Set(state.records.keys());
+          const added = [...proposedRecords.keys()].filter((path) => !before.has(path));
+          state.durableClaims = proposedDurable;
+          state.trustedClaims = proposedTrusted;
+          state.records = proposedRecords;
           committed = true;
           return { paths: candidates.map((candidate) => candidate.canonical), added };
         });
