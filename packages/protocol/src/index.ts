@@ -10,6 +10,7 @@ export * from "./version.js";
 export * from "./capabilities.js";
 export * from "./common.js";
 export * from "./messages.js";
+export * from "./extension.js";
 export * from "./domain.js";
 export * from "./results.js";
 export * from "./semantic-mapping.js";

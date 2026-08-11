@@ -227,12 +227,15 @@ describe("RuntimeCommand", () => {
       type: "extension_ui_response",
       commandId: "c-ui-r",
       id: "ui-1",
+      method: "input",
+      responseKind: "value",
       value: "ok",
     },
     extension_ui_input: {
       type: "extension_ui_input",
       commandId: "c-ui-i",
       id: "ui-2",
+      method: "input",
       data: "typed",
     },
     set_auto_retry: {
@@ -389,53 +392,12 @@ describe("RuntimeCommand", () => {
     );
   });
 
-  it("accepts exclusive extension_ui_response variants and rejects conflicts", () => {
-    assert.equal(
-      safeParseRuntimeCommand({
-        type: "extension_ui_response",
-        commandId: "c1",
-        id: "ui",
-        confirmed: true,
-      }).success,
-      true,
-    );
-    assert.equal(
-      safeParseRuntimeCommand({
-        type: "extension_ui_response",
-        commandId: "c1",
-        id: "ui",
-        cancelled: true,
-      }).success,
-      true,
-    );
-    assert.equal(
-      safeParseRuntimeCommand({
-        type: "extension_ui_response",
-        commandId: "c1",
-        id: "ui",
-        value: "x",
-        confirmed: true,
-      }).success,
-      false,
-    );
-    assert.equal(
-      safeParseRuntimeCommand({
-        type: "extension_ui_response",
-        commandId: "c1",
-        id: "ui",
-        value: "x",
-        cancelled: true,
-      }).success,
-      false,
-    );
-    assert.equal(
-      safeParseRuntimeCommand({
-        type: "extension_ui_response",
-        commandId: "c1",
-        id: "ui",
-      }).success,
-      false,
-    );
+  it("binds extension responses to request method and rejects conflicts", () => {
+    assert.equal(safeParseRuntimeCommand({ type: "extension_ui_response", commandId: "c1", id: "ui", method: "confirm", responseKind: "confirmed", confirmed: true }).success, true);
+    assert.equal(safeParseRuntimeCommand({ type: "extension_ui_response", commandId: "c1", id: "ui", method: "select", responseKind: "selected", selected: "a" }).success, true);
+    assert.equal(safeParseRuntimeCommand({ type: "extension_ui_response", commandId: "c1", id: "ui", method: "confirm", responseKind: "value", value: "x" }).success, false);
+    assert.equal(safeParseRuntimeCommand({ type: "extension_ui_response", commandId: "c1", id: "ui", method: "select", responseKind: "confirmed", confirmed: true }).success, false);
+    assert.equal(safeParseRuntimeCommand({ type: "extension_ui_input", commandId: "c1", id: "ui", method: "confirm", data: "x" }).success, false);
   });
 });
 
@@ -444,12 +406,9 @@ describe("messages and RuntimeEvent", () => {
     const event = roundTrip(RuntimeEventSchema, {
       type: "message_update",
       ...baseEvent,
-      message: {
-        role: "assistant",
-        content: [{ type: "text", text: "partial" }],
-        model: "gpt-4.1",
-        provider: "openai",
-      },
+      streamId: "stream-1",
+      messageId: "message-1",
+      delta: { role: "assistant", delta: { type: "text", text: "partial" } },
     });
     assert.equal(event.type, "message_update");
   });
@@ -473,6 +432,8 @@ describe("messages and RuntimeEvent", () => {
       safeParseRuntimeEvent({
         type: "message_start",
         ...baseEvent,
+        streamId: "stream-1",
+        messageId: "message-1",
         message: { role: "assistant", content: null },
       }).success,
       false,
@@ -484,6 +445,8 @@ describe("messages and RuntimeEvent", () => {
       safeParseRuntimeEvent({
         type: "message_end",
         ...baseEvent,
+        streamId: "stream-1",
+        messageId: "message-1",
         message: { role: "assistant", content: [{ type: "text", text: "x" }] },
       }).success,
       false,
@@ -492,6 +455,8 @@ describe("messages and RuntimeEvent", () => {
       safeParseRuntimeEvent({
         type: "message_end",
         ...baseEvent,
+        streamId: "stream-1",
+        messageId: "message-1",
         message: {
           role: "assistant",
           content: [{ type: "text", text: "done" }],
@@ -586,6 +551,8 @@ describe("RuntimeSnapshot", () => {
   it("round-trips snapshot with streaming, queues, pending UI, tools", () => {
     const snapshot = roundTrip(RuntimeSnapshotSchema, {
       sessionId: "s-1",
+      cwd: "/tmp/project",
+      projectRoot: "/tmp/project",
       capabilities: { capabilities: ["runtime.prompt", "runtime.abort"], version: 1 },
       state: {
         ...baseSnapshotState,
@@ -613,6 +580,8 @@ describe("RuntimeSnapshot", () => {
       },
       streaming: {
         active: true,
+        streamId: "stream-1",
+        messageId: "message-1",
         phase: "streaming",
         toolCallIds: [],
         partialMessage: {
@@ -630,7 +599,9 @@ describe("RuntimeSnapshot", () => {
     assert.equal(
       safeParseRuntimeSnapshot({
         sessionId: "s",
-        state: baseSnapshotState,
+        cwd: "/tmp/project",
+        projectRoot: "/tmp/project",
+        state: { ...baseSnapshotState, sessionId: "s" },
         capabilities: { capabilities: [], version: 0 },
       }).success,
       true,
@@ -648,7 +619,7 @@ describe("RuntimeSnapshot", () => {
 });
 
 describe("WS envelopes", () => {
-  it("parses client attach with epoch/lastEventId and createRequestId", () => {
+  it("parses client attach with atomic epoch/lastEventId", () => {
     const msg = roundTrip(WsClientMessageSchema, {
       type: "attach",
       id: "req-1",
@@ -656,14 +627,12 @@ describe("WS envelopes", () => {
         sessionId: "s-1",
         epoch: "epoch-2",
         lastEventId: 10,
-        createRequestId: "create-1",
       },
     });
     assert.equal(msg.type, "attach");
     if (msg.type === "attach") {
       assert.equal(msg.payload.epoch, "epoch-2");
       assert.equal(msg.payload.lastEventId, 10);
-      assert.equal(msg.payload.createRequestId, "create-1");
     }
   });
 
@@ -671,12 +640,17 @@ describe("WS envelopes", () => {
     const snap = roundTrip(WsHostMessageSchema, {
       type: "snapshot",
       payload: {
+        sessionId: "s-1",
+        cwd: "/tmp/project",
+        projectRoot: "/tmp/project",
         epoch: "e0",
         lastEventId: 0,
         workerStatus: "ready",
         resumeStatus: "snapshot",
         snapshot: {
           sessionId: "s-1",
+          cwd: "/tmp/project",
+          projectRoot: "/tmp/project",
           state: baseSnapshotState,
           capabilities: { capabilities: [], version: 0 },
         },
@@ -743,6 +717,7 @@ describe("sessiond RPC", () => {
       rpc("runtime.create", {
         createRequestId: "cr-1",
         cwd: "/tmp/project",
+        projectRoot: "/tmp/project",
       }),
       rpc("runtime.activate", { sessionId: "s-1" }),
       rpc("runtime.attach", {
@@ -823,6 +798,7 @@ describe("sessiond RPC", () => {
     const ok = SessionCreateParamsSchema.parse({
       createRequestId: "cr-1",
       cwd: "/tmp/project",
+      projectRoot: "/tmp/project",
     });
     assert.equal(ok.createRequestId, "cr-1");
   });
@@ -859,12 +835,14 @@ describe("sessiond RPC", () => {
         epoch: "e1",
         created: true,
         cwd: "/tmp/p",
+        projectRoot: "/tmp/p",
         workerStatus: "ready",
       },
       "runtime.activate": {
         sessionId: "s-1",
         epoch: "e1",
         cwd: "/tmp/p",
+        projectRoot: "/tmp/p",
         workerStatus: "ready",
       },
       "runtime.attach": {
@@ -872,9 +850,12 @@ describe("sessiond RPC", () => {
         epoch: "e1",
         lastEventId: 0,
         cwd: "/tmp/p",
+        projectRoot: "/tmp/p",
         resumeStatus: "snapshot",
         snapshot: {
           sessionId: "s-1",
+          cwd: "/tmp/p",
+          projectRoot: "/tmp/p",
           state: baseSnapshotState,
           capabilities: { capabilities: [], version: 0 },
         },
@@ -882,16 +863,19 @@ describe("sessiond RPC", () => {
       "runtime.detach": { sessionId: "s-1", detached: true },
       "runtime.getSnapshot": {
         sessionId: "s-1",
+        cwd: "/tmp/p",
+        projectRoot: "/tmp/p",
         capabilities: { capabilities: ["runtime.prompt"], version: 1 },
         state: {
           ...baseSnapshotState,
           isStreaming: true,
           isPromptRunning: true,
         },
+        streaming: { active: true, streamId: "stream-1", messageId: "message-1", phase: "streaming", partialMessage: { role: "assistant", content: [{ type: "text", text: "x" }] } },
       },
       "runtime.listRunning": {
         sessions: [
-          { sessionId: "s-1", workerStatus: "busy", cwd: "/tmp/p" },
+          { sessionId: "s-1", workerStatus: "busy", cwd: "/tmp/p", projectRoot: "/tmp/p" },
         ],
       },
       "runtime.command": { commandId: "c-1", result: { ok: true, type: "abort" } },
@@ -930,6 +914,7 @@ describe("worker IPC", () => {
       payload: {
         sessionId: "s-1",
         cwd: "/tmp/project",
+        projectRoot: "/tmp/project",
         model: { provider: "openai", modelId: "gpt-4.1" },
       },
     });

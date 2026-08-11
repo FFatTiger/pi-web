@@ -114,19 +114,70 @@ export const ContextUsageSchema = z.strictObject({
 
 export type ContextUsage = z.infer<typeof ContextUsageSchema>;
 
+export const MAX_IMAGE_BASE64_LENGTH = 14_000_000;
+export const MAX_IMAGE_URL_LENGTH = 8_192;
+
+export const SupportedImageMediaTypeSchema = z.enum([
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+]);
+export type SupportedImageMediaType = z.infer<
+  typeof SupportedImageMediaTypeSchema
+>;
+
+/** Canonical padded base64; rejects malformed quartets and excessive payloads. */
+export const ImageBase64Schema = z.string().superRefine((value, ctx) => {
+  if (value.length < 4) ctx.addIssue({ code: "too_small", origin: "string", minimum: 4, inclusive: true });
+  if (value.length > MAX_IMAGE_BASE64_LENGTH) {
+    ctx.addIssue({ code: "too_big", origin: "string", maximum: MAX_IMAGE_BASE64_LENGTH, inclusive: true });
+    return;
+  }
+  if (value.length % 4 !== 0) ctx.addIssue({ code: "custom", message: "base64 length must be a multiple of 4" });
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    const valid = (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || (code >= 48 && code <= 57) || code === 43 || code === 47 || code === 61;
+    if (!valid) { ctx.addIssue({ code: "custom", message: "invalid base64 character" }); return; }
+  }
+  const padding = value.endsWith("==") ? 2 : value.endsWith("=") ? 1 : 0;
+  const quartet = value.slice(-4);
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  const canonicalTail =
+    padding === 0 ||
+    (padding === 1 && /[A-Za-z0-9+/]{3}=$/.test(quartet) && (alphabet.indexOf(quartet[2] ?? "") & 3) === 0) ||
+    (padding === 2 && /[A-Za-z0-9+/]{2}==$/.test(quartet) && (alphabet.indexOf(quartet[1] ?? "") & 15) === 0);
+  if (value.slice(0, value.length - padding).includes("=") || !canonicalTail) {
+    ctx.addIssue({ code: "custom", message: "invalid canonical base64 padding" });
+  }
+});
+
+export const HttpImageUrlSchema = z
+  .string()
+  .min(1)
+  .max(MAX_IMAGE_URL_LENGTH)
+  .refine((value) => {
+    try {
+      const url = new URL(value);
+      return (
+        (url.protocol === "https:" || url.protocol === "http:") &&
+        url.hostname.length > 0 &&
+        url.username.length === 0 &&
+        url.password.length === 0
+      );
+    } catch {
+      return false;
+    }
+  }, { message: "image URL must be an absolute http(s) URL without credentials" });
+
 /**
  * Image attachment on prompt/steer/follow_up.
- * Protocol shape uses type:"image" + base64 data + mimeType (image/*).
+ * Protocol shape uses type:"image" + canonical base64 data + supported mimeType.
  */
 export const ImageAttachmentSchema = z.strictObject({
   type: z.literal("image"),
-  data: z.string().min(1),
-  mimeType: z
-    .string()
-    .min(1)
-    .refine((value) => value.startsWith("image/"), {
-      message: "mimeType must start with image/",
-    }),
+  data: ImageBase64Schema,
+  mimeType: SupportedImageMediaTypeSchema,
 });
 
 export type ImageAttachment = z.infer<typeof ImageAttachmentSchema>;

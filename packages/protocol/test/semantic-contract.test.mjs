@@ -31,13 +31,15 @@ const state = {
 };
 const snapshot = {
   sessionId: "s-1",
+  cwd: "/p",
+  projectRoot: "/p",
   state,
   capabilities: { capabilities: ["runtime.prompt", "runtime.abort"], version: 3 },
 };
 
 describe("method-bound RPC response envelopes", () => {
   it("accepts the result only for its matching method", () => {
-    const createResult = { sessionId: "s-1", epoch: "e-1", created: true, cwd: "/p" };
+    const createResult = { sessionId: "s-1", epoch: "e-1", created: true, cwd: "/p", projectRoot: "/p" };
     assert.equal(SessiondRpcResponseSchema.safeParse({ id: "1", ok: true, method: "runtime.create", result: createResult }).success, true);
     assert.equal(SessiondRpcResponseSchema.safeParse({ id: "1", ok: true, method: "runtime.stop", result: createResult }).success, false);
     assert.equal(SessiondRpcResponseSchema.safeParse({ id: "1", ok: true, method: "runtime.attach", result: { sessionId: "s-1", stopped: true } }).success, false);
@@ -132,6 +134,8 @@ describe("ACL0 semantic fixtures remain protocol-local", () => {
       },
       streaming: {
         active: true,
+        streamId: "stream-1",
+        messageId: "message-1",
         phase: "streaming",
         partialMessage: { role: "assistant", content: [{ type: "text", text: "par" }], writtenFiles: [] },
       },
@@ -156,9 +160,9 @@ describe("event vocabulary and cursor ownership", () => {
   const samples = {
     agent_start: {}, agent_end: {}, agent_settled: {}, prompt_done: {},
     prompt_error: { errorMessage: "x" },
-    message_start: { message: { role: "assistant", content: [] } },
-    message_update: { message: { role: "assistant", content: [{ type: "text", text: "x" }] } },
-    message_end: { message: { role: "assistant", content: [], model: "m", provider: "p" } },
+    message_start: { streamId: "stream-1", messageId: "message-1", message: { role: "assistant", content: [{ type: "text", text: "x" }] } },
+    message_update: { streamId: "stream-1", messageId: "message-1", delta: { role: "assistant", delta: { type: "text", text: "x" } } },
+    message_end: { streamId: "stream-1", messageId: "message-1", message: { role: "assistant", content: [], model: "m", provider: "p" } },
     tool_execution_start: { toolCallId: "t", toolName: "bash" },
     tool_execution_update: { toolCallId: "t" },
     tool_execution_end: { toolCallId: "t", writtenFiles: ["/p/a"] },
@@ -205,9 +209,9 @@ describe("strict response and UI correlation", () => {
 
   it("requires extension response correlation ids and exclusive variants", async () => {
     const { RuntimeCommandSchema } = await import("../dist/index.js");
-    assert.equal(RuntimeCommandSchema.safeParse({ type: "extension_ui_response", commandId: "c", id: "ui", confirmed: false }).success, true);
-    assert.equal(RuntimeCommandSchema.safeParse({ type: "extension_ui_input", commandId: "c", id: "ui", data: "x" }).success, true);
-    assert.equal(RuntimeCommandSchema.safeParse({ type: "extension_ui_response", commandId: "c", confirmed: true }).success, false);
-    assert.equal(RuntimeCommandSchema.safeParse({ type: "extension_ui_response", commandId: "c", id: "ui", value: "x", confirmed: true }).success, false);
+    assert.equal(RuntimeCommandSchema.safeParse({ type: "extension_ui_response", commandId: "c", id: "ui", method: "confirm", responseKind: "confirmed", confirmed: false }).success, true);
+    assert.equal(RuntimeCommandSchema.safeParse({ type: "extension_ui_input", commandId: "c", id: "ui", method: "input", data: "x" }).success, true);
+    assert.equal(RuntimeCommandSchema.safeParse({ type: "extension_ui_response", commandId: "c", method: "confirm", responseKind: "confirmed", confirmed: true }).success, false);
+    assert.equal(RuntimeCommandSchema.safeParse({ type: "extension_ui_response", commandId: "c", id: "ui", method: "confirm", responseKind: "value", value: "x" }).success, false);
   });
 });

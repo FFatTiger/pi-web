@@ -5,6 +5,7 @@ import type {
   SessiondRpcResponse,
 } from "./sessiond.js";
 import type { RuntimeCommandOutcome, RuntimeInterruptResult } from "./results.js";
+import type { WsClientMessage, WsHostMessage } from "./ws.js";
 
 /** Compile-time assertions for method/payload/result discrimination. */
 type Equal<A, B> =
@@ -17,6 +18,10 @@ type AttachRequest = Extract<SessiondRpcRequest, { method: "runtime.attach" }>;
 type CreateSuccess = Extract<SessiondRpcResponse, { ok: true; method: "runtime.create" }>;
 type CommandSuccess = Extract<SessiondRpcResponse, { ok: true; method: "runtime.command" }>;
 type AttachFailure = Extract<SessiondRpcResponse, { ok: false; method: "runtime.attach" }>;
+type WsCreate = Extract<WsClientMessage, { type: "create" }>;
+type WsAttach = Extract<WsClientMessage, { type: "attach" }>;
+type WsInterrupt = Extract<WsClientMessage, { type: "interrupt" }>;
+type WsInterruptResult = Extract<WsHostMessage, { type: "interrupt_result" }>;
 
 export type ProtocolTypeAssertions =
   | Assert<Equal<CreateRequest["params"], SessiondMethodParams["runtime.create"]>>
@@ -25,6 +30,10 @@ export type ProtocolTypeAssertions =
   | Assert<Equal<CommandSuccess["result"], SessiondMethodResult["runtime.command"]>>
   | Assert<Equal<AttachFailure["method"], "runtime.attach">>
   | Assert<Equal<Extract<RuntimeCommandOutcome, { ok: true; type: "fork" }>["forkedSessionId"], string>>
-  | Assert<Equal<Extract<RuntimeInterruptResult, { ok: false }>["error"]["retryable"], boolean>>;
+  | Assert<Equal<Extract<RuntimeInterruptResult, { ok: false }>["error"]["retryable"], boolean>>
+  | Assert<Equal<WsCreate["payload"]["createRequestId"], string>>
+  | Assert<Equal<Extract<WsAttach["payload"], { epoch: string }>["lastEventId"], number>>
+  | Assert<Equal<WsInterrupt["payload"]["commandId"], string>>
+  | Assert<Equal<WsInterruptResult["payload"]["interruptType"], RuntimeInterruptResult["type"]>>;
 
 export const protocolTypeAssertions: ProtocolTypeAssertions = true;

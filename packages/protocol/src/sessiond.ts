@@ -4,10 +4,8 @@ import {
   EmptyObjectSchema,
   EpochSchema,
   LastEventIdSchema,
-  ModelSelectorSchema,
   NonEmptyStringSchema,
   ProtocolErrorSchema,
-  ThinkingLevelSchema,
   WorkerStatusSchema,
 } from "./common.js";
 import {
@@ -17,7 +15,11 @@ import {
 } from "./domain.js";
 import { CorrelatedRuntimeCommandResultSchema, RuntimeInterruptResultSchema, RuntimeInterruptSchema } from "./results.js";
 import { RuntimeEventSchema } from "./events.js";
-import { ResumeStatusSchema } from "./handshake.js";
+import {
+  ResumeStatusSchema,
+  RuntimeAttachParamsSchema,
+  RuntimeCreateParamsSchema,
+} from "./handshake.js";
 import { RuntimeSnapshotSchema } from "./snapshot.js";
 import { ProtocolVersionSchema } from "./version.js";
 
@@ -38,19 +40,7 @@ export const SystemHelloParamsSchema = z.strictObject({
 });
 export type SystemHelloParams = z.infer<typeof SystemHelloParamsSchema>;
 
-export const RuntimeCreateParamsSchema = z.strictObject({
-  /** Idempotency key — repeated creates with same id return the same session. */
-  createRequestId: NonEmptyStringSchema,
-  cwd: NonEmptyStringSchema,
-  sessionId: NonEmptyStringSchema.optional(),
-  sessionFile: z.string().optional(),
-  model: ModelSelectorSchema.optional(),
-  thinkingLevel: ThinkingLevelSchema.optional(),
-  thinkingLevelPinned: z.boolean().optional(),
-  toolNames: z.array(NonEmptyStringSchema).optional(),
-  name: z.string().optional(),
-});
-export type RuntimeCreateParams = z.infer<typeof RuntimeCreateParamsSchema>;
+export type SessiondRuntimeCreateParams = z.infer<typeof RuntimeCreateParamsSchema>;
 
 export const RuntimeActivateParamsSchema = z.strictObject({
   sessionId: NonEmptyStringSchema,
@@ -58,11 +48,7 @@ export const RuntimeActivateParamsSchema = z.strictObject({
 });
 export type RuntimeActivateParams = z.infer<typeof RuntimeActivateParamsSchema>;
 
-export const SessiondRuntimeAttachParamsSchema = z.strictObject({
-  sessionId: NonEmptyStringSchema,
-  epoch: EpochSchema.optional(),
-  lastEventId: LastEventIdSchema.optional(),
-});
+export const SessiondRuntimeAttachParamsSchema = RuntimeAttachParamsSchema;
 export type SessiondRuntimeAttachParams = z.infer<
   typeof SessiondRuntimeAttachParamsSchema
 >;
@@ -172,8 +158,14 @@ export const RuntimeCreateResultSchema = z.strictObject({
   epoch: EpochSchema,
   created: z.boolean(),
   cwd: NonEmptyStringSchema,
+  projectRoot: NonEmptyStringSchema,
   workerStatus: WorkerStatusSchema.optional(),
   snapshot: RuntimeSnapshotSchema.optional(),
+}).superRefine((value, ctx) => {
+  if (value.snapshot === undefined) return;
+  if (value.sessionId !== value.snapshot.sessionId) ctx.addIssue({ code: "custom", path: ["snapshot", "sessionId"], message: "snapshot sessionId mismatch" });
+  if (value.cwd !== value.snapshot.cwd) ctx.addIssue({ code: "custom", path: ["snapshot", "cwd"], message: "snapshot cwd mismatch" });
+  if (value.projectRoot !== value.snapshot.projectRoot) ctx.addIssue({ code: "custom", path: ["snapshot", "projectRoot"], message: "snapshot projectRoot mismatch" });
 });
 export type RuntimeCreateResult = z.infer<typeof RuntimeCreateResultSchema>;
 
@@ -181,8 +173,14 @@ export const RuntimeActivateResultSchema = z.strictObject({
   sessionId: NonEmptyStringSchema,
   epoch: EpochSchema,
   cwd: NonEmptyStringSchema,
+  projectRoot: NonEmptyStringSchema,
   workerStatus: WorkerStatusSchema,
   snapshot: RuntimeSnapshotSchema.optional(),
+}).superRefine((value, ctx) => {
+  if (value.snapshot === undefined) return;
+  if (value.sessionId !== value.snapshot.sessionId) ctx.addIssue({ code: "custom", path: ["snapshot", "sessionId"], message: "snapshot sessionId mismatch" });
+  if (value.cwd !== value.snapshot.cwd) ctx.addIssue({ code: "custom", path: ["snapshot", "cwd"], message: "snapshot cwd mismatch" });
+  if (value.projectRoot !== value.snapshot.projectRoot) ctx.addIssue({ code: "custom", path: ["snapshot", "projectRoot"], message: "snapshot projectRoot mismatch" });
 });
 export type RuntimeActivateResult = z.infer<typeof RuntimeActivateResultSchema>;
 
@@ -191,8 +189,13 @@ export const SessiondRuntimeAttachResultSchema = z.strictObject({
   epoch: EpochSchema,
   lastEventId: LastEventIdSchema,
   cwd: NonEmptyStringSchema,
+  projectRoot: NonEmptyStringSchema,
   resumeStatus: ResumeStatusSchema,
-  snapshot: RuntimeSnapshotSchema.optional(),
+  snapshot: RuntimeSnapshotSchema,
+}).superRefine((value, ctx) => {
+  if (value.sessionId !== value.snapshot.sessionId) ctx.addIssue({ code: "custom", path: ["snapshot", "sessionId"], message: "snapshot sessionId mismatch" });
+  if (value.cwd !== value.snapshot.cwd) ctx.addIssue({ code: "custom", path: ["snapshot", "cwd"], message: "snapshot cwd mismatch" });
+  if (value.projectRoot !== value.snapshot.projectRoot) ctx.addIssue({ code: "custom", path: ["snapshot", "projectRoot"], message: "snapshot projectRoot mismatch" });
 });
 export type SessiondRuntimeAttachResult = z.infer<
   typeof SessiondRuntimeAttachResultSchema
@@ -212,6 +215,7 @@ export type RuntimeGetSnapshotResult = z.infer<
 export const RuntimeRunningItemSchema = z.strictObject({
   sessionId: NonEmptyStringSchema,
   cwd: NonEmptyStringSchema,
+  projectRoot: NonEmptyStringSchema,
   workerStatus: WorkerStatusSchema,
   epoch: EpochSchema.optional(),
   name: z.string().optional(),
@@ -421,7 +425,7 @@ export type SessiondRpcMethod = (typeof SESSIOND_RPC_METHODS)[number];
 export type SessiondMethodParams = {
   "system.ping": SystemPingParams;
   "system.hello": SystemHelloParams;
-  "runtime.create": RuntimeCreateParams;
+  "runtime.create": SessiondRuntimeCreateParams;
   "runtime.activate": RuntimeActivateParams;
   "runtime.attach": SessiondRuntimeAttachParams;
   "runtime.detach": RuntimeDetachParams;
@@ -546,9 +550,15 @@ export const SessiondPushSnapshotSchema = z.strictObject({
   sessionId: NonEmptyStringSchema,
   epoch: EpochSchema,
   lastEventId: LastEventIdSchema,
+  cwd: NonEmptyStringSchema,
+  projectRoot: NonEmptyStringSchema,
   workerStatus: WorkerStatusSchema,
   snapshot: RuntimeSnapshotSchema,
   resumeStatus: ResumeStatusSchema.optional(),
+}).superRefine((value, ctx) => {
+  if (value.sessionId !== value.snapshot.sessionId) ctx.addIssue({ code: "custom", path: ["snapshot", "sessionId"], message: "snapshot sessionId mismatch" });
+  if (value.cwd !== value.snapshot.cwd) ctx.addIssue({ code: "custom", path: ["snapshot", "cwd"], message: "snapshot cwd mismatch" });
+  if (value.projectRoot !== value.snapshot.projectRoot) ctx.addIssue({ code: "custom", path: ["snapshot", "projectRoot"], message: "snapshot projectRoot mismatch" });
 });
 
 export const SessiondPushSchema = z.discriminatedUnion("type", [

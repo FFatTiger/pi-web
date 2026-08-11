@@ -4,7 +4,6 @@ import {
   EventIdSchema,
   ExtensionStatusItemSchema,
   ExtensionWidgetItemSchema,
-  ExtensionWidgetPlacementSchema,
   NonEmptyStringSchema,
   ProtocolErrorSchema,
 } from "./common.js";
@@ -13,7 +12,12 @@ import {
   RuntimeCapabilitySetSchema,
   RuntimeCloseReasonSchema,
 } from "./domain.js";
-import { AgentMessageSchema, StreamingAgentMessageSchema } from "./messages.js";
+import { ExtensionUiRequestSchema } from "./extension.js";
+import {
+  AgentMessageSchema,
+  StreamingAgentMessageSchema,
+  StreamingMessageDeltaSchema,
+} from "./messages.js";
 
 /**
  * Runtime event product data is separate from the sessiond-owned wire cursor.
@@ -38,18 +42,44 @@ export const PromptErrorEventDataSchema = z.strictObject({
 export const MessageStartEventDataSchema = z.strictObject({
   ...eventDataBase,
   type: z.literal("message_start"),
+  streamId: NonEmptyStringSchema,
+  messageId: NonEmptyStringSchema,
   message: StreamingAgentMessageSchema,
 });
 export const MessageUpdateEventDataSchema = z.strictObject({
   ...eventDataBase,
   type: z.literal("message_update"),
-  message: StreamingAgentMessageSchema,
+  streamId: NonEmptyStringSchema,
+  messageId: NonEmptyStringSchema,
+  delta: StreamingMessageDeltaSchema,
 });
 export const MessageEndEventDataSchema = z.strictObject({
   ...eventDataBase,
   type: z.literal("message_end"),
+  streamId: NonEmptyStringSchema,
+  messageId: NonEmptyStringSchema,
   message: AgentMessageSchema,
 });
+export const StreamingMessageLifecycleSchema = z
+  .array(z.union([MessageStartEventDataSchema, MessageUpdateEventDataSchema, MessageEndEventDataSchema]))
+  .min(2)
+  .superRefine((events, ctx) => {
+    const first = events[0];
+    if (first?.type !== "message_start") {
+      ctx.addIssue({ code: "custom", path: [0], message: "stream lifecycle must start with message_start" });
+      return;
+    }
+    for (let index = 1; index < events.length; index += 1) {
+      const event = events[index];
+      if (event?.streamId !== first.streamId || event.messageId !== first.messageId) {
+        ctx.addIssue({ code: "custom", path: [index], message: "stream/message id mismatch" });
+      }
+    }
+    if (events.at(-1)?.type !== "message_end") {
+      ctx.addIssue({ code: "custom", path: [events.length - 1], message: "stream lifecycle must end with message_end" });
+    }
+  });
+
 export const ToolExecutionStartEventDataSchema = z.strictObject({
   ...eventDataBase,
   type: z.literal("tool_execution_start"),
@@ -132,50 +162,8 @@ export const ExtensionErrorEventDataSchema = z.strictObject({
   details: z.unknown().optional(),
 });
 
-export const ExtensionUiRequestMethodSchema = z.enum([
-  "select", "confirm", "input", "editor", "notify", "setStatus",
-  "setWidget", "setTitle", "set_editor_text", "custom",
-]);
-export type ExtensionUiRequestMethod = z.infer<typeof ExtensionUiRequestMethodSchema>;
-
-export const ExtensionUiRequestSchema = z
-  .strictObject({
-    id: NonEmptyStringSchema,
-    method: ExtensionUiRequestMethodSchema,
-    timeout: z.number().nonnegative().optional(),
-    expiresAt: z.number().optional(),
-    title: z.string().optional(),
-    message: z.string().optional(),
-    options: z.array(z.string()).optional(),
-    placeholder: z.string().optional(),
-    prefill: z.string().optional(),
-    notifyType: z.enum(["info", "warning", "error"]).optional(),
-    statusKey: NonEmptyStringSchema.optional(),
-    statusText: z.string().optional(),
-    widgetKey: NonEmptyStringSchema.optional(),
-    widgetLines: z.array(z.string()).optional(),
-    widgetPlacement: ExtensionWidgetPlacementSchema.optional(),
-    text: z.string().optional(),
-    lines: z.array(z.string()).optional(),
-    closed: z.boolean().optional(),
-  })
-  .superRefine((value, ctx) => {
-    const requireField = (field: keyof typeof value) => {
-      if (value[field] === undefined) ctx.addIssue({ code: "custom", path: [field], message: `${field} is required for ${value.method}` });
-    };
-    switch (value.method) {
-      case "select": requireField("title"); requireField("options"); break;
-      case "confirm": requireField("title"); requireField("message"); break;
-      case "input":
-      case "editor":
-      case "setTitle": requireField("title"); break;
-      case "notify": requireField("message"); requireField("notifyType"); break;
-      case "setStatus": requireField("statusKey"); break;
-      case "setWidget": requireField("widgetKey"); break;
-      case "set_editor_text": requireField("text"); break;
-      case "custom": requireField("lines"); break;
-    }
-  });
+export { ExtensionUiRequestMethodSchema, ExtensionUiRequestSchema } from "./extension.js";
+export type { ExtensionUiRequestMethod } from "./extension.js";
 
 export const ExtensionUiRequestEventDataSchema = z.strictObject({
   ...eventDataBase,

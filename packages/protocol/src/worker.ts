@@ -29,6 +29,7 @@ export const WorkerInitMessageSchema = z.strictObject({
   payload: z.strictObject({
     sessionId: NonEmptyStringSchema,
     cwd: NonEmptyStringSchema,
+    projectRoot: NonEmptyStringSchema,
     sessionFile: z.string().optional(),
     model: ModelSelectorSchema.optional(),
     thinkingLevel: ThinkingLevelSchema.optional(),
