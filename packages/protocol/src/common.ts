@@ -39,6 +39,8 @@ export const EpochSchema = NonEmptyStringSchema;
 export const ProtocolErrorCodeSchema = z.enum([
   "protocol_mismatch",
   "invalid_request",
+  "invalid_command",
+  "invalid_input",
   "unauthorized",
   "forbidden",
   "not_found",
@@ -50,20 +52,28 @@ export const ProtocolErrorCodeSchema = z.enum([
   "session_busy",
   "command_rejected",
   "command_duplicate",
+  "interrupted",
   "unsupported_capability",
   "timeout",
+  "external",
+  "unavailable",
   "internal",
 ]);
 
 export type ProtocolErrorCode = z.infer<typeof ProtocolErrorCodeSchema>;
 
-export const ProtocolErrorSchema = z
-  .strictObject({
-    code: ProtocolErrorCodeSchema,
-    message: z.string(),
-    details: z.unknown().optional(),
-    retryable: z.boolean().optional(),
-  });
+export const ProtocolErrorSchema = z.strictObject({
+  code: ProtocolErrorCodeSchema,
+  message: z.string(),
+  retryable: z.boolean(),
+  cause: z
+    .strictObject({
+      kind: z.enum(["auth", "network", "file", "model", "tool", "backend", "unknown"]),
+      detail: z.string().optional(),
+    })
+    .optional(),
+  details: z.unknown().optional(),
+});
 
 export type ProtocolError = z.infer<typeof ProtocolErrorSchema>;
 
@@ -161,13 +171,6 @@ export const ExtensionWidgetItemSchema = z.strictObject({
 });
 
 export type ExtensionWidgetItem = z.infer<typeof ExtensionWidgetItemSchema>;
-
-export const QueuedMessagesSchema = z.strictObject({
-  steering: z.array(z.string()),
-  followUp: z.array(z.string()),
-});
-
-export type QueuedMessages = z.infer<typeof QueuedMessagesSchema>;
 
 export const ToolInfoSchema = z.strictObject({
   name: NonEmptyStringSchema,

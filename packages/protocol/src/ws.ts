@@ -1,9 +1,13 @@
 import { z } from "zod";
 import { RuntimeCommandSchema } from "./commands.js";
 import {
+  EpochSchema,
+  LastEventIdSchema,
   NonEmptyStringSchema,
   ProtocolErrorSchema,
+  WorkerStatusSchema,
 } from "./common.js";
+import { CorrelatedRuntimeCommandResultSchema } from "./results.js";
 import { RuntimeEventSchema } from "./events.js";
 import {
   ProtocolHandshakeRejectSchema,
@@ -63,19 +67,28 @@ export const WsCommandMessageSchema = z.strictObject({
 export const WsResponseMessageSchema = z.strictObject({
   type: z.literal("response"),
   id: NonEmptyStringSchema,
-  payload: z.strictObject({
-    sessionId: NonEmptyStringSchema.optional(),
-    commandId: NonEmptyStringSchema.optional(),
-    ok: z.boolean(),
-    data: z.unknown().optional(),
-    error: ProtocolErrorSchema.optional(),
-  }),
+  payload: z.discriminatedUnion("ok", [
+    z.strictObject({
+      sessionId: NonEmptyStringSchema.optional(),
+      ok: z.literal(true),
+      result: CorrelatedRuntimeCommandResultSchema,
+    }),
+    z.strictObject({
+      sessionId: NonEmptyStringSchema.optional(),
+      ok: z.literal(false),
+      error: ProtocolErrorSchema,
+    }),
+  ]),
 });
 
 export const WsSnapshotMessageSchema = z.strictObject({
   type: z.literal("snapshot"),
   id: NonEmptyStringSchema.optional(),
-  payload: RuntimeSnapshotSchema.extend({
+  payload: z.strictObject({
+    epoch: EpochSchema,
+    lastEventId: LastEventIdSchema,
+    workerStatus: WorkerStatusSchema,
+    snapshot: RuntimeSnapshotSchema,
     resumeStatus: ResumeStatusSchema.optional(),
   }),
 });

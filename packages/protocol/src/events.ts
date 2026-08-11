@@ -9,189 +9,140 @@ import {
   ProtocolErrorSchema,
 } from "./common.js";
 import {
-  AgentMessageSchema,
-  StreamingAgentMessageSchema,
-} from "./messages.js";
+  QueuedMessagesSchema,
+  RuntimeCapabilitySetSchema,
+  RuntimeCloseReasonSchema,
+} from "./domain.js";
+import { AgentMessageSchema, StreamingAgentMessageSchema } from "./messages.js";
 
 /**
- * Envelope fields shared by every normalized runtime event.
- * `eventId` is a positive safe integer, monotonic per (sessionId, epoch).
- * `epoch` is a non-blank string token.
+ * Runtime event product data is separate from the sessiond-owned wire cursor.
+ * Worker IPC carries RuntimeEventData; browser/sessiond streams carry RuntimeEvent.
  */
-const eventBase = {
-  eventId: EventIdSchema,
+const eventDataBase = {
   sessionId: NonEmptyStringSchema,
-  epoch: EpochSchema,
   ts: z.number().int().nonnegative().optional(),
 };
+const eventCursor = { eventId: EventIdSchema, epoch: EpochSchema };
 
-export const AgentStartEventSchema = z.strictObject({
-  ...eventBase,
-  type: z.literal("agent_start"),
+export const AgentStartEventDataSchema = z.strictObject({ ...eventDataBase, type: z.literal("agent_start") });
+export const AgentEndEventDataSchema = z.strictObject({ ...eventDataBase, type: z.literal("agent_end") });
+export const AgentSettledEventDataSchema = z.strictObject({ ...eventDataBase, type: z.literal("agent_settled") });
+export const PromptDoneEventDataSchema = z.strictObject({ ...eventDataBase, type: z.literal("prompt_done") });
+export const PromptErrorEventDataSchema = z.strictObject({
+  ...eventDataBase,
+  type: z.literal("prompt_error"),
+  errorMessage: z.string(),
+  error: ProtocolErrorSchema.optional(),
 });
-
-export const AgentEndEventSchema = z.strictObject({
-  ...eventBase,
-  type: z.literal("agent_end"),
-});
-
-export const AgentSettledEventSchema = z.strictObject({
-  ...eventBase,
-  type: z.literal("agent_settled"),
-});
-
-export const MessageStartEventSchema = z.strictObject({
-  ...eventBase,
+export const MessageStartEventDataSchema = z.strictObject({
+  ...eventDataBase,
   type: z.literal("message_start"),
   message: StreamingAgentMessageSchema,
 });
-
-export const MessageUpdateEventSchema = z.strictObject({
-  ...eventBase,
+export const MessageUpdateEventDataSchema = z.strictObject({
+  ...eventDataBase,
   type: z.literal("message_update"),
   message: StreamingAgentMessageSchema,
 });
-
-/** message_end carries a complete AgentMessage only. */
-export const MessageEndEventSchema = z.strictObject({
-  ...eventBase,
+export const MessageEndEventDataSchema = z.strictObject({
+  ...eventDataBase,
   type: z.literal("message_end"),
   message: AgentMessageSchema,
 });
-
-export const ToolExecutionStartEventSchema = z.strictObject({
-  ...eventBase,
+export const ToolExecutionStartEventDataSchema = z.strictObject({
+  ...eventDataBase,
   type: z.literal("tool_execution_start"),
   toolCallId: NonEmptyStringSchema,
   toolName: NonEmptyStringSchema,
   args: z.unknown().optional(),
 });
-
-export const ToolExecutionUpdateEventSchema = z.strictObject({
-  ...eventBase,
+export const ToolExecutionUpdateEventDataSchema = z.strictObject({
+  ...eventDataBase,
   type: z.literal("tool_execution_update"),
   toolCallId: NonEmptyStringSchema,
   toolName: z.string().optional(),
   partialResult: z.unknown().optional(),
 });
-
-export const ToolExecutionEndEventSchema = z.strictObject({
-  ...eventBase,
+export const ToolExecutionEndEventDataSchema = z.strictObject({
+  ...eventDataBase,
   type: z.literal("tool_execution_end"),
   toolCallId: NonEmptyStringSchema,
   toolName: z.string().optional(),
   isError: z.boolean().optional(),
   result: z.unknown().optional(),
+  writtenFiles: z.array(z.string()).optional(),
 });
-
-export const TurnStartEventSchema = z.strictObject({
-  ...eventBase,
-  type: z.literal("turn_start"),
-});
-
-export const TurnEndEventSchema = z.strictObject({
-  ...eventBase,
-  type: z.literal("turn_end"),
-});
-
-export const PromptDoneEventSchema = z.strictObject({
-  ...eventBase,
-  type: z.literal("prompt_done"),
-});
-
-export const PromptErrorEventSchema = z.strictObject({
-  ...eventBase,
-  type: z.literal("prompt_error"),
-  errorMessage: z.string(),
-});
-
-export const QueueUpdateEventSchema = z.strictObject({
-  ...eventBase,
+export const QueueUpdateEventDataSchema = z.strictObject({
+  ...eventDataBase,
   type: z.literal("queue_update"),
-  steering: z.array(z.string()).optional(),
-  followUp: z.array(z.string()).optional(),
+  steering: QueuedMessagesSchema.shape.steering.optional(),
+  followUp: QueuedMessagesSchema.shape.followUp.optional(),
 });
-
-export const AutoRetryStartEventSchema = z.strictObject({
-  ...eventBase,
-  type: z.literal("auto_retry_start"),
+export const RetryStartEventDataSchema = z.strictObject({
+  ...eventDataBase,
+  type: z.literal("retry_start"),
   attempt: z.number().int().nonnegative(),
   maxAttempts: z.number().int().positive(),
   errorMessage: z.string().optional(),
 });
-
-export const AutoRetryEndEventSchema = z.strictObject({
-  ...eventBase,
-  type: z.literal("auto_retry_end"),
+export const RetryEndEventDataSchema = z.strictObject({
+  ...eventDataBase,
+  type: z.literal("retry_end"),
   success: z.boolean().optional(),
 });
-
-export const CompactionStartEventSchema = z.strictObject({
-  ...eventBase,
+export const AutoRetryStartEventDataSchema = RetryStartEventDataSchema.extend({ type: z.literal("auto_retry_start") });
+export const AutoRetryEndEventDataSchema = RetryEndEventDataSchema.extend({ type: z.literal("auto_retry_end") });
+export const CompactionStartEventDataSchema = z.strictObject({
+  ...eventDataBase,
   type: z.literal("compaction_start"),
+  reason: z.string().optional(),
 });
-
-export const CompactionEndEventSchema = z.strictObject({
-  ...eventBase,
+export const CompactionEndEventDataSchema = z.strictObject({
+  ...eventDataBase,
   type: z.literal("compaction_end"),
   aborted: z.boolean().optional(),
   errorMessage: z.string().optional(),
   reason: z.string().optional(),
   result: z.unknown().optional(),
 });
-
-export const AutoCompactionStartEventSchema = z.strictObject({
-  ...eventBase,
-  type: z.literal("auto_compaction_start"),
-});
-
-export const AutoCompactionEndEventSchema = z.strictObject({
-  ...eventBase,
+export const AutoCompactionStartEventDataSchema = z.strictObject({ ...eventDataBase, type: z.literal("auto_compaction_start") });
+export const AutoCompactionEndEventDataSchema = z.strictObject({
+  ...eventDataBase,
   type: z.literal("auto_compaction_end"),
   aborted: z.boolean().optional(),
   errorMessage: z.string().optional(),
-  reason: z.string().optional(),
   result: z.unknown().optional(),
 });
-
-export const ExtensionErrorEventSchema = z.strictObject({
-  ...eventBase,
+export const BashUpdateEventDataSchema = z.strictObject({
+  ...eventDataBase,
+  type: z.literal("bash_update"),
+  command: z.string().optional(),
+  output: z.string().optional(),
+  exitCode: z.number().int().optional(),
+  cancelled: z.boolean().optional(),
+  truncated: z.boolean().optional(),
+  fullOutputPath: z.string().optional(),
+  excludeFromContext: z.boolean().optional(),
+});
+export const ExtensionErrorEventDataSchema = z.strictObject({
+  ...eventDataBase,
   type: z.literal("extension_error"),
   error: z.string(),
   details: z.unknown().optional(),
 });
 
-/**
- * extension_ui_request is one RuntimeEvent type; method is nested discrimination.
- * Implemented as a single strict-ish object with method-specific required fields
- * validated via superRefine so the top-level RuntimeEvent can stay a
- * discriminatedUnion("type", ...).
- */
-const extensionUiMethods = [
-  "select",
-  "confirm",
-  "input",
-  "editor",
-  "notify",
-  "setStatus",
-  "setWidget",
-  "setTitle",
-  "set_editor_text",
-  "custom",
-] as const;
+export const ExtensionUiRequestMethodSchema = z.enum([
+  "select", "confirm", "input", "editor", "notify", "setStatus",
+  "setWidget", "setTitle", "set_editor_text", "custom",
+]);
+export type ExtensionUiRequestMethod = z.infer<typeof ExtensionUiRequestMethodSchema>;
 
-export const ExtensionUiRequestMethodSchema = z.enum(extensionUiMethods);
-export type ExtensionUiRequestMethod = z.infer<
-  typeof ExtensionUiRequestMethodSchema
->;
-
-export const ExtensionUiRequestEventSchema = z
-  .object({
-    ...eventBase,
-    type: z.literal("extension_ui_request"),
+export const ExtensionUiRequestSchema = z
+  .strictObject({
     id: NonEmptyStringSchema,
     method: ExtensionUiRequestMethodSchema,
-    timeout: z.number().optional(),
+    timeout: z.number().nonnegative().optional(),
     expiresAt: z.number().optional(),
     title: z.string().optional(),
     message: z.string().optional(),
@@ -208,120 +159,149 @@ export const ExtensionUiRequestEventSchema = z
     lines: z.array(z.string()).optional(),
     closed: z.boolean().optional(),
   })
-  .strict()
   .superRefine((value, ctx) => {
-    const require = (field: keyof typeof value, label = String(field)) => {
-      if (value[field] === undefined) {
-        ctx.addIssue({
-          code: "custom",
-          message: `${label} is required for method ${value.method}`,
-          path: [field],
-        });
-      }
+    const requireField = (field: keyof typeof value) => {
+      if (value[field] === undefined) ctx.addIssue({ code: "custom", path: [field], message: `${field} is required for ${value.method}` });
     };
     switch (value.method) {
-      case "select":
-        require("title");
-        require("options");
-        break;
-      case "confirm":
-        require("title");
-        require("message");
-        break;
+      case "select": requireField("title"); requireField("options"); break;
+      case "confirm": requireField("title"); requireField("message"); break;
       case "input":
-        require("title");
-        break;
       case "editor":
-        require("title");
-        break;
-      case "notify":
-        require("message");
-        break;
-      case "setStatus":
-        require("statusKey");
-        break;
-      case "setWidget":
-        require("widgetKey");
-        break;
-      case "setTitle":
-        require("title");
-        break;
-      case "set_editor_text":
-        require("text");
-        break;
-      case "custom":
-        require("lines");
-        break;
+      case "setTitle": requireField("title"); break;
+      case "notify": requireField("message"); requireField("notifyType"); break;
+      case "setStatus": requireField("statusKey"); break;
+      case "setWidget": requireField("widgetKey"); break;
+      case "set_editor_text": requireField("text"); break;
+      case "custom": requireField("lines"); break;
     }
   });
 
-export type ExtensionUiRequestEvent = z.infer<
-  typeof ExtensionUiRequestEventSchema
->;
+export const ExtensionUiRequestEventDataSchema = z.strictObject({
+  ...eventDataBase,
+  type: z.literal("extension_ui_request"),
+  request: ExtensionUiRequestSchema,
+});
+export type ExtensionUiRequestEventData = z.infer<typeof ExtensionUiRequestEventDataSchema>;
 
-export const ExtensionStatusesEventSchema = z.strictObject({
-  ...eventBase,
+export const ExtensionStatusesEventDataSchema = z.strictObject({
+  ...eventDataBase,
   type: z.literal("extension_statuses"),
   statuses: z.array(ExtensionStatusItemSchema),
 });
-
-export const ExtensionWidgetsEventSchema = z.strictObject({
-  ...eventBase,
+export const ExtensionWidgetsEventDataSchema = z.strictObject({
+  ...eventDataBase,
   type: z.literal("extension_widgets"),
   widgets: z.array(ExtensionWidgetItemSchema),
 });
-
-export const SessionTitleEventSchema = z.strictObject({
-  ...eventBase,
-  type: z.literal("session_title"),
-  name: z.string(),
+export const SessionTitleEventDataSchema = z.strictObject({ ...eventDataBase, type: z.literal("session_title"), name: z.string() });
+export const RuntimeStateChangedEventDataSchema = z.strictObject({ ...eventDataBase, type: z.literal("runtime_state_changed") });
+export const RuntimeCapabilitiesChangedEventDataSchema = z.strictObject({
+  ...eventDataBase,
+  type: z.literal("runtime_capabilities_changed"),
+  capabilities: RuntimeCapabilitySetSchema,
 });
-
-export const RuntimeErrorEventSchema = z.strictObject({
-  ...eventBase,
+export const RuntimeClosedEventDataSchema = z.strictObject({
+  ...eventDataBase,
+  type: z.literal("runtime_closed"),
+  reason: RuntimeCloseReasonSchema,
+});
+export const SessionChangedEventDataSchema = z.strictObject({
+  ...eventDataBase,
+  type: z.literal("session_changed"),
+  cwd: NonEmptyStringSchema,
+  sessionFile: z.string().optional(),
+  leafId: NonEmptyStringSchema.optional(),
+});
+export const WorkerCrashedEventDataSchema = z.strictObject({
+  ...eventDataBase,
+  type: z.literal("worker_crashed"),
+  error: ProtocolErrorSchema.optional(),
+});
+export const RunningSessionsChangedEventDataSchema = z.strictObject({
+  ...eventDataBase,
+  type: z.literal("running_sessions_changed"),
+  sessionIds: z.array(NonEmptyStringSchema),
+});
+export const RuntimeUnavailableEventDataSchema = z.strictObject({
+  ...eventDataBase,
+  type: z.literal("runtime_unavailable"),
+  error: ProtocolErrorSchema,
+});
+export const RuntimeErrorEventDataSchema = z.strictObject({
+  ...eventDataBase,
   type: z.literal("runtime_error"),
   error: ProtocolErrorSchema,
 });
 
-/**
- * Normalized RuntimeEvent union (top-level type discrimination).
- * SDK Event types must not leak; adapters project SDK events into these shapes.
- */
-export const RuntimeEventSchema = z.discriminatedUnion("type", [
-  AgentStartEventSchema,
-  AgentEndEventSchema,
-  AgentSettledEventSchema,
-  MessageStartEventSchema,
-  MessageUpdateEventSchema,
-  MessageEndEventSchema,
-  ToolExecutionStartEventSchema,
-  ToolExecutionUpdateEventSchema,
-  ToolExecutionEndEventSchema,
-  TurnStartEventSchema,
-  TurnEndEventSchema,
-  PromptDoneEventSchema,
-  PromptErrorEventSchema,
-  QueueUpdateEventSchema,
-  AutoRetryStartEventSchema,
-  AutoRetryEndEventSchema,
-  CompactionStartEventSchema,
-  CompactionEndEventSchema,
-  AutoCompactionStartEventSchema,
-  AutoCompactionEndEventSchema,
-  ExtensionErrorEventSchema,
-  ExtensionUiRequestEventSchema,
-  ExtensionStatusesEventSchema,
-  ExtensionWidgetsEventSchema,
-  SessionTitleEventSchema,
-  RuntimeErrorEventSchema,
-]);
+const runtimeEventDataOptions = [
+  AgentStartEventDataSchema, AgentEndEventDataSchema, AgentSettledEventDataSchema,
+  PromptDoneEventDataSchema, PromptErrorEventDataSchema, MessageStartEventDataSchema,
+  MessageUpdateEventDataSchema, MessageEndEventDataSchema, ToolExecutionStartEventDataSchema,
+  ToolExecutionUpdateEventDataSchema, ToolExecutionEndEventDataSchema, QueueUpdateEventDataSchema,
+  RetryStartEventDataSchema, RetryEndEventDataSchema, AutoRetryStartEventDataSchema,
+  AutoRetryEndEventDataSchema, CompactionStartEventDataSchema, CompactionEndEventDataSchema,
+  AutoCompactionStartEventDataSchema, AutoCompactionEndEventDataSchema, BashUpdateEventDataSchema,
+  ExtensionErrorEventDataSchema, ExtensionUiRequestEventDataSchema, ExtensionStatusesEventDataSchema,
+  ExtensionWidgetsEventDataSchema, SessionTitleEventDataSchema, RuntimeStateChangedEventDataSchema,
+  RuntimeCapabilitiesChangedEventDataSchema, RuntimeClosedEventDataSchema, SessionChangedEventDataSchema,
+  WorkerCrashedEventDataSchema, RunningSessionsChangedEventDataSchema, RuntimeUnavailableEventDataSchema,
+  RuntimeErrorEventDataSchema,
+] as const;
 
+export const RuntimeEventDataSchema = z.discriminatedUnion("type", runtimeEventDataOptions);
+export type RuntimeEventData = z.infer<typeof RuntimeEventDataSchema>;
+
+const wire = <T extends z.ZodRawShape>(schema: z.ZodObject<T>) => schema.extend(eventCursor);
+export const AgentStartEventSchema = wire(AgentStartEventDataSchema);
+export const AgentEndEventSchema = wire(AgentEndEventDataSchema);
+export const AgentSettledEventSchema = wire(AgentSettledEventDataSchema);
+export const PromptDoneEventSchema = wire(PromptDoneEventDataSchema);
+export const PromptErrorEventSchema = wire(PromptErrorEventDataSchema);
+export const MessageStartEventSchema = wire(MessageStartEventDataSchema);
+export const MessageUpdateEventSchema = wire(MessageUpdateEventDataSchema);
+export const MessageEndEventSchema = wire(MessageEndEventDataSchema);
+export const ToolExecutionStartEventSchema = wire(ToolExecutionStartEventDataSchema);
+export const ToolExecutionUpdateEventSchema = wire(ToolExecutionUpdateEventDataSchema);
+export const ToolExecutionEndEventSchema = wire(ToolExecutionEndEventDataSchema);
+export const QueueUpdateEventSchema = wire(QueueUpdateEventDataSchema);
+export const RetryStartEventSchema = wire(RetryStartEventDataSchema);
+export const RetryEndEventSchema = wire(RetryEndEventDataSchema);
+export const AutoRetryStartEventSchema = wire(AutoRetryStartEventDataSchema);
+export const AutoRetryEndEventSchema = wire(AutoRetryEndEventDataSchema);
+export const CompactionStartEventSchema = wire(CompactionStartEventDataSchema);
+export const CompactionEndEventSchema = wire(CompactionEndEventDataSchema);
+export const AutoCompactionStartEventSchema = wire(AutoCompactionStartEventDataSchema);
+export const AutoCompactionEndEventSchema = wire(AutoCompactionEndEventDataSchema);
+export const BashUpdateEventSchema = wire(BashUpdateEventDataSchema);
+export const ExtensionErrorEventSchema = wire(ExtensionErrorEventDataSchema);
+export const ExtensionUiRequestEventSchema = wire(ExtensionUiRequestEventDataSchema);
+export const ExtensionStatusesEventSchema = wire(ExtensionStatusesEventDataSchema);
+export const ExtensionWidgetsEventSchema = wire(ExtensionWidgetsEventDataSchema);
+export const SessionTitleEventSchema = wire(SessionTitleEventDataSchema);
+export const RuntimeStateChangedEventSchema = wire(RuntimeStateChangedEventDataSchema);
+export const RuntimeCapabilitiesChangedEventSchema = wire(RuntimeCapabilitiesChangedEventDataSchema);
+export const RuntimeClosedEventSchema = wire(RuntimeClosedEventDataSchema);
+export const SessionChangedEventSchema = wire(SessionChangedEventDataSchema);
+export const WorkerCrashedEventSchema = wire(WorkerCrashedEventDataSchema);
+export const RunningSessionsChangedEventSchema = wire(RunningSessionsChangedEventDataSchema);
+export const RuntimeUnavailableEventSchema = wire(RuntimeUnavailableEventDataSchema);
+export const RuntimeErrorEventSchema = wire(RuntimeErrorEventDataSchema);
+
+export const RuntimeEventSchema = z.discriminatedUnion("type", [
+  AgentStartEventSchema, AgentEndEventSchema, AgentSettledEventSchema,
+  PromptDoneEventSchema, PromptErrorEventSchema, MessageStartEventSchema,
+  MessageUpdateEventSchema, MessageEndEventSchema, ToolExecutionStartEventSchema,
+  ToolExecutionUpdateEventSchema, ToolExecutionEndEventSchema, QueueUpdateEventSchema,
+  RetryStartEventSchema, RetryEndEventSchema, AutoRetryStartEventSchema, AutoRetryEndEventSchema,
+  CompactionStartEventSchema, CompactionEndEventSchema, AutoCompactionStartEventSchema,
+  AutoCompactionEndEventSchema, BashUpdateEventSchema, ExtensionErrorEventSchema,
+  ExtensionUiRequestEventSchema, ExtensionStatusesEventSchema, ExtensionWidgetsEventSchema,
+  SessionTitleEventSchema, RuntimeStateChangedEventSchema, RuntimeCapabilitiesChangedEventSchema,
+  RuntimeClosedEventSchema, SessionChangedEventSchema, WorkerCrashedEventSchema,
+  RunningSessionsChangedEventSchema, RuntimeUnavailableEventSchema, RuntimeErrorEventSchema,
+]);
 export type RuntimeEvent = z.infer<typeof RuntimeEventSchema>;
 
-export function parseRuntimeEvent(input: unknown): RuntimeEvent {
-  return RuntimeEventSchema.parse(input);
-}
-
-export function safeParseRuntimeEvent(input: unknown) {
-  return RuntimeEventSchema.safeParse(input);
-}
+export function parseRuntimeEvent(input: unknown): RuntimeEvent { return RuntimeEventSchema.parse(input); }
+export function safeParseRuntimeEvent(input: unknown) { return RuntimeEventSchema.safeParse(input); }

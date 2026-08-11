@@ -104,6 +104,7 @@ export const AssistantMessageSchema = z.strictObject({
   errorMessage: z.string().optional(),
   timestamp: z.number().optional(),
   usage: TokenUsageSchema.optional(),
+  writtenFiles: z.array(z.string()).optional(),
 });
 
 export type AssistantMessage = z.infer<typeof AssistantMessageSchema>;
@@ -176,6 +177,7 @@ export const StreamingAssistantMessageSchema = z.strictObject({
   errorMessage: z.string().optional(),
   timestamp: z.number().optional(),
   usage: TokenUsageSchema.optional(),
+  writtenFiles: z.array(z.string()).optional(),
 });
 
 export const StreamingToolResultMessageSchema = z.strictObject({

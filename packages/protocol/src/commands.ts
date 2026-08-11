@@ -118,7 +118,7 @@ export const GetCommandsCommandSchema = z.strictObject({
 export const SetToolsCommandSchema = z.strictObject({
   ...commandBase,
   type: z.literal("set_tools"),
-  toolNames: z.array(z.string()),
+  toolNames: z.array(NonEmptyStringSchema),
   includeExtensionTools: z.boolean().optional(),
 });
 

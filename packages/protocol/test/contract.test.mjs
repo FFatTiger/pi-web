@@ -36,7 +36,6 @@ import {
   safeParseSessiondToWorkerMessage,
   safeParseWorkerToSessiondMessage,
   safeParseWsClientMessage,
-  safeParseWsHostMessage,
   WsClientMessageSchema,
   WsHostMessageSchema,
 } from "../dist/index.js";
@@ -59,6 +58,8 @@ const baseSnapshotState = {
   isPromptRunning: false,
   isBashRunning: false,
   isCompacting: false,
+  model: null,
+  messageCount: 0,
 };
 
 describe("protocol version", () => {
@@ -561,10 +562,12 @@ describe("messages and RuntimeEvent", () => {
       safeParseRuntimeEvent({
         type: "extension_ui_request",
         ...baseEvent,
-        id: "ui-1",
-        method: "select",
-        title: "Pick",
-        options: ["a", "b"],
+        request: {
+          id: "ui-1",
+          method: "select",
+          title: "Pick",
+          options: ["a", "b"],
+        },
       }).success,
       true,
     );
@@ -572,9 +575,7 @@ describe("messages and RuntimeEvent", () => {
       safeParseRuntimeEvent({
         type: "extension_ui_request",
         ...baseEvent,
-        id: "ui-1",
-        method: "select",
-        title: "Pick",
+        request: { id: "ui-1", method: "select", title: "Pick" },
       }).success,
       false,
     );
@@ -585,9 +586,7 @@ describe("RuntimeSnapshot", () => {
   it("round-trips snapshot with streaming, queues, pending UI, tools", () => {
     const snapshot = roundTrip(RuntimeSnapshotSchema, {
       sessionId: "s-1",
-      epoch: "epoch-3",
-      lastEventId: 99,
-      workerStatus: "busy",
+      capabilities: { capabilities: ["runtime.prompt", "runtime.abort"], version: 1 },
       state: {
         ...baseSnapshotState,
         isStreaming: true,
@@ -597,7 +596,7 @@ describe("RuntimeSnapshot", () => {
         model: { id: "gpt-4.1", provider: "openai" },
         thinkingLevel: "medium",
         contextUsage: { percent: 42, tokens: 12000, contextWindow: 128000 },
-        queuedMessages: { steering: [], followUp: ["later"] },
+        queuedMessages: { steering: [], followUp: [{ message: "later", images: [{ type: "image", data: "AA==", mimeType: "image/png" }] }] },
         tools: [{ name: "bash", active: true, description: "shell" }],
         extensionStatuses: [{ key: "status", text: "ok" }],
         extensionWidgets: [
@@ -622,21 +621,17 @@ describe("RuntimeSnapshot", () => {
         },
       },
     });
-    assert.equal(snapshot.epoch, "epoch-3");
-    assert.equal(snapshot.lastEventId, 99);
-    assert.equal(snapshot.workerStatus, "busy");
+    assert.equal(snapshot.capabilities.version, 1);
     assert.equal(snapshot.state.model?.id, "gpt-4.1");
     assert.equal(snapshot.state.pendingExtensionUi?.[0]?.method, "confirm");
   });
 
-  it("accepts lastEventId 0 and rejects invalid cursors", () => {
+  it("requires capability snapshot and rejects transport cursor leakage", () => {
     assert.equal(
       safeParseRuntimeSnapshot({
         sessionId: "s",
-        epoch: "e0",
-        lastEventId: 0,
-        workerStatus: "ready",
         state: baseSnapshotState,
+        capabilities: { capabilities: [], version: 0 },
       }).success,
       true,
     );
@@ -644,19 +639,8 @@ describe("RuntimeSnapshot", () => {
       safeParseRuntimeSnapshot({
         sessionId: "s",
         epoch: "e0",
-        lastEventId: "0",
-        workerStatus: "ready",
         state: baseSnapshotState,
-      }).success,
-      false,
-    );
-    assert.equal(
-      safeParseRuntimeSnapshot({
-        sessionId: "s",
-        epoch: 0,
-        lastEventId: 0,
-        workerStatus: "ready",
-        state: baseSnapshotState,
+        capabilities: { capabilities: [], version: 0 },
       }).success,
       false,
     );
@@ -687,12 +671,15 @@ describe("WS envelopes", () => {
     const snap = roundTrip(WsHostMessageSchema, {
       type: "snapshot",
       payload: {
-        sessionId: "s-1",
         epoch: "e0",
         lastEventId: 0,
         workerStatus: "ready",
         resumeStatus: "snapshot",
-        state: baseSnapshotState,
+        snapshot: {
+          sessionId: "s-1",
+          state: baseSnapshotState,
+          capabilities: { capabilities: [], version: 0 },
+        },
       },
     });
     assert.equal(snap.type, "snapshot");
@@ -844,7 +831,8 @@ describe("sessiond RPC", () => {
     const err = roundTrip(SessiondRpcResponseSchema, {
       id: "rpc-1",
       ok: false,
-      error: { code: "not_found", message: "session missing" },
+      method: "runtime.attach",
+      error: { code: "not_found", message: "session missing", retryable: false },
     });
     assert.equal(err.ok, false);
     if (!err.ok) assert.equal(err.error.code, "not_found");
@@ -855,7 +843,8 @@ describe("sessiond RPC", () => {
       safeParseSessiondRpcResponse({
         id: "x",
         ok: false,
-        error: { message: "boom" },
+        method: "runtime.attach",
+        error: { message: "boom", retryable: false },
       }).success,
       false,
     );
@@ -869,32 +858,31 @@ describe("sessiond RPC", () => {
         sessionId: "s-1",
         epoch: "e1",
         created: true,
+        cwd: "/tmp/p",
         workerStatus: "ready",
       },
       "runtime.activate": {
         sessionId: "s-1",
         epoch: "e1",
+        cwd: "/tmp/p",
         workerStatus: "ready",
       },
       "runtime.attach": {
         sessionId: "s-1",
         epoch: "e1",
         lastEventId: 0,
+        cwd: "/tmp/p",
         resumeStatus: "snapshot",
         snapshot: {
           sessionId: "s-1",
-          epoch: "e1",
-          lastEventId: 0,
-          workerStatus: "ready",
           state: baseSnapshotState,
+          capabilities: { capabilities: [], version: 0 },
         },
       },
       "runtime.detach": { sessionId: "s-1", detached: true },
       "runtime.getSnapshot": {
         sessionId: "s-1",
-        epoch: "e1",
-        lastEventId: 2,
-        workerStatus: "busy",
+        capabilities: { capabilities: ["runtime.prompt"], version: 1 },
         state: {
           ...baseSnapshotState,
           isStreaming: true,
@@ -906,7 +894,8 @@ describe("sessiond RPC", () => {
           { sessionId: "s-1", workerStatus: "busy", cwd: "/tmp/p" },
         ],
       },
-      "runtime.command": { commandId: "c-1", data: null },
+      "runtime.command": { commandId: "c-1", result: { ok: true, type: "abort" } },
+      "runtime.interrupt": { ok: true, type: "abort" },
       "runtime.stop": { sessionId: "s-1", stopped: true },
       "runtime.hasBusyCwd": {
         cwd: "/tmp/p",
@@ -917,14 +906,10 @@ describe("sessiond RPC", () => {
         cwd: "/tmp/p",
         stoppedSessionIds: ["s-1"],
       },
-      "sessions.list": { sessions: [{ sessionId: "s-1" }] },
-      "sessions.resolve": { sessionId: "s-1", cwd: "/tmp/p" },
-      "sessions.read": { sessionId: "s-1", entries: [] },
-      "sessions.context": {
-        sessionId: "s-1",
-        thinkingLevel: "off",
-        model: null,
-      },
+      "sessions.list": { sessions: [{ sessionId: "s-1", cwd: "/tmp/p", projectRoot: "/tmp/p" }] },
+      "sessions.resolve": { sessionId: "s-1", cwd: "/tmp/p", projectRoot: "/tmp/p" },
+      "sessions.read": { sessionId: "s-1", cwd: "/tmp/p", projectRoot: "/tmp/p", entries: [] },
+      "sessions.context": { sessionId: "s-1", entries: [] },
       "sessions.rename": { sessionId: "s-1", name: "New" },
       "sessions.delete": { sessionId: "s-1", deleted: true },
     };
@@ -1034,9 +1019,7 @@ describe("worker IPC", () => {
         sessionId: "s-1",
         event: {
           type: "agent_start",
-          eventId: 1,
           sessionId: "s-1",
-          epoch: "e1",
         },
       },
     });
@@ -1046,7 +1029,7 @@ describe("worker IPC", () => {
       safeParseWorkerToSessiondMessage({
         type: "worker.fatal",
         payload: {
-          error: { code: "internal", message: "boom" },
+          error: { code: "internal", message: "boom", retryable: false },
         },
       }).success,
       true,

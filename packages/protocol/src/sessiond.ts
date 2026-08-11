@@ -10,6 +10,12 @@ import {
   ThinkingLevelSchema,
   WorkerStatusSchema,
 } from "./common.js";
+import {
+  SessionContextSchema,
+  SessionDetailSchema,
+  SessionHeaderSchema,
+} from "./domain.js";
+import { CorrelatedRuntimeCommandResultSchema, RuntimeInterruptResultSchema, RuntimeInterruptSchema } from "./results.js";
 import { RuntimeEventSchema } from "./events.js";
 import { ResumeStatusSchema } from "./handshake.js";
 import { RuntimeSnapshotSchema } from "./snapshot.js";
@@ -40,8 +46,9 @@ export const RuntimeCreateParamsSchema = z.strictObject({
   sessionFile: z.string().optional(),
   model: ModelSelectorSchema.optional(),
   thinkingLevel: ThinkingLevelSchema.optional(),
-  toolNames: z.array(z.string()).optional(),
-  includeExtensionTools: z.boolean().optional(),
+  thinkingLevelPinned: z.boolean().optional(),
+  toolNames: z.array(NonEmptyStringSchema).optional(),
+  name: z.string().optional(),
 });
 export type RuntimeCreateParams = z.infer<typeof RuntimeCreateParamsSchema>;
 
@@ -84,6 +91,12 @@ export const RuntimeCommandParamsSchema = z.strictObject({
   command: RuntimeCommandSchema,
 });
 export type RuntimeCommandParams = z.infer<typeof RuntimeCommandParamsSchema>;
+
+export const RuntimeInterruptParamsSchema = z.strictObject({
+  sessionId: NonEmptyStringSchema,
+  interrupt: RuntimeInterruptSchema,
+});
+export type RuntimeInterruptParams = z.infer<typeof RuntimeInterruptParamsSchema>;
 
 export const RuntimeStopParamsSchema = z.strictObject({
   sessionId: NonEmptyStringSchema,
@@ -158,14 +171,18 @@ export const RuntimeCreateResultSchema = z.strictObject({
   sessionId: NonEmptyStringSchema,
   epoch: EpochSchema,
   created: z.boolean(),
+  cwd: NonEmptyStringSchema,
   workerStatus: WorkerStatusSchema.optional(),
+  snapshot: RuntimeSnapshotSchema.optional(),
 });
 export type RuntimeCreateResult = z.infer<typeof RuntimeCreateResultSchema>;
 
 export const RuntimeActivateResultSchema = z.strictObject({
   sessionId: NonEmptyStringSchema,
   epoch: EpochSchema,
+  cwd: NonEmptyStringSchema,
   workerStatus: WorkerStatusSchema,
+  snapshot: RuntimeSnapshotSchema.optional(),
 });
 export type RuntimeActivateResult = z.infer<typeof RuntimeActivateResultSchema>;
 
@@ -173,6 +190,7 @@ export const SessiondRuntimeAttachResultSchema = z.strictObject({
   sessionId: NonEmptyStringSchema,
   epoch: EpochSchema,
   lastEventId: LastEventIdSchema,
+  cwd: NonEmptyStringSchema,
   resumeStatus: ResumeStatusSchema,
   snapshot: RuntimeSnapshotSchema.optional(),
 });
@@ -193,7 +211,7 @@ export type RuntimeGetSnapshotResult = z.infer<
 
 export const RuntimeRunningItemSchema = z.strictObject({
   sessionId: NonEmptyStringSchema,
-  cwd: NonEmptyStringSchema.optional(),
+  cwd: NonEmptyStringSchema,
   workerStatus: WorkerStatusSchema,
   epoch: EpochSchema.optional(),
   name: z.string().optional(),
@@ -207,11 +225,11 @@ export type RuntimeListRunningResult = z.infer<
   typeof RuntimeListRunningResultSchema
 >;
 
-export const RuntimeCommandResultSchema = z.strictObject({
-  commandId: NonEmptyStringSchema,
-  data: z.unknown().optional(),
-});
+export const RuntimeCommandResultSchema = CorrelatedRuntimeCommandResultSchema;
 export type RuntimeCommandResult = z.infer<typeof RuntimeCommandResultSchema>;
+
+export const RuntimeInterruptRpcResultSchema = RuntimeInterruptResultSchema;
+export type RuntimeInterruptRpcResult = z.infer<typeof RuntimeInterruptRpcResultSchema>;
 
 export const RuntimeStopResultSchema = z.strictObject({
   sessionId: NonEmptyStringSchema,
@@ -234,13 +252,7 @@ export const RuntimeStopByCwdResultSchema = z.strictObject({
 });
 export type RuntimeStopByCwdResult = z.infer<typeof RuntimeStopByCwdResultSchema>;
 
-export const SessionsListItemSchema = z.strictObject({
-  sessionId: NonEmptyStringSchema,
-  cwd: z.string().optional(),
-  sessionFile: z.string().optional(),
-  name: z.string().optional(),
-  modified: z.string().optional(),
-});
+export const SessionsListItemSchema = SessionHeaderSchema;
 export type SessionsListItem = z.infer<typeof SessionsListItemSchema>;
 
 export const SessionsListResultSchema = z.strictObject({
@@ -251,23 +263,15 @@ export type SessionsListResult = z.infer<typeof SessionsListResultSchema>;
 export const SessionsResolveResultSchema = z.strictObject({
   sessionId: NonEmptyStringSchema,
   sessionFile: z.string().optional(),
-  cwd: z.string().optional(),
+  cwd: NonEmptyStringSchema,
+  projectRoot: NonEmptyStringSchema,
 });
 export type SessionsResolveResult = z.infer<typeof SessionsResolveResultSchema>;
 
-export const SessionsReadResultSchema = z.strictObject({
-  sessionId: NonEmptyStringSchema,
-  entries: z.array(z.unknown()).optional(),
-  header: z.unknown().optional(),
-});
+export const SessionsReadResultSchema = SessionDetailSchema;
 export type SessionsReadResult = z.infer<typeof SessionsReadResultSchema>;
 
-export const SessionsContextResultSchema = z.strictObject({
-  sessionId: NonEmptyStringSchema,
-  messages: z.array(z.unknown()).optional(),
-  thinkingLevel: ThinkingLevelSchema.optional(),
-  model: ModelSelectorSchema.nullable().optional(),
-});
+export const SessionsContextResultSchema = SessionContextSchema;
 export type SessionsContextResult = z.infer<typeof SessionsContextResultSchema>;
 
 export const SessionsRenameResultSchema = z.strictObject({
@@ -337,6 +341,11 @@ export const SessiondRpcRequestSchema = z.discriminatedUnion("method", [
   }),
   z.strictObject({
     ...rpcEnvelope,
+    method: z.literal("runtime.interrupt"),
+    params: RuntimeInterruptParamsSchema,
+  }),
+  z.strictObject({
+    ...rpcEnvelope,
     method: z.literal("runtime.stop"),
     params: RuntimeStopParamsSchema,
   }),
@@ -394,6 +403,7 @@ export const SESSIOND_RPC_METHODS = [
   "runtime.getSnapshot",
   "runtime.listRunning",
   "runtime.command",
+  "runtime.interrupt",
   "runtime.stop",
   "runtime.hasBusyCwd",
   "runtime.stopByCwd",
@@ -418,6 +428,7 @@ export type SessiondMethodParams = {
   "runtime.getSnapshot": RuntimeGetSnapshotParams;
   "runtime.listRunning": RuntimeListRunningParams;
   "runtime.command": RuntimeCommandParams;
+  "runtime.interrupt": RuntimeInterruptParams;
   "runtime.stop": RuntimeStopParams;
   "runtime.hasBusyCwd": RuntimeHasBusyCwdParams;
   "runtime.stopByCwd": RuntimeStopByCwdParams;
@@ -439,6 +450,7 @@ export type SessiondMethodResult = {
   "runtime.getSnapshot": RuntimeGetSnapshotResult;
   "runtime.listRunning": RuntimeListRunningResult;
   "runtime.command": RuntimeCommandResult;
+  "runtime.interrupt": RuntimeInterruptRpcResult;
   "runtime.stop": RuntimeStopResult;
   "runtime.hasBusyCwd": RuntimeHasBusyCwdResult;
   "runtime.stopByCwd": RuntimeStopByCwdResult;
@@ -460,6 +472,7 @@ export const SessiondMethodResultSchemas = {
   "runtime.getSnapshot": RuntimeGetSnapshotResultSchema,
   "runtime.listRunning": RuntimeListRunningResultSchema,
   "runtime.command": RuntimeCommandResultSchema,
+  "runtime.interrupt": RuntimeInterruptRpcResultSchema,
   "runtime.stop": RuntimeStopResultSchema,
   "runtime.hasBusyCwd": RuntimeHasBusyCwdResultSchema,
   "runtime.stopByCwd": RuntimeStopByCwdResultSchema,
@@ -471,19 +484,51 @@ export const SessiondMethodResultSchemas = {
   "sessions.delete": SessionsDeleteResultSchema,
 } as const;
 
-export const SessiondRpcSuccessSchema = z.strictObject({
-  id: NonEmptyStringSchema,
-  ok: z.literal(true),
-  result: z.unknown().optional(),
-});
+export const SessiondRpcSuccessSchema = z.discriminatedUnion("method", [
+  z.strictObject({ id: NonEmptyStringSchema, ok: z.literal(true), method: z.literal("system.ping"), result: SystemPingResultSchema }),
+  z.strictObject({ id: NonEmptyStringSchema, ok: z.literal(true), method: z.literal("system.hello"), result: SystemHelloResultSchema }),
+  z.strictObject({ id: NonEmptyStringSchema, ok: z.literal(true), method: z.literal("runtime.create"), result: RuntimeCreateResultSchema }),
+  z.strictObject({ id: NonEmptyStringSchema, ok: z.literal(true), method: z.literal("runtime.activate"), result: RuntimeActivateResultSchema }),
+  z.strictObject({ id: NonEmptyStringSchema, ok: z.literal(true), method: z.literal("runtime.attach"), result: SessiondRuntimeAttachResultSchema }),
+  z.strictObject({ id: NonEmptyStringSchema, ok: z.literal(true), method: z.literal("runtime.detach"), result: RuntimeDetachResultSchema }),
+  z.strictObject({ id: NonEmptyStringSchema, ok: z.literal(true), method: z.literal("runtime.getSnapshot"), result: RuntimeGetSnapshotResultSchema }),
+  z.strictObject({ id: NonEmptyStringSchema, ok: z.literal(true), method: z.literal("runtime.listRunning"), result: RuntimeListRunningResultSchema }),
+  z.strictObject({ id: NonEmptyStringSchema, ok: z.literal(true), method: z.literal("runtime.command"), result: RuntimeCommandResultSchema }),
+  z.strictObject({ id: NonEmptyStringSchema, ok: z.literal(true), method: z.literal("runtime.interrupt"), result: RuntimeInterruptRpcResultSchema }),
+  z.strictObject({ id: NonEmptyStringSchema, ok: z.literal(true), method: z.literal("runtime.stop"), result: RuntimeStopResultSchema }),
+  z.strictObject({ id: NonEmptyStringSchema, ok: z.literal(true), method: z.literal("runtime.hasBusyCwd"), result: RuntimeHasBusyCwdResultSchema }),
+  z.strictObject({ id: NonEmptyStringSchema, ok: z.literal(true), method: z.literal("runtime.stopByCwd"), result: RuntimeStopByCwdResultSchema }),
+  z.strictObject({ id: NonEmptyStringSchema, ok: z.literal(true), method: z.literal("sessions.list"), result: SessionsListResultSchema }),
+  z.strictObject({ id: NonEmptyStringSchema, ok: z.literal(true), method: z.literal("sessions.resolve"), result: SessionsResolveResultSchema }),
+  z.strictObject({ id: NonEmptyStringSchema, ok: z.literal(true), method: z.literal("sessions.read"), result: SessionsReadResultSchema }),
+  z.strictObject({ id: NonEmptyStringSchema, ok: z.literal(true), method: z.literal("sessions.context"), result: SessionsContextResultSchema }),
+  z.strictObject({ id: NonEmptyStringSchema, ok: z.literal(true), method: z.literal("sessions.rename"), result: SessionsRenameResultSchema }),
+  z.strictObject({ id: NonEmptyStringSchema, ok: z.literal(true), method: z.literal("sessions.delete"), result: SessionsDeleteResultSchema }),
+]);
 
-export const SessiondRpcFailureSchema = z.strictObject({
-  id: NonEmptyStringSchema,
-  ok: z.literal(false),
-  error: ProtocolErrorSchema,
-});
+export const SessiondRpcFailureSchema = z.discriminatedUnion("method", [
+  z.strictObject({ id: NonEmptyStringSchema, ok: z.literal(false), method: z.literal("system.ping"), error: ProtocolErrorSchema }),
+  z.strictObject({ id: NonEmptyStringSchema, ok: z.literal(false), method: z.literal("system.hello"), error: ProtocolErrorSchema }),
+  z.strictObject({ id: NonEmptyStringSchema, ok: z.literal(false), method: z.literal("runtime.create"), error: ProtocolErrorSchema }),
+  z.strictObject({ id: NonEmptyStringSchema, ok: z.literal(false), method: z.literal("runtime.activate"), error: ProtocolErrorSchema }),
+  z.strictObject({ id: NonEmptyStringSchema, ok: z.literal(false), method: z.literal("runtime.attach"), error: ProtocolErrorSchema }),
+  z.strictObject({ id: NonEmptyStringSchema, ok: z.literal(false), method: z.literal("runtime.detach"), error: ProtocolErrorSchema }),
+  z.strictObject({ id: NonEmptyStringSchema, ok: z.literal(false), method: z.literal("runtime.getSnapshot"), error: ProtocolErrorSchema }),
+  z.strictObject({ id: NonEmptyStringSchema, ok: z.literal(false), method: z.literal("runtime.listRunning"), error: ProtocolErrorSchema }),
+  z.strictObject({ id: NonEmptyStringSchema, ok: z.literal(false), method: z.literal("runtime.command"), error: ProtocolErrorSchema }),
+  z.strictObject({ id: NonEmptyStringSchema, ok: z.literal(false), method: z.literal("runtime.interrupt"), error: ProtocolErrorSchema }),
+  z.strictObject({ id: NonEmptyStringSchema, ok: z.literal(false), method: z.literal("runtime.stop"), error: ProtocolErrorSchema }),
+  z.strictObject({ id: NonEmptyStringSchema, ok: z.literal(false), method: z.literal("runtime.hasBusyCwd"), error: ProtocolErrorSchema }),
+  z.strictObject({ id: NonEmptyStringSchema, ok: z.literal(false), method: z.literal("runtime.stopByCwd"), error: ProtocolErrorSchema }),
+  z.strictObject({ id: NonEmptyStringSchema, ok: z.literal(false), method: z.literal("sessions.list"), error: ProtocolErrorSchema }),
+  z.strictObject({ id: NonEmptyStringSchema, ok: z.literal(false), method: z.literal("sessions.resolve"), error: ProtocolErrorSchema }),
+  z.strictObject({ id: NonEmptyStringSchema, ok: z.literal(false), method: z.literal("sessions.read"), error: ProtocolErrorSchema }),
+  z.strictObject({ id: NonEmptyStringSchema, ok: z.literal(false), method: z.literal("sessions.context"), error: ProtocolErrorSchema }),
+  z.strictObject({ id: NonEmptyStringSchema, ok: z.literal(false), method: z.literal("sessions.rename"), error: ProtocolErrorSchema }),
+  z.strictObject({ id: NonEmptyStringSchema, ok: z.literal(false), method: z.literal("sessions.delete"), error: ProtocolErrorSchema }),
+]);
 
-export const SessiondRpcResponseSchema = z.discriminatedUnion("ok", [
+export const SessiondRpcResponseSchema = z.union([
   SessiondRpcSuccessSchema,
   SessiondRpcFailureSchema,
 ]);
@@ -493,13 +538,15 @@ export type SessiondRpcResponse = z.infer<typeof SessiondRpcResponseSchema>;
 /** Server-push frames on the same sessiond channel (events / snapshots). */
 export const SessiondPushEventSchema = z.strictObject({
   type: z.literal("event"),
-  sessionId: NonEmptyStringSchema,
   event: RuntimeEventSchema,
 });
 
 export const SessiondPushSnapshotSchema = z.strictObject({
   type: z.literal("snapshot"),
   sessionId: NonEmptyStringSchema,
+  epoch: EpochSchema,
+  lastEventId: LastEventIdSchema,
+  workerStatus: WorkerStatusSchema,
   snapshot: RuntimeSnapshotSchema,
   resumeStatus: ResumeStatusSchema.optional(),
 });

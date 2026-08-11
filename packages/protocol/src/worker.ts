@@ -9,7 +9,8 @@ import {
   ThinkingLevelSchema,
   WorkerStatusSchema,
 } from "./common.js";
-import { RuntimeEventSchema } from "./events.js";
+import { RuntimeEventDataSchema } from "./events.js";
+import { CorrelatedRuntimeCommandResultSchema, RuntimeInterruptResultSchema, RuntimeInterruptSchema } from "./results.js";
 import { RuntimeSnapshotSchema, RuntimeStateSchema } from "./snapshot.js";
 import { ProtocolVersionSchema } from "./version.js";
 
@@ -31,10 +32,9 @@ export const WorkerInitMessageSchema = z.strictObject({
     sessionFile: z.string().optional(),
     model: ModelSelectorSchema.optional(),
     thinkingLevel: ThinkingLevelSchema.optional(),
-    toolNames: z.array(z.string()).optional(),
-    includeExtensionTools: z.boolean().optional(),
-    /** Opaque bootstrap options (paths, env flags) — not SDK objects. */
-    options: z.unknown().optional(),
+    thinkingLevelPinned: z.boolean().optional(),
+    toolNames: z.array(NonEmptyStringSchema).optional(),
+    name: z.string().optional(),
   }),
 });
 
@@ -45,6 +45,16 @@ export const WorkerCommandMessageSchema = z.strictObject({
   payload: z.strictObject({
     sessionId: NonEmptyStringSchema,
     command: RuntimeCommandSchema,
+  }),
+});
+
+export const WorkerInterruptMessageSchema = z.strictObject({
+  type: z.literal("worker.interrupt"),
+  id: NonEmptyStringSchema,
+  protocolVersion: ProtocolVersionSchema,
+  payload: z.strictObject({
+    sessionId: NonEmptyStringSchema,
+    interrupt: RuntimeInterruptSchema,
   }),
 });
 
@@ -73,12 +83,18 @@ export const WorkerHostResponseMessageSchema = z.strictObject({
   type: z.literal("worker.hostResponse"),
   id: NonEmptyStringSchema,
   protocolVersion: ProtocolVersionSchema,
-  payload: z.strictObject({
-    requestId: NonEmptyStringSchema,
-    ok: z.boolean(),
-    data: z.unknown().optional(),
-    error: ProtocolErrorSchema.optional(),
-  }),
+  payload: z.discriminatedUnion("ok", [
+    z.strictObject({
+      requestId: NonEmptyStringSchema,
+      ok: z.literal(true),
+      data: z.unknown().optional(),
+    }),
+    z.strictObject({
+      requestId: NonEmptyStringSchema,
+      ok: z.literal(false),
+      error: ProtocolErrorSchema,
+    }),
+  ]),
 });
 
 export const WorkerPingMessageSchema = z.strictObject({
@@ -92,6 +108,7 @@ export const WorkerPingMessageSchema = z.strictObject({
 export const SessiondToWorkerMessageSchema = z.discriminatedUnion("type", [
   WorkerInitMessageSchema,
   WorkerCommandMessageSchema,
+  WorkerInterruptMessageSchema,
   WorkerGetSnapshotMessageSchema,
   WorkerShutdownMessageSchema,
   WorkerHostResponseMessageSchema,
@@ -120,10 +137,16 @@ export const WorkerCommandResultMessageSchema = z.strictObject({
   id: NonEmptyStringSchema,
   payload: z.strictObject({
     sessionId: NonEmptyStringSchema,
-    commandId: NonEmptyStringSchema,
-    ok: z.boolean(),
-    data: z.unknown().optional(),
-    error: ProtocolErrorSchema.optional(),
+    result: CorrelatedRuntimeCommandResultSchema,
+  }),
+});
+
+export const WorkerInterruptResultMessageSchema = z.strictObject({
+  type: z.literal("worker.interruptResult"),
+  id: NonEmptyStringSchema,
+  payload: z.strictObject({
+    sessionId: NonEmptyStringSchema,
+    result: RuntimeInterruptResultSchema,
   }),
 });
 
@@ -131,7 +154,7 @@ export const WorkerEventMessageSchema = z.strictObject({
   type: z.literal("worker.event"),
   payload: z.strictObject({
     sessionId: NonEmptyStringSchema,
-    event: RuntimeEventSchema,
+    event: RuntimeEventDataSchema,
   }),
 });
 
@@ -194,6 +217,7 @@ export const WorkerStatusMessageSchema = z.strictObject({
 export const WorkerToSessiondPushSchema = z.discriminatedUnion("type", [
   WorkerReadyMessageSchema,
   WorkerCommandResultMessageSchema,
+  WorkerInterruptResultMessageSchema,
   WorkerEventMessageSchema,
   WorkerSnapshotMessageSchema,
   WorkerSessionDiscoveredMessageSchema,
