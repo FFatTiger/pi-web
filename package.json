@@ -40,9 +40,9 @@
     "start:lan": "next start -H 0.0.0.0 -p 30141",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit --incremental false",
-    "workspaces:build": "npm run build --workspaces --if-present",
-    "workspaces:typecheck": "npm run typecheck --workspaces --if-present",
-    "workspaces:test": "npm run test --workspaces --if-present",
+    "workspaces:build": "node scripts/run-workspaces.mjs build",
+    "workspaces:typecheck": "node scripts/run-workspaces.mjs typecheck",
+    "workspaces:test": "node scripts/run-workspaces.mjs test",
     "release": "npm version patch --no-git-tag-version && npm run build && npm publish --access public",
     "test": "node --test '**/*.test.mjs'"
   },
